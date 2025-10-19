@@ -30,6 +30,7 @@ dependencies {
     implementation(project(":infra:redis"))
 
     implementation(libs.redisson)
+    implementation(libs.pengrad)
     implementation(libs.koin.core)
     implementation(libs.koin.ktor)
     implementation(libs.koin.logger)

@@ -3,9 +3,11 @@ package com.example.app
 import com.example.app.api.installApiErrors
 import com.example.app.config.AppConfig
 import com.example.app.config.ConfigLoader
+import com.example.app.di.adminModule
 import com.example.app.di.appModule
 import com.example.app.di.dbModule
 import com.example.app.di.redisBindingsModule
+import com.example.app.routes.installAdminWebhook
 import com.example.app.routes.installApiRoutes
 import com.example.app.routes.installWebhookRoutes
 import io.ktor.http.HttpStatusCode
@@ -38,6 +40,7 @@ fun Application.module() {
     runMigrations(log)
     configureServerPlugins()
 
+    installAdminWebhook()
     installWebhookRoutes()
     installApiRoutes()
     installBaseRoutes(cfg)
@@ -59,7 +62,7 @@ private fun loadConfiguration(log: Logger): AppConfig {
 
 private fun Application.configureDependencyInjection(cfg: AppConfig) {
     install(Koin) {
-        modules(appModule(cfg), dbModule(cfg), redisBindingsModule)
+        modules(appModule(cfg), dbModule(cfg), redisBindingsModule, adminModule)
     }
 }
 
