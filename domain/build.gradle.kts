@@ -1,4 +1,7 @@
-plugins { alias(libs.plugins.kotlin.jvm) }
+plugins {
+    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.serialization)
+}
 
 java { toolchain { languageVersion.set(JavaLanguageVersion.of(21)) } }
 

@@ -4,6 +4,7 @@ import com.example.app.config.AppConfig
 import com.example.app.config.ConfigLoader
 import com.example.app.di.appModule
 import com.example.app.di.dbModule
+import com.example.app.di.redisBindingsModule
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -39,7 +40,7 @@ fun Application.module() {
     }
 
     install(Koin) {
-        modules(appModule(cfg), dbModule(cfg))
+        modules(appModule(cfg), dbModule(cfg), redisBindingsModule)
     }
 
     val flyway by inject<Flyway>()

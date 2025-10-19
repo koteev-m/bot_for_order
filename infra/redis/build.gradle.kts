@@ -5,5 +5,7 @@ java { toolchain { languageVersion.set(JavaLanguageVersion.of(21)) } }
 dependencies {
     implementation(libs.kotlin.stdlib)
     implementation(libs.coroutines.core)
-    api(libs.redisson)
+    implementation(libs.redisson)
+    implementation(libs.serialization.json)
+    implementation(project(":domain"))
 }
