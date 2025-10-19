@@ -1,19 +1,41 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
+
 plugins {
-    id("java")
+    alias(libs.plugins.kotlin.jvm) apply false
+    alias(libs.plugins.kotlin.js) apply false
+    alias(libs.plugins.ktor) apply false
+    alias(libs.plugins.serialization) apply false
+    alias(libs.plugins.detekt)
+    alias(libs.plugins.ktlint)
 }
 
-group = "org.example"
-version = "1.0-SNAPSHOT"
-
-repositories {
-    mavenCentral()
+allprojects {
+    group = "com.example"
+    version = "0.1.0"
 }
 
-dependencies {
-    testImplementation(platform("org.junit:junit-bom:5.10.0"))
-    testImplementation("org.junit.jupiter:junit-jupiter")
+subprojects {
+    apply(plugin = "io.gitlab.arturbosch.detekt")
+
+    pluginManager.withPlugin("org.jetbrains.kotlin.jvm") {
+        extensions.configure<KotlinJvmProjectExtension> {
+            compilerOptions {
+                jvmTarget.set(JvmTarget.JVM_21)
+            }
+        }
+    }
+
+    detekt {
+        buildUponDefaultConfig = true
+        allRules = false
+        autoCorrect = false
+        config.setFrom(files("$rootDir/detekt.yml"))
+    }
 }
 
-tasks.test {
-    useJUnitPlatform()
+ktlint {
+    version.set(libs.versions.ktlint.get())
+    android.set(false)
+    verbose.set(true)
 }

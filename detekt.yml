@@ -1,0 +1,12 @@
+processors:
+  active: true
+config:
+  validation: true
+build:
+  maxIssues: 0
+style:
+  MagicNumber:
+    active: false
+  WildcardImport:
+    active: true
+    excludeImports: ['java.util.*']
