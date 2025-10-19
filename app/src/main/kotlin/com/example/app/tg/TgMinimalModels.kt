@@ -15,7 +15,10 @@ data class TgMessage(
     val date: Long,
     val text: String? = null,
     val from: TgUser? = null,
-    val chat: TgChat
+    val chat: TgChat,
+    @SerialName("media_group_id") val mediaGroupId: String? = null,
+    val photo: List<TgPhotoSize>? = null,
+    val video: TgVideo? = null
 )
 
 @Serializable
@@ -32,4 +35,19 @@ data class TgChat(
     val type: String,
     val title: String? = null,
     val username: String? = null
+)
+
+@Serializable
+data class TgPhotoSize(
+    @SerialName("file_id") val fileId: String,
+    val width: Int? = null,
+    val height: Int? = null
+)
+
+@Serializable
+data class TgVideo(
+    @SerialName("file_id") val fileId: String,
+    val width: Int? = null,
+    val height: Int? = null,
+    val duration: Int? = null
 )

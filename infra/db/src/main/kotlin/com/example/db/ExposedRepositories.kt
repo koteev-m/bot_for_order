@@ -31,6 +31,7 @@ import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
@@ -109,6 +110,12 @@ class ItemMediaRepositoryExposed(private val tx: DatabaseTx) : ItemMediaReposito
                     sortOrder = it[ItemMediaTable.sortOrder]
                 )
             }
+    }
+
+    override suspend fun deleteByItem(itemId: String) {
+        tx.tx {
+            ItemMediaTable.deleteWhere { ItemMediaTable.itemId eq itemId }
+        }
     }
 }
 

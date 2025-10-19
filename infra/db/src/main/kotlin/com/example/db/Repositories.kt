@@ -24,6 +24,7 @@ interface ItemsRepository {
 interface ItemMediaRepository {
     suspend fun add(media: ItemMedia): Long
     suspend fun listByItem(itemId: String): List<ItemMedia>
+    suspend fun deleteByItem(itemId: String)
 }
 
 interface VariantsRepository {
