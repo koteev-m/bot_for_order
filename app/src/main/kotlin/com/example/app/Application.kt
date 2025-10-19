@@ -3,6 +3,7 @@ package com.example.app
 import com.example.app.config.AppConfig
 import com.example.app.config.ConfigLoader
 import com.example.app.di.appModule
+import com.example.app.di.dbModule
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -16,8 +17,9 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import java.net.URI
+import org.flywaydb.core.Flyway
+import org.koin.ktor.ext.inject
 import org.koin.ktor.plugin.Koin
-import org.koin.ktor.plugin.slf4jLogger
 import org.slf4j.LoggerFactory
 
 fun main() = EngineMain.main(emptyArray())
@@ -37,9 +39,16 @@ fun Application.module() {
     }
 
     install(Koin) {
-        slf4jLogger()
-        modules(appModule(cfg))
+        modules(appModule(cfg), dbModule(cfg))
     }
+
+    val flyway by inject<Flyway>()
+    val migrations = flyway.migrate()
+    log.info(
+        "Flyway migrated: initial={} current={}",
+        migrations.initialSchemaVersion,
+        migrations.targetSchemaVersion
+    )
 
     install(CallLogging)
     configureStatusPages()
@@ -59,7 +68,7 @@ private fun Application.configureStatusPages() {
     install(StatusPages) {
         exception<Throwable> { call, cause ->
             call.respondText("Internal error", status = HttpStatusCode.InternalServerError)
-            environment.log.error("Unhandled", cause)
+            this@configureStatusPages.environment.log.error("Unhandled", cause)
         }
     }
 }

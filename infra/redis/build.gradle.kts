@@ -5,5 +5,5 @@ java { toolchain { languageVersion.set(JavaLanguageVersion.of(21)) } }
 dependencies {
     implementation(libs.kotlin.stdlib)
     implementation(libs.coroutines.core)
-    implementation(libs.redisson)
+    api(libs.redisson)
 }
