@@ -6,4 +6,5 @@ dependencies {
     implementation(libs.kotlin.stdlib)
     implementation(libs.coroutines.core)
     implementation(libs.pengrad)
+    implementation(libs.serialization.json)
 }
