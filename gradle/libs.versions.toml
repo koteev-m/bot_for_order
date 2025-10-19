@@ -4,7 +4,6 @@ ktor = "3.3.1"
 serialization = "1.9.0"
 coroutines = "1.10.2"
 pengrad = "9.2.0"
-ktelegram = "6.3.0"
 exposed = "1.0.0-rc-2"
 postgres = "42.7.8"
 flyway = "11.14.1"
@@ -13,6 +12,8 @@ kotest = "6.0.4"
 mockk = "1.14.6"
 ktlint = "1.3.1"
 detekt = "1.23.8"
+koin = "4.1.1"
+logback = "1.5.19"
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
@@ -48,3 +49,8 @@ pengrad = { module = "com.github.pengrad:java-telegram-bot-api", version.ref = "
 kotest-runner = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
 kotest-assertions = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+
+koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
+koin-ktor = { module = "io.insert-koin:koin-ktor", version.ref = "koin" }
+koin-logger = { module = "io.insert-koin:koin-logger-slf4j", version.ref = "koin" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }

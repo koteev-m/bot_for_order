@@ -29,6 +29,11 @@ dependencies {
     implementation(project(":infra:db"))
     implementation(project(":infra:redis"))
 
+    implementation(libs.koin.core)
+    implementation(libs.koin.ktor)
+    implementation(libs.koin.logger)
+    runtimeOnly(libs.logback.classic)
+
     testImplementation(libs.kotest.runner)
     testImplementation(libs.kotest.assertions)
     testImplementation(libs.mockk)
