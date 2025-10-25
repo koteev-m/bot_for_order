@@ -9,7 +9,7 @@ import com.example.app.di.dbModule
 import com.example.app.di.redisBindingsModule
 import com.example.app.routes.installAdminWebhook
 import com.example.app.routes.installApiRoutes
-import com.example.app.routes.installWebhookRoutes
+import com.example.app.routes.installShopWebhook
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -41,7 +41,7 @@ fun Application.module() {
     configureServerPlugins()
 
     installAdminWebhook()
-    installWebhookRoutes()
+    installShopWebhook()
     installApiRoutes()
     installBaseRoutes(cfg)
 
