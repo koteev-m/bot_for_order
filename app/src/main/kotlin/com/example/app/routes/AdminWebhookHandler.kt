@@ -5,6 +5,7 @@ import com.example.app.services.ItemsService
 import com.example.app.services.MediaStateStore
 import com.example.app.services.MediaType
 import com.example.app.services.PendingMedia
+import com.example.app.services.PostService
 import com.example.app.tg.TgMessage
 import com.example.app.tg.TgUpdate
 import com.example.bots.TelegramClients
@@ -37,6 +38,7 @@ fun Application.installAdminWebhook() {
     val itemsService by inject<ItemsService>()
     val itemMediaRepository by inject<ItemMediaRepository>()
     val mediaStateStore by inject<MediaStateStore>()
+    val postService by inject<PostService>()
 
     val json = Json { ignoreUnknownKeys = true }
     val deps = AdminWebhookDeps(
@@ -46,7 +48,8 @@ fun Application.installAdminWebhook() {
         clients = clients,
         itemsService = itemsService,
         itemMediaRepository = itemMediaRepository,
-        mediaStateStore = mediaStateStore
+        mediaStateStore = mediaStateStore,
+        postService = postService
     )
 
     routing {
@@ -64,7 +67,8 @@ private data class AdminWebhookDeps(
     val clients: TelegramClients,
     val itemsService: ItemsService,
     val itemMediaRepository: ItemMediaRepository,
-    val mediaStateStore: MediaStateStore
+    val mediaStateStore: MediaStateStore,
+    val postService: PostService
 )
 
 private suspend fun handleAdminUpdate(
@@ -125,7 +129,35 @@ private suspend fun handleAdminCommand(
         "/media_done" -> handleMediaFinalize(fromId, deps.mediaStateStore, deps.itemMediaRepository, reply)
         "/media_cancel" -> handleMediaCancel(fromId, deps.mediaStateStore, reply)
         "/preview" -> handlePreview(chatId, args, deps.itemMediaRepository, deps.clients, reply)
+        "/post" -> handlePost(args, deps.postService, reply)
         else -> reply("Неизвестная команда. Напишите <code>/help</code>.")
+    }
+}
+
+@Suppress("TooGenericExceptionCaught")
+private suspend fun handlePost(
+    args: String,
+    postService: PostService,
+    reply: (String) -> Unit
+) {
+    val itemId = args.ifBlank { null }
+    if (itemId == null) {
+        reply("Укажите ID: <code>/post &lt;ITEM_ID&gt;</code>")
+        return
+    }
+
+    try {
+        val messageIds = postService.postItemAlbumToChannel(itemId)
+        reply("✅ Опубликовано в канал. Сообщений в альбоме: ${messageIds.size}. Первая запись с CTA готова.")
+    } catch (error: IllegalArgumentException) {
+        val reason = error.message ?: "Некорректные данные"
+        reply("⚠️ $reason")
+    } catch (error: IllegalStateException) {
+        val reason = error.message ?: "Состояние не позволяет опубликовать"
+        reply("⚠️ $reason")
+    } catch (error: Exception) {
+        val reason = error.message ?: "Неизвестная ошибка"
+        reply("❌ Не удалось опубликовать: $reason")
     }
 }
 
