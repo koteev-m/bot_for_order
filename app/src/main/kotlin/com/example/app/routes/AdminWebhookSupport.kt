@@ -29,19 +29,16 @@ internal val START_REPLY = """
     <b>Admin-панель</b>
     /help — подсказка
     /new [title] | [description] — черновик
-    /media <ITEM_ID> — режим сбора 2–10 фото/видео
-    /media_done — сохранить собранные медиа в БД
-    /media_cancel — отменить сбор
-    /preview <ITEM_ID> — предпросмотр альбома
+    /media <ITEM_ID> → /media_done → /preview <ITEM_ID>
+    <b>/post &lt;ITEM_ID&gt;</b> — опубликовать в канал с кнопкой «Купить»
 """.trimIndent()
 
 internal val HELP_REPLY = """
-    <b>Медиа-режим</b>
-    1) /media &lt;ITEM_ID&gt; → бот ждёт 2–10 фото или видео (можно альбомом).
-    2) Пришлите медиа (если пришлёте альбом — всё соберётся автоматически).
-    3) /media_done → сохранить в БД.
-    4) /preview &lt;ITEM_ID&gt; → показать альбом.
-    5) /media_cancel → отменить без сохранения.
+    <b>Публикация</b>
+    1) /media &lt;ITEM_ID&gt; → собрать 2–10 фото/видео → /media_done
+    2) /preview &lt;ITEM_ID&gt; → проверить альбом
+    3) <b>/post &lt;ITEM_ID&gt;</b> → отправить альбом в канал и добавить кнопку «Купить»
+    В канале используется URL-кнопка (Direct Link Mini App ?startapp=).
 """.trimIndent()
 
 internal fun buildDraftCreatedReply(id: String): String = buildString {
