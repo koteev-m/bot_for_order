@@ -2,10 +2,19 @@ package com.example.app.routes
 
 import com.example.app.config.AppConfig
 import com.example.app.services.ItemsService
+import com.example.app.services.MediaStateStore
+import com.example.app.services.MediaType
+import com.example.app.services.PendingMedia
+import com.example.app.tg.TgMessage
 import com.example.app.tg.TgUpdate
 import com.example.bots.TelegramClients
-import com.pengrad.telegrambot.model.LinkPreviewOptions
+import com.example.db.ItemMediaRepository
+import com.example.domain.ItemMedia
+import com.pengrad.telegrambot.model.request.InputMedia
+import com.pengrad.telegrambot.model.request.InputMediaPhoto
+import com.pengrad.telegrambot.model.request.InputMediaVideo
 import com.pengrad.telegrambot.model.request.ParseMode
+import com.pengrad.telegrambot.request.SendMediaGroup
 import com.pengrad.telegrambot.request.SendMessage
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -23,17 +32,27 @@ import org.slf4j.LoggerFactory
 fun Application.installAdminWebhook() {
     val log = LoggerFactory.getLogger("AdminWebhook")
 
-    val cfg by inject<AppConfig>()
+    val config by inject<AppConfig>()
     val clients by inject<TelegramClients>()
     val itemsService by inject<ItemsService>()
+    val itemMediaRepository by inject<ItemMediaRepository>()
+    val mediaStateStore by inject<MediaStateStore>()
 
     val json = Json { ignoreUnknownKeys = true }
-    val deps = AdminWebhookDeps(json, log, cfg, clients, itemsService)
+    val deps = AdminWebhookDeps(
+        json = json,
+        log = log,
+        config = config,
+        clients = clients,
+        itemsService = itemsService,
+        itemMediaRepository = itemMediaRepository,
+        mediaStateStore = mediaStateStore
+    )
 
     routing {
         post("/tg/admin") {
             val body = call.receiveText()
-            call.processAdminUpdate(body, deps)
+            handleAdminUpdate(call, body, deps)
         }
     }
 }
@@ -43,149 +62,203 @@ private data class AdminWebhookDeps(
     val log: Logger,
     val config: AppConfig,
     val clients: TelegramClients,
-    val itemsService: ItemsService
+    val itemsService: ItemsService,
+    val itemMediaRepository: ItemMediaRepository,
+    val mediaStateStore: MediaStateStore
 )
 
-private data class AdminCommand(
-    val chatId: Long,
-    val fromId: Long,
-    val command: String,
-    val args: String
-)
-
-private suspend fun ApplicationCall.processAdminUpdate(
+private suspend fun handleAdminUpdate(
+    call: ApplicationCall,
     body: String,
     deps: AdminWebhookDeps
 ) {
     val update = runCatching { deps.json.decodeFromString(TgUpdate.serializer(), body) }
-        .onFailure { deps.log.warn("Invalid update json: {}", it.message) }
-        .getOrNull()
+        .getOrElse {
+            deps.log.warn("Invalid update json: {}", it.message)
+            call.respond(HttpStatusCode.OK)
+            return
+        }
 
-    val command = update?.let(::extractAdminCommand)
+    val message = update.message
+    val fromId = message?.from?.id
+    if (message == null || fromId == null) {
+        call.respond(HttpStatusCode.OK)
+        return
+    }
+    val chatId = message.chat.id
 
-    command?.let {
-        if (!deps.config.telegram.adminIds.contains(it.fromId)) {
-            deps.clients.adminBot.execute(
-                SendMessage(it.chatId, "⛔ Команда доступна только администраторам.")
-                    .parseMode(ParseMode.HTML)
-                    .disablePreview()
-            )
+    val reply: (String) -> Unit = { html ->
+        deps.clients.adminBot.execute(
+            SendMessage(chatId, html)
+                .parseMode(ParseMode.HTML)
+                .disablePreview()
+        )
+    }
+
+    if (!deps.config.telegram.adminIds.contains(fromId)) {
+        reply("⛔ Команда доступна только администраторам.")
+    } else {
+        val text = message.text?.trim().orEmpty()
+        if (text.startsWith("/")) {
+            handleAdminCommand(chatId, fromId, text, deps, reply)
         } else {
-            when (it.command) {
-                "/start" -> deps.clients.replyHtml(it.chatId, START_REPLY)
-                "/help" -> deps.clients.replyHtml(it.chatId, HELP_REPLY)
-                "/new" -> handleCreateDraft(it.chatId, it.args, deps.clients, deps.itemsService)
-                else -> deps.clients.replyHtml(
-                    it.chatId,
-                    "Неизвестная команда. Напишите <code>/help</code>."
-                )
-            }
+            handleMediaCollection(fromId, chatId, message, deps, reply)
         }
     }
 
-    respond(HttpStatusCode.OK)
+    call.respond(HttpStatusCode.OK)
 }
 
-private fun splitCommand(text: String): Pair<String, String> {
-    val spaceIndex = text.indexOf(' ')
-    return if (spaceIndex == -1) {
-        text to ""
-    } else {
-        text.substring(0, spaceIndex) to text.substring(spaceIndex + 1).trim()
-    }
-}
-
-private fun extractAdminCommand(update: TgUpdate): AdminCommand? {
-    val message = update.message
-    val fromId = message?.from?.id
-    val text = message?.text?.trim().orEmpty()
-    val isCommand = text.isNotBlank() && text.startsWith("/")
-    if (message == null || fromId == null || !isCommand) {
-        return null
-    }
+private suspend fun handleAdminCommand(
+    chatId: Long,
+    fromId: Long,
+    text: String,
+    deps: AdminWebhookDeps,
+    reply: (String) -> Unit
+) {
     val (command, args) = splitCommand(text)
-    return AdminCommand(
-        chatId = message.chat.id,
-        fromId = fromId,
-        command = command,
-        args = args
-    )
+    when (command) {
+        "/start" -> reply(START_REPLY)
+        "/help" -> reply(HELP_REPLY)
+        "/new" -> handleCreateDraft(chatId, args, deps.clients, deps.itemsService)
+        "/media" -> handleMediaStart(fromId, chatId, args, deps.mediaStateStore, reply)
+        "/media_done" -> handleMediaFinalize(fromId, deps.mediaStateStore, deps.itemMediaRepository, reply)
+        "/media_cancel" -> handleMediaCancel(fromId, deps.mediaStateStore, reply)
+        "/preview" -> handlePreview(chatId, args, deps.itemMediaRepository, deps.clients, reply)
+        else -> reply("Неизвестная команда. Напишите <code>/help</code>.")
+    }
 }
 
-private fun parseNewArgs(args: String): Pair<String, String> {
-    if (args.isBlank()) return "Untitled" to "No description"
-    val parts = args.split("|", limit = 2).map { it.trim() }
-    val title = parts.getOrNull(0)?.takeIf { it.isNotBlank() } ?: "Untitled"
-    val description = parts.getOrNull(1)?.takeIf { it.isNotBlank() } ?: "No description"
-    require(title.length in 1..200) { "Title length invalid" }
-    require(description.length in 1..4000) { "Description length invalid" }
-    return title to description
-}
-
-private val START_REPLY = """
-    <b>Admin-панель</b>
-    Доступные команды:
-    • <code>/help</code> — подсказка
-    • <code>/new [title] | [description]</code> — создать черновик лота
-""".trimIndent()
-
-private val HELP_REPLY = """
-    <b>Справка</b>
-    • <code>/new</code> — создать черновик: <i>/new Nike Dunk | 42 EU, состояние 9/10</i>
-    Далее добавьте медиа и опубликуйте в канал на шагах S8–S9.
-""".trimIndent()
-
-private fun buildDraftCreatedReply(id: String): String = buildString {
-    appendLine("✅ Черновик создан")
-    appendLine("<b>Item ID:</b> <code>$id</code>")
-    appendLine()
-    appendLine("Дальше:")
-    appendLine("1) <i>/media $id</i> — добавить 2–10 фото/видео (S8)")
-    appendLine("2) <i>/preview $id</i> — предпросмотр альбома (S8)")
-    appendLine("3) <i>/post $id</i> — постинг в канал (S9)")
-}
-
-private fun TelegramClients.replyHtml(chatId: Long, text: String) {
-    adminBot.execute(
-        SendMessage(chatId, text)
-            .parseMode(ParseMode.HTML)
-            .disablePreview()
-    )
-}
-
-@Suppress("TooGenericExceptionCaught")
-private suspend fun handleCreateDraft(
+private fun handleMediaStart(
+    adminId: Long,
     chatId: Long,
     args: String,
-    clients: TelegramClients,
-    itemsService: ItemsService
+    mediaStateStore: MediaStateStore,
+    reply: (String) -> Unit
 ) {
-    val (title, description) = try {
-        parseNewArgs(args)
-    } catch (error: IllegalArgumentException) {
-        val message = error.message ?: "Неверный формат команды."
-        clients.adminBot.execute(
-            SendMessage(chatId, "⚠️ $message")
-                .parseMode(ParseMode.HTML)
-                .disablePreview()
-        )
+    val itemId = args.ifBlank { null }
+    if (itemId == null) {
+        reply("Укажите ID: <code>/media &lt;ITEM_ID&gt;</code>")
         return
     }
-
-    val id = try {
-        itemsService.createDraft(title, description)
-    } catch (error: Exception) {
-        val reason = error.message ?: "Неизвестная ошибка"
-        clients.adminBot.execute(
-            SendMessage(chatId, "⚠️ Не удалось создать черновик: $reason")
-                .parseMode(ParseMode.HTML)
-                .disablePreview()
-        )
-        return
-    }
-
-    clients.replyHtml(chatId, buildDraftCreatedReply(id))
+    mediaStateStore.start(adminId, chatId, itemId)
+    reply(
+        """
+        Режим сбора медиа для <code>$itemId</code>.
+        Пришлите 2–10 фото/видео (одним альбомом или по одному).
+        Когда закончите — команда <code>/media_done</code>.
+        """.trimIndent()
+    )
 }
 
-private fun SendMessage.disablePreview(): SendMessage =
-    linkPreviewOptions(LinkPreviewOptions().isDisabled(true))
+private suspend fun handleMediaFinalize(
+    adminId: Long,
+    mediaStateStore: MediaStateStore,
+    itemMediaRepository: ItemMediaRepository,
+    reply: (String) -> Unit
+) {
+    val state = mediaStateStore.get(adminId)
+    if (state == null) {
+        reply("Нет активного сбора. Используйте <code>/media &lt;ITEM_ID&gt;</code>.")
+        return
+    }
+    val count = state.media.size
+    if (count < 2 || count > 10) {
+        reply("Нужно 2–10 медиа, сейчас: $count.")
+        return
+    }
+
+    itemMediaRepository.deleteByItem(state.itemId)
+    state.media.forEachIndexed { index, media ->
+        itemMediaRepository.add(
+            ItemMedia(
+                id = 0,
+                itemId = state.itemId,
+                fileId = media.fileId,
+                mediaType = media.type.name.lowercase(),
+                sortOrder = index
+            )
+        )
+    }
+    reply("✅ Сохранено $count медиа для <code>${state.itemId}</code>.")
+    mediaStateStore.clear(adminId)
+}
+
+private fun handleMediaCancel(
+    adminId: Long,
+    mediaStateStore: MediaStateStore,
+    reply: (String) -> Unit
+) {
+    mediaStateStore.clear(adminId)
+    reply("Отменено. Состояние сбора очищено.")
+}
+
+@Suppress("SpreadOperator")
+private suspend fun handlePreview(
+    chatId: Long,
+    args: String,
+    itemMediaRepository: ItemMediaRepository,
+    clients: TelegramClients,
+    reply: (String) -> Unit
+) {
+    val itemId = args.ifBlank { null }
+    if (itemId == null) {
+        reply("Укажите ID: <code>/preview &lt;ITEM_ID&gt;</code>")
+        return
+    }
+
+    val medias = itemMediaRepository.listByItem(itemId)
+    if (medias.isEmpty()) {
+        reply(
+            """
+            Для <code>$itemId</code> нет сохранённых медиа.
+            Используйте <code>/media $itemId</code> → <code>/media_done</code>.
+            """.trimIndent()
+        )
+        return
+    }
+
+    val group: List<InputMedia<*>> = medias.map {
+        when (it.mediaType) {
+            "photo" -> InputMediaPhoto(it.fileId)
+            "video" -> InputMediaVideo(it.fileId)
+            else -> InputMediaPhoto(it.fileId)
+        }
+    }
+    clients.adminBot.execute(
+        SendMediaGroup(chatId, *group.toTypedArray())
+    )
+    reply("Предпросмотр отправлен альбомом.")
+}
+
+private fun handleMediaCollection(
+    adminId: Long,
+    chatId: Long,
+    message: TgMessage,
+    deps: AdminWebhookDeps,
+    reply: (String) -> Unit
+): Boolean {
+    val state = deps.mediaStateStore.get(adminId)
+    if (state == null || state.chatId != chatId) {
+        return false
+    }
+
+    val added = mutableListOf<PendingMedia>()
+    message.photo?.lastOrNull()?.let { added.add(PendingMedia(it.fileId, MediaType.PHOTO)) }
+    message.video?.let { added.add(PendingMedia(it.fileId, MediaType.VIDEO)) }
+
+    if (added.isNotEmpty()) {
+        added.forEach { deps.mediaStateStore.add(adminId, it) }
+        var total = state.media.size
+        if (total > 10) {
+            state.media.subList(10, total).clear()
+            total = 10
+            reply("Лимит 10 медиа. Лишние игнорированы. Сейчас: 10. Завершите /media_done.")
+        } else {
+            reply("Добавлено: ${added.size}. Сейчас: $total (нужно 2–10). Завершите /media_done.")
+        }
+    }
+
+    return true
+}
+
