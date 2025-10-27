@@ -46,3 +46,7 @@ ktor {
         archiveFileName.set("app-all.jar")
     }
 }
+
+tasks.named("processResources") {
+    dependsOn(":miniapp:copyMiniAppToApp")
+}
