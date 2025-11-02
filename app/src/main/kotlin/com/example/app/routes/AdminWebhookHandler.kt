@@ -1,6 +1,8 @@
 package com.example.app.routes
 
 import com.example.app.config.AppConfig
+import com.example.app.security.TelegramPrincipal
+import com.example.app.security.withRbacPrincipal
 import com.example.app.services.ItemsService
 import com.example.app.services.MediaStateStore
 import com.example.app.services.MediaType
@@ -89,28 +91,30 @@ private suspend fun handleAdminUpdate(
         call.respond(HttpStatusCode.OK)
         return
     }
-    val chatId = message.chat.id
+    call.withRbacPrincipal(TelegramPrincipal(fromId)) {
+        val chatId = message.chat.id
 
-    val reply: (String) -> Unit = { html ->
-        deps.clients.adminBot.execute(
-            SendMessage(chatId, html)
-                .parseMode(ParseMode.HTML)
-                .disablePreview()
-        )
-    }
-
-    if (!deps.config.telegram.adminIds.contains(fromId)) {
-        reply("⛔ Команда доступна только администраторам.")
-    } else {
-        val text = message.text?.trim().orEmpty()
-        if (text.startsWith("/")) {
-            handleAdminCommand(chatId, fromId, text, deps, reply)
-        } else {
-            handleMediaCollection(fromId, chatId, message, deps, reply)
+        val reply: (String) -> Unit = { html ->
+            deps.clients.adminBot.execute(
+                SendMessage(chatId, html)
+                    .parseMode(ParseMode.HTML)
+                    .disablePreview()
+            )
         }
-    }
 
-    call.respond(HttpStatusCode.OK)
+        if (!deps.config.telegram.adminIds.contains(fromId)) {
+            reply("⛔ Команда доступна только администраторам.")
+        } else {
+            val text = message.text?.trim().orEmpty()
+            if (text.startsWith("/")) {
+                handleAdminCommand(chatId, fromId, text, deps, reply)
+            } else {
+                handleMediaCollection(fromId, chatId, message, deps, reply)
+            }
+        }
+
+        call.respond(HttpStatusCode.OK)
+    }
 }
 
 private suspend fun handleAdminCommand(

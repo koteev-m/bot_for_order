@@ -11,11 +11,15 @@ import com.example.app.routes.installAdminWebhook
 import com.example.app.routes.installApiRoutes
 import com.example.app.routes.installShopWebhook
 import com.example.app.routes.installStaticAppRoutes
+import com.example.app.security.RbacActorMdcPlugin
+import com.example.app.security.UserPrincipalPlugin
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.netty.EngineMain
+import io.ktor.server.plugins.callid.CallId
+import io.ktor.server.plugins.callid.callIdMdc
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
@@ -25,6 +29,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import java.net.URI
 import org.flywaydb.core.Flyway
+import java.util.concurrent.ThreadLocalRandom
 import org.koin.ktor.ext.inject
 import org.koin.ktor.plugin.Koin
 import org.slf4j.Logger
@@ -79,7 +84,19 @@ private fun Application.runMigrations(log: Logger) {
 }
 
 private fun Application.configureServerPlugins() {
-    install(CallLogging)
+    install(CallId) {
+        retrieveFromHeader("X-Request-Id")
+        generate { generateRequestId() }
+        verify { id -> id.isNotBlank() && id.matches(Regex("[A-Za-z0-9._-]+")) }
+        reply { call, callId ->
+            call.response.headers.append("X-Request-Id", callId)
+        }
+    }
+    install(CallLogging) {
+        callIdMdc("request_id")
+    }
+    install(UserPrincipalPlugin)
+    install(RbacActorMdcPlugin)
     install(StatusPages) {
         installApiErrors()
         exception<Throwable> { call, cause ->
@@ -135,4 +152,10 @@ private fun logStartup(log: Logger, cfg: AppConfig) {
         cfg.payments.invoiceCurrency,
         cfg.telegram.adminIds.size
     )
+}
+
+private fun generateRequestId(): String {
+    val alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+    val random = ThreadLocalRandom.current()
+    return CharArray(20) { alphabet[random.nextInt(alphabet.length)] }.concatToString()
 }

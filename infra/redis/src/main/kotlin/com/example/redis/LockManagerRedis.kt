@@ -2,6 +2,7 @@ package com.example.redis
 
 import com.example.domain.hold.LockManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.slf4j.MDCContext
 import kotlinx.coroutines.withContext
 import org.redisson.api.RLock
 import org.redisson.api.RedissonClient
@@ -12,7 +13,7 @@ class LockManagerRedis(
 ) : LockManager {
 
     override suspend fun <T> withLock(key: String, waitMs: Long, leaseMs: Long, action: suspend () -> T): T =
-        withContext(Dispatchers.IO) {
+        withContext(MDCContext() + Dispatchers.IO) {
             val lockKey = "lock:$key"
             val lock: RLock = redisson.getLock(lockKey)
 
