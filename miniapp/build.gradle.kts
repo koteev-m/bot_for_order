@@ -1,5 +1,6 @@
 plugins {
-    kotlin("js") version libs.versions.kotlin.get()
+    kotlin("js")
+    alias(libs.plugins.serialization)
 }
 
 repositories {
@@ -11,6 +12,9 @@ kotlin {
         browser {
             commonWebpackConfig {
                 outputFileName = "miniapp.js"
+                cssSupport {
+                    enabled.set(true)
+                }
             }
         }
         binaries.executable()
@@ -23,6 +27,9 @@ dependencies {
     implementation(libs.serialization.json)
 
     implementation(libs.kvision)
+    implementation(libs.kvision.bootstrap)
+    implementation(libs.kvision.bootstrap.css)
+    implementation(libs.kvision.tom.select)
 
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.js)
