@@ -3,53 +3,32 @@ package com.example.miniapp.tg
 import kotlinx.browser.window
 
 object TelegramBridge {
-    private val webApp: dynamic = js(
-        "typeof window !== 'undefined' ? (window.Telegram ? window.Telegram.WebApp : null) : null"
-    )
+    private val wa: dynamic = js("typeof window !== 'undefined' ? (window.Telegram ? window.Telegram.WebApp : null) : null")
 
     fun userIdOrNull(): Long? = try {
-        val user = webApp?.initDataUnsafe?.user
-        val id = (user?.id as? Double)?.toLong() ?: (user?.id as? Int)?.toLong()
-        id
-    } catch (_: dynamic) {
-        null
-    }
+        val u = wa?.initDataUnsafe?.user
+        val id = u?.id as? Int ?: (u?.id as? Double)?.toInt()
+        id?.toLong()
+    } catch (_: dynamic) { null }
 
     fun startParam(): String? = try {
-        val query = window.location.search
-        val params = UrlQuery.parse(query)
-        params["tgWebAppStartParam"]
-    } catch (_: dynamic) {
-        null
-    }
+        val url = window.location.search
+        val qp = UrlQuery.parse(url)
+        qp["tgWebAppStartParam"]
+    } catch (_: dynamic) { null }
 
-    fun isAvailable(): Boolean = webApp != null
-
-    fun ready() {
-        try {
-            webApp?.ready?.invoke()
-        } catch (_: dynamic) {
-            // ignore
-        }
-    }
+    fun ready() { try { wa?.ready?.invoke() } catch (_: dynamic) {} }
 }
 
 object UrlQuery {
     fun parse(query: String): Map<String, String> {
         if (query.isBlank()) return emptyMap()
-        val trimmed = if (query.startsWith("?")) query.drop(1) else query
-        if (trimmed.isBlank()) return emptyMap()
-        return trimmed.split("&").mapNotNull { part ->
-            val idx = part.indexOf('=')
-            if (idx <= 0) {
-                null
-            } else {
-                val key = part.substring(0, idx)
-                val value = decodeURIComponent(part.substring(idx + 1))
-                key to value
-            }
+        val s = if (query.startsWith("?")) query.substring(1) else query
+        if (s.isBlank()) return emptyMap()
+        return s.split("&").mapNotNull {
+            val i = it.indexOf('=')
+            if (i <= 0) null else it.substring(0, i) to decodeURIComponent(it.substring(i + 1))
         }.toMap()
     }
-
-    private fun decodeURIComponent(value: String): String = js("decodeURIComponent")(value) as String
+    private fun decodeURIComponent(s: String): String = js("decodeURIComponent")(s) as String
 }

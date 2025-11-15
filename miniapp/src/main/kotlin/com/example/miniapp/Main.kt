@@ -7,233 +7,248 @@ import com.example.miniapp.api.OrderCreateRequest
 import com.example.miniapp.startapp.StartAppCodecJs
 import com.example.miniapp.tg.TelegramBridge
 import com.example.miniapp.tg.UrlQuery
-import io.kvision.core.Container
+import io.kvision.Application
+import io.kvision.BootstrapCssModule
+import io.kvision.BootstrapModule
+import io.kvision.CoreModule
+import io.kvision.Hot
+import io.kvision.TomSelectModule
 import io.kvision.core.onClick
-import io.kvision.form.select.SimpleSelect
-import io.kvision.form.spinner.Spinner
+import io.kvision.form.select.TomSelect
 import io.kvision.form.text.TextArea
 import io.kvision.form.text.TextInput
-import io.kvision.form.text.TextInputType
 import io.kvision.html.Button
 import io.kvision.html.Div
-import io.kvision.panel.Root
+import io.kvision.html.InputType
+import io.kvision.panel.root
 import io.kvision.panel.vPanel
-import io.kvision.utils.onEvent
+import io.kvision.startApplication
 import kotlinx.browser.window
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.max
 
-private val scope = MainScope()
-
-fun main() {
-    Root("kvapp").vPanel(spacing = 8) {
-        TelegramBridge.ready()
-        AppUI(this).start()
-    }
-}
-
-class AppUI(private val container: Container) {
-
-    private val api = ApiClient(baseUrl = "")
+class MiniApp : Application() {
+    private val scope = MainScope()
+    private val api = ApiClient()
     private var currentItem: ItemResponse? = null
 
-    private val titleEl = Div().apply { addCssClass("h1") }
-    private val descEl = Div()
-    private val priceEl = Div()
-    private val infoEl = Div().apply { addCssClass("muted") }
+    override fun start(state: Map<String, Any>) {
+        root("kvapp") {
+            vPanel(spacing = 8) {
+                val titleEl = Div(className = "h1")
+                val descEl = Div()
+                val priceEl = Div()
+                val infoEl = Div(className = "muted")
 
-    private val variantSelect = SimpleSelect(
-        options = listOf<Pair<String, String>>(),
-        placeholder = "Выберите вариант (если есть)",
-        emptyOption = true
-    )
-    private val qtyInput = Spinner(value = 1, min = 1, max = 99, decimals = 0)
+                val variantSelect = TomSelect(options = listOf())
+                val qtyInput = TextInput(InputType.NUMBER).apply {
+                    placeholder = "Кол-во"
+                    value = "1"
+                }
+                val nameInput = TextInput(InputType.TEXT).apply { placeholder = "Ваше имя" }
+                val phoneInput = TextInput(InputType.TEL).apply { placeholder = "Телефон" }
+                val addrInput = TextArea(rows = 3).apply { placeholder = "Адрес доставки (если требуется)" }
 
-    private val nameInput = TextInput(TextInputType.TEXT) { placeholder = "Ваше имя" }
-    private val phoneInput = TextInput(TextInputType.TEL) { placeholder = "Телефон" }
-    private val addrInput = TextArea(rows = 3) { placeholder = "Адрес доставки (если требуется)" }
+                val statusOk = Div(className = "ok")
+                val statusErr = Div(className = "err")
 
-    private val statusOk = Div().apply { addCssClass("ok") }
-    private val statusErr = Div().apply { addCssClass("err") }
-
-    fun start() {
-        container.add(
-            Div().apply {
-                addCssClass("card")
-                add(titleEl)
-                add(descEl)
-                add(priceEl)
-                add(infoEl)
-                add(Div().apply {
-                    addCssClass("h2")
-                    content = "Параметры"
-                })
-                add(Div().apply {
-                    addCssClass("row")
-                    add(variantSelect)
-                    add(Div("Кол-во:"))
-                    add(qtyInput)
-                })
-                add(Div().apply {
-                    addCssClass("h2")
-                    content = "Контакты / адрес"
-                })
-                add(Div().apply {
-                    addCssClass("row")
-                    add(nameInput)
-                    add(phoneInput)
-                })
-                add(addrInput)
-                add(Div().apply {
-                    addCssClass("buttons")
-                    add(Button("Купить").apply {
-                        addCssClass("primary")
-                        onClick { onBuyClicked() }
+                add(Div(className = "card").apply {
+                    add(titleEl)
+                    add(descEl)
+                    add(priceEl)
+                    add(infoEl)
+                    add(Div(className = "h2").apply {
+                        content = "Параметры"
                     })
-                    add(Button("Предложить цену").apply {
-                        addCssClass("secondary")
-                        onClick { onOfferClicked() }
+                    add(Div(className = "row").apply {
+                        add(variantSelect)
+                        add(Div("Кол-во:"))
+                        add(qtyInput)
                     })
+                    add(Div(className = "h2").apply {
+                        content = "Контакты / адрес"
+                    })
+                    add(Div(className = "row").apply {
+                        add(nameInput)
+                        add(phoneInput)
+                    })
+                    add(addrInput)
+                    add(Div(className = "buttons").apply {
+                        add(Button("Купить", className = "primary").apply {
+                            onClick {
+                                onBuyClicked(
+                                    qtyInput.value,
+                                    variantSelect.value,
+                                    nameInput.value,
+                                    phoneInput.value,
+                                    addrInput.value,
+                                    statusOk,
+                                    statusErr
+                                )
+                            }
+                        })
+                        add(
+                            Button("Предложить цену", className = "secondary").apply {
+                                onClick { onOfferClicked(qtyInput.value, variantSelect.value, statusOk, statusErr) }
+                            }
+                        )
+                    })
+                    add(statusOk)
+                    add(statusErr)
                 })
-                add(statusOk)
-                add(statusErr)
+
+                val qp = UrlQuery.parse(window.location.search)
+                val itemId = qp["item"] ?: TelegramBridge.startParam()?.let { StartAppCodecJs.decode(it).itemId }
+                if (itemId == null) {
+                    titleEl.content = "Не указан товар"
+                    descEl.content = "Откройте Mini App по кнопке «Купить» или передайте ?item=<ID>."
+                } else {
+                    loadItem(itemId, titleEl, descEl, priceEl, infoEl, variantSelect)
+                }
             }
-        )
-
-        val query = UrlQuery.parse(window.location.search)
-        val itemId = query["item"] ?: TelegramBridge.startParam()?.let { StartAppCodecJs.decode(it).itemId }
-        if (itemId == null) {
-            titleEl.content = "Не указан товар"
-            descEl.content = "Откройте Mini App по кнопке «Купить» под постом или передайте ?item=<ID>."
-            return
         }
-        loadItem(itemId)
     }
 
-    private fun loadItem(itemId: String) {
-        statusOk.content = ""
-        statusErr.content = ""
+    private fun loadItem(
+        itemId: String,
+        titleEl: Div,
+        descEl: Div,
+        priceEl: Div,
+        infoEl: Div,
+        variantSelect: TomSelect
+    ) {
+        TelegramBridge.ready()
         scope.launch {
-            try {
-                val item = api.getItem(itemId)
-                currentItem = item
-                renderItem(item)
-            } catch (e: dynamic) {
-                statusErr.content = "Ошибка загрузки товара: ${e?.message ?: e.toString()}"
-            }
+            runCatching { api.getItem(itemId) }
+                .onSuccess { item ->
+                    currentItem = item
+                    renderItem(item, titleEl, descEl, priceEl, infoEl, variantSelect)
+                }
+                .onFailure { e ->
+                    descEl.content = "Ошибка загрузки товара: ${e.message ?: e.toString()}"
+                }
         }
     }
 
-    private fun renderItem(item: ItemResponse) {
-        titleEl.content = item.title
+    private fun renderItem(
+        item: ItemResponse,
+        titleEl: Div,
+        descEl: Div,
+        priceEl: Div,
+        infoEl: Div,
+        variantSelect: TomSelect
+    ) {
+        titleEl.content = escape(item.title)
         descEl.content = escape(item.description)
-        val price = item.prices
-        priceEl.content = if (price != null) {
-            "Цена: <b>${formatMoney(price.baseAmountMinor, price.baseCurrency)}</b>"
+        val p = item.prices
+        priceEl.content = if (p != null) {
+            "Цена: <b>${formatMoney(p.baseAmountMinor, p.baseCurrency)}</b>"
         } else {
             "Цена: <i>уточняется</i>"
         }
         infoEl.content = "ID: ${item.id}"
-
         val options = item.variants.filter { it.active }.map { it.id to (it.size ?: it.sku ?: it.id) }
-        variantSelect.setOptions(options)
-
-        nameInput.value = localGet("name") ?: ""
-        phoneInput.value = localGet("phone") ?: ""
-        addrInput.value = localGet("addr") ?: ""
-
-        nameInput.onEvent {
-            change { localSet("name", nameInput.value ?: "") }
-        }
-        phoneInput.onEvent {
-            change { localSet("phone", phoneInput.value ?: "") }
-        }
-        addrInput.onEvent {
-            change { localSet("addr", addrInput.value ?: "") }
-        }
+        variantSelect.options = options
     }
 
-    private fun onBuyClicked() {
-        statusOk.content = ""
-        statusErr.content = ""
-        val item = currentItem ?: return
-        val quantity = max(1, qtyInput.value ?: 1)
+    private fun onBuyClicked(
+        qtyRaw: String?,
+        variantId: String?,
+        name: String?,
+        phone: String?,
+        addr: String?,
+        ok: Div,
+        err: Div
+    ) {
+        ok.content = ""
+        err.content = ""
+        val item = currentItem ?: run {
+            err.content = "Товар не загружен."
+            return
+        }
+        val qty = max(1, qtyRaw?.toIntOrNull() ?: 1)
         val currency = item.prices?.baseCurrency ?: "RUB"
-        val basePrice = item.prices?.baseAmountMinor ?: 0L
-        val amountMinor = basePrice * quantity
-
-        val addressJson = """{"name":${stringify(nameInput.value)}, "phone":${stringify(phoneInput.value)}, "addr":${stringify(addrInput.value)}}"""
+        val baseMinor = item.prices?.baseAmountMinor ?: 0L
+        val sumMinor = baseMinor * qty
+        val addressJson = if (addr.isNullOrBlank()) null
+        else """{"name":${q(name)},"phone":${q(phone)},"addr":${q(addr)}}"""
 
         scope.launch {
-            try {
-                val response = api.postOrder(
+            runCatching {
+                api.postOrder(
                     OrderCreateRequest(
                         itemId = item.id,
-                        variantId = variantSelect.value,
-                        qty = quantity,
+                        variantId = variantId,
+                        qty = qty,
                         currency = currency,
-                        amountMinor = amountMinor,
-                        deliveryOption = if (addrInput.value.isNullOrBlank()) null else "address",
-                        addressJson = if (addrInput.value.isNullOrBlank()) null else addressJson
+                        amountMinor = sumMinor,
+                        deliveryOption = if (!addr.isNullOrBlank()) "address" else null,
+                        addressJson = addressJson
                     )
                 )
-                statusOk.content = "Заказ создан: ${response.orderId} (статус ${response.status}). Ожидайте счёт в чате."
-            } catch (e: dynamic) {
-                statusErr.content = "Ошибка заказа: ${e?.message ?: e.toString()}"
+            }.onSuccess { resp ->
+                ok.content = "Заказ создан: ${resp.orderId} (статус ${resp.status}). Ожидайте счёт в чате."
+            }.onFailure { e ->
+                err.content = "Ошибка заказа: ${e.message ?: e.toString()}"
             }
         }
     }
 
-    private fun onOfferClicked() {
-        statusOk.content = ""
-        statusErr.content = ""
-        val item = currentItem ?: return
-        val basePrice = item.prices?.baseAmountMinor ?: 0L
-        val promptValue = js("prompt")("Введите вашу цену (например, ${formatMoney(basePrice, item.prices?.baseCurrency ?: "RUB")})") as String?
-        if (promptValue.isNullOrBlank()) return
-        val amountMinor = parseMoneyToMinor(promptValue, item.prices?.baseCurrency ?: "RUB") ?: run {
-            statusErr.content = "Неверный формат суммы."
+    private fun onOfferClicked(qtyRaw: String?, variantId: String?, ok: Div, err: Div) {
+        ok.content = ""
+        err.content = ""
+        val item = currentItem ?: run {
+            err.content = "Товар не загружен."
             return
         }
-        val quantity = max(1, qtyInput.value ?: 1)
+        val baseMinor = item.prices?.baseAmountMinor ?: 0L
+        val currency = item.prices?.baseCurrency ?: "RUB"
+        val prompt = "Введите вашу цену (например, ${formatMoney(baseMinor, currency)})"
+        val input = js("prompt")(prompt) as String?
+        if (input.isNullOrBlank()) return
+        val amountMinor = parseMoneyToMinor(input) ?: run {
+            err.content = "Неверный формат суммы."
+            return
+        }
+        val qty = max(1, qtyRaw?.toIntOrNull() ?: 1)
 
         scope.launch {
-            try {
-                val response = api.postOffer(
+            runCatching {
+                api.postOffer(
                     OfferRequest(
                         itemId = item.id,
-                        variantId = variantSelect.value,
-                        qty = quantity,
+                        variantId = variantId,
+                        qty = qty,
                         offerAmountMinor = amountMinor
                     )
                 )
-                when (response.decision) {
-                    "autoAccept" -> statusOk.content = "Предложение принято автоматически. Продолжайте оформление."
-                    "counter" -> statusOk.content = "Продавец предлагает ${formatMoney(response.counterAmountMinor ?: 0L, item.prices?.baseCurrency ?: "RUB")}."
-                    "reject" -> statusErr.content = "Предложение отклонено."
-                    else -> statusErr.content = "Ответ: ${response.decision}"
+            }.onSuccess { resp ->
+                when (resp.decision) {
+                    "autoAccept" -> ok.content = "Предложение принято автоматически. Продолжайте оформление."
+                    "counter" -> ok.content = "Контр-офер: ${formatMoney(resp.counterAmountMinor ?: 0, currency)}."
+                    "reject" -> err.content = "Предложение отклонено."
+                    else -> err.content = "Ответ: ${resp.decision}"
                 }
-            } catch (e: dynamic) {
-                statusErr.content = "Ошибка офера: ${e?.message ?: e.toString()}"
+            }.onFailure { e ->
+                err.content = "Ошибка офера: ${e.message ?: e.toString()}"
             }
         }
     }
 
     private fun formatMoney(amountMinor: Long, currency: String): String {
-        val absValue = abs(amountMinor)
-        val major = absValue / 100
-        val minor = (absValue % 100).toInt()
-        val formatted = "%d.%02d".format(major, minor)
+        val absolute = abs(amountMinor)
+        val major = absolute / 100
+        val minor = (absolute % 100).toInt()
+        val num = "$major.${minor.toString().padStart(2, '0')}"
         val sign = if (amountMinor < 0) "-" else ""
-        return "$sign$formatted ${currency.uppercase()}"
+        return "$sign$num ${currency.uppercase()}"
     }
 
-    private fun parseMoneyToMinor(value: String, currency: String): Long? {
-        val cleaned = value.trim().replace(" ", "").replace(currency, "", ignoreCase = true)
-        val normalized = cleaned.replace(",", ".")
-        val parts = normalized.split(".")
+    private fun parseMoneyToMinor(input: String): Long? {
+        val norm = input.trim().replace(" ", "").replace(",", ".")
+        val parts = norm.split(".")
         return when (parts.size) {
             1 -> parts[0].toLongOrNull()?.times(100)
             2 -> {
@@ -245,20 +260,12 @@ class AppUI(private val container: Container) {
         }
     }
 
-    private fun stringify(value: String?): String = js("JSON.stringify")(value ?: "") as String
+    private fun q(value: String?): String = js("JSON.stringify")(value ?: "") as String
+    private fun escape(value: String): String =
+        value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+}
 
-    private fun escape(value: String): String = value
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-
-    private fun localGet(key: String): String? = runCatching {
-        window.localStorage.getItem("miniapp.$key")
-    }.getOrNull()
-
-    private fun localSet(key: String, value: String) {
-        runCatching {
-            window.localStorage.setItem("miniapp.$key", value)
-        }
-    }
+fun main() {
+    val hot = js("import.meta.webpackHot").unsafeCast<Hot?>()
+    startApplication(::MiniApp, hot, BootstrapModule, BootstrapCssModule, TomSelectModule, CoreModule)
 }
