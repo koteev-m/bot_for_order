@@ -59,6 +59,7 @@ kvision = { module = "io.kvision:kvision", version.ref = "kvision" }
 kvision-bootstrap = { module = "io.kvision:kvision-bootstrap", version.ref = "kvision" }
 kvision-bootstrap-css = { module = "io.kvision:kvision-bootstrap-css", version = "5.18.2" }
 kvision-tom-select = { module = "io.kvision:kvision-tom-select", version.ref = "kvision" }
+detekt-formatting = { module = "io.gitlab.arturbosch.detekt:detekt-formatting", version.ref = "detekt" }
 
 kotest-runner = { module = "io.kotest:kotest-runner-junit5", version.ref = "kotest" }
 kotest-assertions = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }

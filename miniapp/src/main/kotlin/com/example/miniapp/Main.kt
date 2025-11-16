@@ -29,6 +29,11 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.max
 
+private const val DEFAULT_QUANTITY = 1
+private const val MINOR_UNITS_IN_MAJOR = 100
+private const val MINOR_DIGITS = 2
+private const val DEFAULT_CURRENCY = "RUB"
+
 class MiniApp : Application() {
     private val scope = MainScope()
     private val api = ApiClient()
@@ -45,7 +50,7 @@ class MiniApp : Application() {
                 val variantSelect = TomSelect(options = listOf())
                 val qtyInput = TextInput(InputType.NUMBER).apply {
                     placeholder = "Кол-во"
-                    value = "1"
+                    value = DEFAULT_QUANTITY.toString()
                 }
                 val nameInput = TextInput(InputType.TEXT).apply { placeholder = "Ваше имя" }
                 val phoneInput = TextInput(InputType.TEL).apply { placeholder = "Телефон" }
@@ -76,22 +81,31 @@ class MiniApp : Application() {
                     })
                     add(addrInput)
                     add(Div(className = "buttons").apply {
-                        add(Button("Купить", className = "primary").apply {
-                            onClick {
-                                onBuyClicked(
-                                    qtyInput.value,
-                                    variantSelect.value,
-                                    nameInput.value,
-                                    phoneInput.value,
-                                    addrInput.value,
-                                    statusOk,
-                                    statusErr
-                                )
+                        add(
+                            Button("Купить", className = "primary").apply {
+                                onClick {
+                                    onBuyClicked(
+                                        qtyInput.value,
+                                        variantSelect.value,
+                                        nameInput.value,
+                                        phoneInput.value,
+                                        addrInput.value,
+                                        statusOk,
+                                        statusErr
+                                    )
+                                }
                             }
-                        })
+                        )
                         add(
                             Button("Предложить цену", className = "secondary").apply {
-                                onClick { onOfferClicked(qtyInput.value, variantSelect.value, statusOk, statusErr) }
+                                onClick {
+                                    onOfferClicked(
+                                        qtyInput.value,
+                                        variantSelect.value,
+                                        statusOk,
+                                        statusErr
+                                    )
+                                }
                             }
                         )
                     })
@@ -100,7 +114,8 @@ class MiniApp : Application() {
                 })
 
                 val qp = UrlQuery.parse(window.location.search)
-                val itemId = qp["item"] ?: TelegramBridge.startParam()?.let { StartAppCodecJs.decode(it).itemId }
+                val itemId = qp["item"]
+                    ?: TelegramBridge.startParam()?.let { StartAppCodecJs.decode(it).itemId }
                 if (itemId == null) {
                     titleEl.content = "Не указан товар"
                     descEl.content = "Откройте Mini App по кнопке «Купить» или передайте ?item=<ID>."
@@ -142,14 +157,16 @@ class MiniApp : Application() {
     ) {
         titleEl.content = escape(item.title)
         descEl.content = escape(item.description)
-        val p = item.prices
-        priceEl.content = if (p != null) {
-            "Цена: <b>${formatMoney(p.baseAmountMinor, p.baseCurrency)}</b>"
+        val prices = item.prices
+        priceEl.content = if (prices != null) {
+            "Цена: <b>${formatMoney(prices.baseAmountMinor, prices.baseCurrency)}</b>"
         } else {
             "Цена: <i>уточняется</i>"
         }
         infoEl.content = "ID: ${item.id}"
-        val options = item.variants.filter { it.active }.map { it.id to (it.size ?: it.sku ?: it.id) }
+        val options = item.variants
+            .filter { it.active }
+            .map { it.id to (it.size ?: it.sku ?: it.id) }
         variantSelect.options = options
     }
 
@@ -168,12 +185,15 @@ class MiniApp : Application() {
             err.content = "Товар не загружен."
             return
         }
-        val qty = max(1, qtyRaw?.toIntOrNull() ?: 1)
-        val currency = item.prices?.baseCurrency ?: "RUB"
+        val qty = max(DEFAULT_QUANTITY, qtyRaw?.toIntOrNull() ?: DEFAULT_QUANTITY)
+        val currency = item.prices?.baseCurrency ?: DEFAULT_CURRENCY
         val baseMinor = item.prices?.baseAmountMinor ?: 0L
         val sumMinor = baseMinor * qty
-        val addressJson = if (addr.isNullOrBlank()) null
-        else """{"name":${q(name)},"phone":${q(phone)},"addr":${q(addr)}}"""
+        val addressJson = if (addr.isNullOrBlank()) {
+            null
+        } else {
+            """{"name":${q(name)},"phone":${q(phone)},"addr":${q(addr)}}"""
+        }
 
         scope.launch {
             runCatching {
@@ -204,7 +224,7 @@ class MiniApp : Application() {
             return
         }
         val baseMinor = item.prices?.baseAmountMinor ?: 0L
-        val currency = item.prices?.baseCurrency ?: "RUB"
+        val currency = item.prices?.baseCurrency ?: DEFAULT_CURRENCY
         val prompt = "Введите вашу цену (например, ${formatMoney(baseMinor, currency)})"
         val input = js("prompt")(prompt) as String?
         if (input.isNullOrBlank()) return
@@ -212,7 +232,7 @@ class MiniApp : Application() {
             err.content = "Неверный формат суммы."
             return
         }
-        val qty = max(1, qtyRaw?.toIntOrNull() ?: 1)
+        val qty = max(DEFAULT_QUANTITY, qtyRaw?.toIntOrNull() ?: DEFAULT_QUANTITY)
 
         scope.launch {
             runCatching {
@@ -239,9 +259,9 @@ class MiniApp : Application() {
 
     private fun formatMoney(amountMinor: Long, currency: String): String {
         val absolute = abs(amountMinor)
-        val major = absolute / 100
-        val minor = (absolute % 100).toInt()
-        val num = "$major.${minor.toString().padStart(2, '0')}"
+        val major = absolute / MINOR_UNITS_IN_MAJOR
+        val minor = (absolute % MINOR_UNITS_IN_MAJOR).toInt()
+        val num = "$major.${minor.toString().padStart(MINOR_DIGITS, '0')}"
         val sign = if (amountMinor < 0) "-" else ""
         return "$sign$num ${currency.uppercase()}"
     }
@@ -250,11 +270,14 @@ class MiniApp : Application() {
         val norm = input.trim().replace(" ", "").replace(",", ".")
         val parts = norm.split(".")
         return when (parts.size) {
-            1 -> parts[0].toLongOrNull()?.times(100)
+            1 -> parts[0].toLongOrNull()?.times(MINOR_UNITS_IN_MAJOR)
             2 -> {
                 val major = parts[0].toLongOrNull() ?: return null
-                val minor = parts[1].padEnd(2, '0').take(2).toIntOrNull() ?: return null
-                major * 100 + minor
+                val minor = parts[1]
+                    .padEnd(MINOR_DIGITS, '0')
+                    .take(MINOR_DIGITS)
+                    .toIntOrNull() ?: return null
+                major * MINOR_UNITS_IN_MAJOR + minor
             }
             else -> null
         }
@@ -267,5 +290,12 @@ class MiniApp : Application() {
 
 fun main() {
     val hot = js("import.meta.webpackHot").unsafeCast<Hot?>()
-    startApplication(::MiniApp, hot, BootstrapModule, BootstrapCssModule, TomSelectModule, CoreModule)
+    startApplication(
+        ::MiniApp,
+        hot,
+        BootstrapModule,
+        BootstrapCssModule,
+        TomSelectModule,
+        CoreModule
+    )
 }

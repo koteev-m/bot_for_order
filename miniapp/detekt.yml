@@ -1,0 +1,22 @@
+config:
+  validation: false
+
+style:
+  MagicNumber:
+    active: false
+  StringLiteralDuplication:
+    active: false
+
+complexity:
+  LongMethod:
+    active: false
+  TooManyFunctions:
+    active: false
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: false
+
+potential-bugs:
+  UnsafeCast:
+    active: false

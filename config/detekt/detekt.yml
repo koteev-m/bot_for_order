@@ -1,0 +1,26 @@
+build:
+  maxIssues: 0
+
+style:
+  MaxLineLength:
+    active: true
+    maxLineLength: 120
+  WildcardImport:
+    active: true
+  MagicNumber:
+    active: true
+    ignorePropertyDeclaration: false
+    ignoreAnnotation: true
+    ignoreEnums: true
+    ignoreCompanionObjectPropertyDeclaration: false
+
+complexity:
+  LongMethod:
+    active: true
+    threshold: 60
+  TooManyFunctions:
+    active: true
+    thresholdInClasses: 20
+    thresholdInFiles: 40
+    thresholdInInterfaces: 20
+    thresholdInObjects: 15
