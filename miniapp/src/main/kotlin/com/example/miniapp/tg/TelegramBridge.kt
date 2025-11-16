@@ -17,6 +17,8 @@ object TelegramBridge {
         qp["tgWebAppStartParam"]
     } catch (_: dynamic) { null }
 
+    fun initDataRaw(): String? = try { wa?.initData as? String } catch (_: dynamic) { null }
+
     fun ready() { try { wa?.ready?.invoke() } catch (_: dynamic) {} }
 }
 

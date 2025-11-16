@@ -2,8 +2,8 @@ package com.example.app.routes
 
 import com.example.app.api.OfferDecisionResponse
 import com.example.app.api.OfferRequest
-import com.example.app.api.requireUserId
 import com.example.db.VariantsRepository
+import com.example.app.security.requireUserId
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond

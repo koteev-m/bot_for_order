@@ -4,8 +4,8 @@ import com.example.app.api.ApiError
 import com.example.app.api.OrderCreateRequest
 import com.example.app.api.OrderCreateResponse
 import com.example.app.api.OrdersPage
-import com.example.app.api.requireUserId
 import com.example.app.config.AppConfig
+import com.example.app.security.requireUserId
 import com.example.db.ItemsRepository
 import com.example.db.OrdersRepository
 import com.example.db.VariantsRepository

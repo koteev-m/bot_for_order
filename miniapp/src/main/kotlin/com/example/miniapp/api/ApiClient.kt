@@ -1,5 +1,6 @@
 package com.example.miniapp.api
 
+import com.example.miniapp.tg.TelegramBridge
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.js.Js
@@ -22,10 +23,10 @@ class ApiClient(
     private val client = HttpClient(Js) {
         install(ContentNegotiation) { json(json) }
         install(DefaultRequest) {
-            val uid = com.example.miniapp.tg.TelegramBridge.userIdOrNull() ?: 1001L
-            header("X-User-Id", uid.toString())
             accept(ContentType.Application.Json)
             contentType(ContentType.Application.Json)
+            TelegramBridge.initDataRaw()?.let { header("X-Telegram-Init-Data", it) }
+            TelegramBridge.userIdOrNull()?.let { header("X-User-Id", it.toString()) }
         }
     }
 
