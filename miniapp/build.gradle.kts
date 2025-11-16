@@ -1,6 +1,7 @@
 plugins {
     kotlin("js")
     alias(libs.plugins.serialization)
+    alias(libs.plugins.detekt)
 }
 
 repositories {
@@ -35,6 +36,20 @@ dependencies {
     implementation(libs.ktor.client.js)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json.client)
+
+    detektPlugins(libs.detekt.formatting)
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(
+        files(
+            "$rootDir/config/detekt/detekt.yml",
+            "$projectDir/detekt.yml"
+        )
+    )
+    baseline = file("$projectDir/detekt-baseline.xml")
+    source.from(files("src/main/kotlin"))
 }
 
 val copyMiniAppToApp by tasks.registering(Copy::class) {

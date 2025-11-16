@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:Main.kt$MiniApp$override fun start(state: Map&lt;String, Any>)</ID>
+    <ID>CyclomaticComplexMethod:Main.kt$MiniApp$private fun onOfferClicked(qtyRaw: String?, variantId: String?, ok: Div, err: Div)</ID>
+    <ID>LongParameterList:Main.kt$MiniApp$( item: ItemResponse, titleEl: Div, descEl: Div, priceEl: Div, infoEl: Div, variantSelect: TomSelect )</ID>
+    <ID>LongParameterList:Main.kt$MiniApp$( itemId: String, titleEl: Div, descEl: Div, priceEl: Div, infoEl: Div, variantSelect: TomSelect )</ID>
+    <ID>LongParameterList:Main.kt$MiniApp$( qtyRaw: String?, variantId: String?, name: String?, phone: String?, addr: String?, ok: Div, err: Div )</ID>
+    <ID>ReturnCount:Main.kt$MiniApp$private fun onOfferClicked(qtyRaw: String?, variantId: String?, ok: Div, err: Div)</ID>
+    <ID>ReturnCount:Main.kt$MiniApp$private fun parseMoneyToMinor(input: String): Long?</ID>
+    <ID>ReturnCount:TelegramBridge.kt$UrlQuery$fun parse(query: String): Map&lt;String, String></ID>
+    <ID>Wrapping:ApiClient.kt$ApiClient$;</ID>
+    <ID>Wrapping:Main.kt$MiniApp$(</ID>
+  </CurrentIssues>
+</SmellBaseline>

@@ -3,7 +3,9 @@ package com.example.miniapp.tg
 import kotlinx.browser.window
 
 object TelegramBridge {
-    private val wa: dynamic = js("typeof window !== 'undefined' ? (window.Telegram ? window.Telegram.WebApp : null) : null")
+    private val wa: dynamic = js(
+        "typeof window !== 'undefined' ? (window.Telegram ? window.Telegram.WebApp : null) : null"
+    )
 
     fun userIdOrNull(): Long? = try {
         val u = wa?.initDataUnsafe?.user
@@ -19,7 +21,12 @@ object TelegramBridge {
 
     fun initDataRaw(): String? = try { wa?.initData as? String } catch (_: dynamic) { null }
 
-    fun ready() { try { wa?.ready?.invoke() } catch (_: dynamic) {} }
+    fun ready() {
+        try {
+            wa?.ready?.invoke()
+        } catch (_: dynamic) {
+        }
+    }
 }
 
 object UrlQuery {
@@ -29,7 +36,13 @@ object UrlQuery {
         if (s.isBlank()) return emptyMap()
         return s.split("&").mapNotNull {
             val i = it.indexOf('=')
-            if (i <= 0) null else it.substring(0, i) to decodeURIComponent(it.substring(i + 1))
+            if (i <= 0) {
+                null
+            } else {
+                val key = it.substring(0, i)
+                val value = decodeURIComponent(it.substring(i + 1))
+                key to value
+            }
         }.toMap()
     }
     private fun decodeURIComponent(s: String): String = js("decodeURIComponent")(s) as String
