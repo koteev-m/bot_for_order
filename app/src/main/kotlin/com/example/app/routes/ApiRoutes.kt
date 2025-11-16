@@ -6,6 +6,7 @@ import com.example.db.ItemsRepository
 import com.example.db.OrdersRepository
 import com.example.db.PricesDisplayRepository
 import com.example.db.VariantsRepository
+import com.example.app.security.installInitDataAuth
 import io.ktor.server.application.Application
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
@@ -21,6 +22,7 @@ fun Application.installApiRoutes() {
 
     routing {
         route("/api") {
+            installInitDataAuth(cfg)
             registerItemRoutes(itemsRepo, mediaRepo, variantsRepo, pricesRepo)
             registerOfferRoutes(variantsRepo)
             registerOrdersRoutes(cfg, itemsRepo, variantsRepo, ordersRepo)
