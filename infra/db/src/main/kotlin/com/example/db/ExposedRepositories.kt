@@ -75,6 +75,13 @@ class ItemsRepositoryExposed(private val tx: DatabaseTx) : ItemsRepository {
         }
     }
 
+    override suspend fun listActive(): List<Item> = tx.tx {
+        ItemsTable
+            .selectAll()
+            .where { ItemsTable.status eq ItemStatus.active.name }
+            .map { it.toItem() }
+    }
+
     private fun ResultRow.toItem(): Item =
         Item(
             id = this[ItemsTable.id],

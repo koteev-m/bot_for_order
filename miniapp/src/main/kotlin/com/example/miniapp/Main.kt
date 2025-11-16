@@ -157,12 +157,7 @@ class MiniApp : Application() {
     ) {
         titleEl.content = escape(item.title)
         descEl.content = escape(item.description)
-        val prices = item.prices
-        priceEl.content = if (prices != null) {
-            "Цена: <b>${formatMoney(prices.baseAmountMinor, prices.baseCurrency)}</b>"
-        } else {
-            "Цена: <i>уточняется</i>"
-        }
+        priceEl.content = buildPriceLine(item)
         infoEl.content = "ID: ${item.id}"
         val options = item.variants
             .filter { it.active }
@@ -186,7 +181,7 @@ class MiniApp : Application() {
             return
         }
         val qty = max(DEFAULT_QUANTITY, qtyRaw?.toIntOrNull() ?: DEFAULT_QUANTITY)
-        val currency = item.prices?.baseCurrency ?: DEFAULT_CURRENCY
+        val currency = item.invoiceCurrency.uppercase()
         val baseMinor = item.prices?.baseAmountMinor ?: 0L
         val sumMinor = baseMinor * qty
         val addressJson = if (addr.isNullOrBlank()) {
@@ -255,6 +250,23 @@ class MiniApp : Application() {
                 err.content = "Ошибка офера: ${e.message ?: e.toString()}"
             }
         }
+    }
+
+    private fun buildPriceLine(item: ItemResponse): String {
+        val invoiceCurrency = item.invoiceCurrency.uppercase()
+        val prices = item.prices ?: return "Цена: <i>уточняется</i> (инвойс: $invoiceCurrency)"
+        val baseCode = prices.baseCurrency.uppercase()
+        val parts = mutableListOf("<b>${formatMoney(prices.baseAmountMinor, baseCode)}</b>")
+        fun append(code: String, amount: Long?) {
+            if (amount != null && code.uppercase() != baseCode) {
+                parts += formatMoney(amount, code)
+            }
+        }
+        append("USD", prices.usd)
+        append("EUR", prices.eur)
+        append("RUB", prices.rub)
+        append("USDT_TS", prices.usdtTs)
+        return "Цена: ${parts.joinToString(" / ")} (инвойс: $invoiceCurrency)"
     }
 
     private fun formatMoney(amountMinor: Long, currency: String): String {
