@@ -98,6 +98,8 @@ data class Order(
     val addressJson: String?,
     val provider: String?,
     val providerChargeId: String?,
+    val telegramPaymentChargeId: String? = null,
+    val invoiceMessageId: Int? = null,
     val status: OrderStatus
 )
 

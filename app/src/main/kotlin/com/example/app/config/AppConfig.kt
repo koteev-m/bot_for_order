@@ -28,7 +28,13 @@ data class RedisConfig(
 
 data class PaymentsConfig(
     val providerToken: String,
-    val invoiceCurrency: String
+    val invoiceCurrency: String,
+    val allowTips: Boolean,
+    val suggestedTipAmountsMinor: List<Int>,
+    val shippingEnabled: Boolean,
+    val shippingRegionAllowlist: Set<String>,
+    val shippingBaseStdMinor: Long,
+    val shippingBaseExpMinor: Long
 )
 
 data class ServerConfig(

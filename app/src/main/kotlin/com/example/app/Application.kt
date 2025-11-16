@@ -7,6 +7,7 @@ import com.example.app.di.adminModule
 import com.example.app.di.appModule
 import com.example.app.di.dbModule
 import com.example.app.di.fxModule
+import com.example.app.di.paymentsModule
 import com.example.app.di.redisBindingsModule
 import com.example.app.services.installFxRefresher
 import com.example.app.routes.installAdminWebhook
@@ -67,7 +68,14 @@ private fun loadConfiguration(log: Logger): AppConfig {
 
 private fun Application.configureDependencyInjection(cfg: AppConfig) {
     install(Koin) {
-        modules(appModule(cfg), dbModule(cfg), redisBindingsModule, adminModule, fxModule(cfg))
+        modules(
+            appModule(cfg),
+            dbModule(cfg),
+            redisBindingsModule,
+            adminModule,
+            fxModule(cfg),
+            paymentsModule
+        )
     }
 }
 

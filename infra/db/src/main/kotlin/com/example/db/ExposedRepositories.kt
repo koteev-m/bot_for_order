@@ -314,6 +314,8 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
                 it[addressJson] = order.addressJson
                 it[provider] = order.provider
                 it[providerChargeId] = order.providerChargeId
+                it[telegramPaymentChargeId] = order.telegramPaymentChargeId
+                it[invoiceMessageId] = order.invoiceMessageId
                 it[status] = order.status.name
                 it[createdAt] = CurrentTimestamp()
                 it[updatedAt] = CurrentTimestamp()
@@ -339,6 +341,8 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
                     addressJson = it[OrdersTable.addressJson],
                     provider = it[OrdersTable.provider],
                     providerChargeId = it[OrdersTable.providerChargeId],
+                    telegramPaymentChargeId = it[OrdersTable.telegramPaymentChargeId],
+                    invoiceMessageId = it[OrdersTable.invoiceMessageId],
                     status = OrderStatus.valueOf(it[OrdersTable.status])
                 )
             }
@@ -348,6 +352,32 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
         tx.tx {
             OrdersTable.update({ OrdersTable.id eq id }) {
                 it[OrdersTable.status] = status.name
+                it[OrdersTable.updatedAt] = CurrentTimestamp()
+            }
+        }
+    }
+
+    override suspend fun setInvoiceMessage(id: String, invoiceMessageId: Int) {
+        tx.tx {
+            OrdersTable.update({ OrdersTable.id eq id }) {
+                it[OrdersTable.invoiceMessageId] = invoiceMessageId
+                it[OrdersTable.updatedAt] = CurrentTimestamp()
+            }
+        }
+    }
+
+    override suspend fun markPaid(
+        id: String,
+        provider: String,
+        providerChargeId: String,
+        telegramPaymentChargeId: String
+    ) {
+        tx.tx {
+            OrdersTable.update({ OrdersTable.id eq id }) {
+                it[OrdersTable.status] = OrderStatus.paid.name
+                it[OrdersTable.provider] = provider
+                it[OrdersTable.providerChargeId] = providerChargeId
+                it[OrdersTable.telegramPaymentChargeId] = telegramPaymentChargeId
                 it[OrdersTable.updatedAt] = CurrentTimestamp()
             }
         }

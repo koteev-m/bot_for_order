@@ -54,6 +54,8 @@ interface OrdersRepository {
     suspend fun create(order: Order)
     suspend fun get(id: String): Order?
     suspend fun setStatus(id: String, status: OrderStatus)
+    suspend fun setInvoiceMessage(id: String, invoiceMessageId: Int)
+    suspend fun markPaid(id: String, provider: String, providerChargeId: String, telegramPaymentChargeId: String)
 }
 
 interface OrderStatusHistoryRepository {
