@@ -19,6 +19,7 @@ interface ItemsRepository {
     suspend fun create(item: Item)
     suspend fun getById(id: String): Item?
     suspend fun setStatus(id: String, status: ItemStatus, allowBargain: Boolean, bargainRules: BargainRules?)
+    suspend fun listActive(): List<Item>
 }
 
 interface ItemMediaRepository {

@@ -5,7 +5,8 @@ data class AppConfig(
     val db: DbConfig,
     val redis: RedisConfig,
     val payments: PaymentsConfig,
-    val server: ServerConfig
+    val server: ServerConfig,
+    val fx: FxConfig
 )
 
 data class TelegramConfig(
@@ -32,4 +33,9 @@ data class PaymentsConfig(
 
 data class ServerConfig(
     val publicBaseUrl: String
+)
+
+data class FxConfig(
+    val displayCurrencies: Set<String>,
+    val refreshIntervalSec: Int
 )

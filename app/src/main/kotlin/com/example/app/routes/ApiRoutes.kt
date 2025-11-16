@@ -23,7 +23,7 @@ fun Application.installApiRoutes() {
     routing {
         route("/api") {
             installInitDataAuth(cfg)
-            registerItemRoutes(itemsRepo, mediaRepo, variantsRepo, pricesRepo)
+            registerItemRoutes(itemsRepo, mediaRepo, variantsRepo, pricesRepo, cfg)
             registerOfferRoutes(variantsRepo)
             registerOrdersRoutes(cfg, itemsRepo, variantsRepo, ordersRepo)
         }

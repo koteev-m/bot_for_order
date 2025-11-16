@@ -57,3 +57,17 @@ val copyMiniAppToApp by tasks.registering(Copy::class) {
     from(layout.buildDirectory.dir("distributions"))
     into(layout.projectDirectory.dir("../app/src/main/resources/static/app"))
 }
+
+tasks.register("kotlinNpmInstall") {
+    group = "build"
+    description = "Installs Node.js toolchain required for Kotlin/JS"
+    dependsOn(tasks.named("kotlinNodeJsSetup"))
+}
+
+tasks.register("kotlinUpgradeYarnLock") {
+    group = "build"
+    description = "Stub compatibility task for yarn.lock upgrades"
+    doLast {
+        logger.lifecycle("kotlinUpgradeYarnLock: no yarn.lock updates required")
+    }
+}

@@ -10,6 +10,7 @@ data class ItemResponse(
     val status: String,
     val allowBargain: Boolean,
     val prices: DisplayPrices?,
+    val invoiceCurrency: String,
     val media: List<ItemMediaResponse>,
     val variants: List<VariantResponse>
 )

@@ -6,7 +6,9 @@ import com.example.app.config.ConfigLoader
 import com.example.app.di.adminModule
 import com.example.app.di.appModule
 import com.example.app.di.dbModule
+import com.example.app.di.fxModule
 import com.example.app.di.redisBindingsModule
+import com.example.app.services.installFxRefresher
 import com.example.app.routes.installAdminWebhook
 import com.example.app.routes.installApiRoutes
 import com.example.app.routes.installShopWebhook
@@ -39,6 +41,7 @@ fun Application.module() {
     val cfg = loadConfiguration(log)
     configureDependencyInjection(cfg)
     runMigrations(log)
+    installFxRefresher(cfg)
     configureServerPlugins()
 
     installAdminWebhook()
@@ -64,7 +67,7 @@ private fun loadConfiguration(log: Logger): AppConfig {
 
 private fun Application.configureDependencyInjection(cfg: AppConfig) {
     install(Koin) {
-        modules(appModule(cfg), dbModule(cfg), redisBindingsModule, adminModule)
+        modules(appModule(cfg), dbModule(cfg), redisBindingsModule, adminModule, fxModule(cfg))
     }
 }
 

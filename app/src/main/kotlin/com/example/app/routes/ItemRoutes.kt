@@ -5,6 +5,7 @@ import com.example.app.api.DisplayPrices
 import com.example.app.api.ItemMediaResponse
 import com.example.app.api.ItemResponse
 import com.example.app.api.VariantResponse
+import com.example.app.config.AppConfig
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemsRepository
 import com.example.db.PricesDisplayRepository
@@ -20,19 +21,22 @@ fun Route.registerItemRoutes(
     itemsRepo: ItemsRepository,
     mediaRepo: ItemMediaRepository,
     variantsRepo: VariantsRepository,
-    pricesRepo: PricesDisplayRepository
+    pricesRepo: PricesDisplayRepository,
+    cfg: AppConfig
 ) {
     get("/items/{id}") {
-        handleGetItem(call, itemsRepo, mediaRepo, variantsRepo, pricesRepo)
+        handleGetItem(call, itemsRepo, mediaRepo, variantsRepo, pricesRepo, cfg)
     }
 }
 
+@Suppress("LongParameterList")
 private suspend fun handleGetItem(
     call: ApplicationCall,
     itemsRepo: ItemsRepository,
     mediaRepo: ItemMediaRepository,
     variantsRepo: VariantsRepository,
-    pricesRepo: PricesDisplayRepository
+    pricesRepo: PricesDisplayRepository,
+    cfg: AppConfig
 ) {
     val id = call.parameters["id"] ?: throw ApiError("id required")
     val item = itemsRepo.getById(id) ?: throw ApiError("item not found", HttpStatusCode.NotFound)
@@ -47,6 +51,7 @@ private suspend fun handleGetItem(
         status = item.status.name,
         allowBargain = item.allowBargain,
         prices = prices?.toDisplayPrices(),
+        invoiceCurrency = cfg.payments.invoiceCurrency,
         media = media.map { it.toResponse() },
         variants = variants.map { it.toResponse() }
     )

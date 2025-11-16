@@ -22,6 +22,8 @@ object ConfigLoader {
 
         val providerToken = requireNonBlank("PROVIDER_TOKEN")
         val invoiceCurrency = requireNonBlank("INVOICE_CURRENCY").uppercase()
+        val displayCurrencies = parseDisplayCurrencies(System.getenv("FX_DISPLAY_CURRENCIES"))
+        val refreshIntervalSec = parseRefreshInterval(System.getenv("FX_REFRESH_INTERVAL_SEC"))
 
         return AppConfig(
             telegram = TelegramConfig(
@@ -44,6 +46,10 @@ object ConfigLoader {
             ),
             server = ServerConfig(
                 publicBaseUrl = publicBaseUrl
+            ),
+            fx = FxConfig(
+                displayCurrencies = displayCurrencies,
+                refreshIntervalSec = refreshIntervalSec
             )
         )
     }
@@ -75,5 +81,26 @@ object ConfigLoader {
     private fun validateRedisUrl(url: String) {
         val uri = runCatching { URI(url) }.getOrElse { error("REDIS_URL invalid: ${it.message}") }
         require(uri.scheme?.startsWith("redis") == true) { "REDIS_URL must start with redis:// or rediss://" }
+    }
+
+    private fun parseDisplayCurrencies(raw: String?): Set<String> {
+        val fallback = setOf("RUB", "USD", "EUR", "USDT_TS")
+        val values = raw?.split(",")
+            ?.mapNotNull { it.trim().takeIf(String::isNotEmpty) }
+            ?.map(String::uppercase)
+            ?.toSet()
+            ?: fallback
+        require(values.isNotEmpty()) { "FX_DISPLAY_CURRENCIES must contain at least one value" }
+        return values
+    }
+
+    private fun parseRefreshInterval(raw: String?): Int {
+        if (raw.isNullOrBlank()) {
+            return 1800
+        }
+        val value = raw.trim().toIntOrNull()
+            ?: error("FX_REFRESH_INTERVAL_SEC must be a number (got '$raw')")
+        require(value > 0) { "FX_REFRESH_INTERVAL_SEC must be greater than 0" }
+        return value
     }
 }
