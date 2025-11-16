@@ -1,6 +1,7 @@
 package com.example.app.routes
 
 import com.example.app.config.AppConfig
+import com.example.app.services.PaymentsService
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemsRepository
 import com.example.db.OrdersRepository
@@ -18,6 +19,7 @@ fun Application.installApiRoutes() {
     val variantsRepo by inject<VariantsRepository>()
     val pricesRepo by inject<PricesDisplayRepository>()
     val ordersRepo by inject<OrdersRepository>()
+    val paymentsService by inject<PaymentsService>()
     val cfg by inject<AppConfig>()
 
     routing {
@@ -25,7 +27,7 @@ fun Application.installApiRoutes() {
             installInitDataAuth(cfg)
             registerItemRoutes(itemsRepo, mediaRepo, variantsRepo, pricesRepo, cfg)
             registerOfferRoutes(variantsRepo)
-            registerOrdersRoutes(cfg, itemsRepo, variantsRepo, ordersRepo)
+            registerOrdersRoutes(cfg, itemsRepo, variantsRepo, ordersRepo, paymentsService)
         }
     }
 }

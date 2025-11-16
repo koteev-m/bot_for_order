@@ -83,6 +83,8 @@ object OrdersTable : Table("orders") {
     val addressJson = text("address_json").nullable()
     val provider = text("provider").nullable()
     val providerChargeId = text("provider_charge_id").nullable()
+    val telegramPaymentChargeId = text("telegram_payment_charge_id").nullable()
+    val invoiceMessageId = integer("invoice_message_id").nullable()
     val status = varchar("status", 16)
     val createdAt = timestamp("created_at")
     val updatedAt = timestamp("updated_at")

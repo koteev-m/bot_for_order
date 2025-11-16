@@ -6,7 +6,9 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class TgUpdate(
     @SerialName("update_id") val updateId: Long,
-    val message: TgMessage? = null
+    val message: TgMessage? = null,
+    @SerialName("shipping_query") val shippingQuery: TgShippingQuery? = null,
+    @SerialName("pre_checkout_query") val preCheckoutQuery: TgPreCheckoutQuery? = null
 )
 
 @Serializable
@@ -18,7 +20,8 @@ data class TgMessage(
     val chat: TgChat,
     @SerialName("media_group_id") val mediaGroupId: String? = null,
     val photo: List<TgPhotoSize>? = null,
-    val video: TgVideo? = null
+    val video: TgVideo? = null,
+    @SerialName("successful_payment") val successfulPayment: TgSuccessfulPayment? = null
 )
 
 @Serializable
@@ -50,4 +53,40 @@ data class TgVideo(
     val width: Int? = null,
     val height: Int? = null,
     val duration: Int? = null
+)
+
+@Serializable
+data class TgShippingQuery(
+    val id: String,
+    val from: TgUser,
+    @SerialName("invoice_payload") val invoicePayload: String,
+    @SerialName("shipping_address") val shippingAddress: TgShippingAddress
+)
+
+@Serializable
+data class TgShippingAddress(
+    @SerialName("country_code") val countryCode: String,
+    @SerialName("state") val state: String? = null,
+    @SerialName("city") val city: String? = null,
+    @SerialName("street_line1") val streetLine1: String? = null,
+    @SerialName("street_line2") val streetLine2: String? = null,
+    @SerialName("post_code") val postCode: String? = null
+)
+
+@Serializable
+data class TgPreCheckoutQuery(
+    val id: String,
+    val from: TgUser,
+    val currency: String,
+    @SerialName("total_amount") val totalAmount: Long,
+    @SerialName("invoice_payload") val invoicePayload: String
+)
+
+@Serializable
+data class TgSuccessfulPayment(
+    val currency: String,
+    @SerialName("total_amount") val totalAmount: Long,
+    @SerialName("invoice_payload") val invoicePayload: String,
+    @SerialName("telegram_payment_charge_id") val telegramPaymentChargeId: String,
+    @SerialName("provider_payment_charge_id") val providerPaymentChargeId: String
 )
