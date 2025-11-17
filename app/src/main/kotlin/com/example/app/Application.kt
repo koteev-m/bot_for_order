@@ -7,6 +7,7 @@ import com.example.app.di.adminModule
 import com.example.app.di.appModule
 import com.example.app.di.dbModule
 import com.example.app.di.fxModule
+import com.example.app.di.offersModule
 import com.example.app.di.paymentsModule
 import com.example.app.di.redisBindingsModule
 import com.example.app.services.installFxRefresher
@@ -74,7 +75,8 @@ private fun Application.configureDependencyInjection(cfg: AppConfig) {
             redisBindingsModule,
             adminModule,
             fxModule(cfg),
-            paymentsModule
+            paymentsModule,
+            offersModule
         )
     }
 }
