@@ -74,14 +74,23 @@ data class OrderCreateResponse(
 )
 
 @Serializable
+data class OrderHistoryEntry(
+    val status: String,
+    val comment: String? = null,
+    val ts: String
+)
+
+@Serializable
 data class OrderCard(
-    val id: String,
+    val orderId: String,
     val itemId: String,
     val variantId: String? = null,
     val qty: Int,
     val currency: String,
     val amountMinor: Long,
-    val status: String
+    val status: String,
+    val updatedAt: String,
+    val history: List<OrderHistoryEntry>
 )
 
 @Serializable

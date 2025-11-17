@@ -343,7 +343,34 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
                     providerChargeId = it[OrdersTable.providerChargeId],
                     telegramPaymentChargeId = it[OrdersTable.telegramPaymentChargeId],
                     invoiceMessageId = it[OrdersTable.invoiceMessageId],
-                    status = OrderStatus.valueOf(it[OrdersTable.status])
+                    status = OrderStatus.valueOf(it[OrdersTable.status]),
+                    updatedAt = it[OrdersTable.updatedAt]
+                )
+            }
+    }
+
+    override suspend fun listByUser(userId: Long): List<Order> = tx.tx {
+        OrdersTable
+            .selectAll()
+            .where { OrdersTable.userId eq userId }
+            .orderBy(OrdersTable.updatedAt to SortOrder.DESC)
+            .map {
+                Order(
+                    id = it[OrdersTable.id],
+                    userId = it[OrdersTable.userId],
+                    itemId = it[OrdersTable.itemId],
+                    variantId = it[OrdersTable.variantId],
+                    qty = it[OrdersTable.qty],
+                    currency = it[OrdersTable.currency],
+                    amountMinor = it[OrdersTable.amountMinor],
+                    deliveryOption = it[OrdersTable.deliveryOption],
+                    addressJson = it[OrdersTable.addressJson],
+                    provider = it[OrdersTable.provider],
+                    providerChargeId = it[OrdersTable.providerChargeId],
+                    telegramPaymentChargeId = it[OrdersTable.telegramPaymentChargeId],
+                    invoiceMessageId = it[OrdersTable.invoiceMessageId],
+                    status = OrderStatus.valueOf(it[OrdersTable.status]),
+                    updatedAt = it[OrdersTable.updatedAt]
                 )
             }
     }
@@ -390,25 +417,30 @@ class OrderStatusHistoryRepositoryExposed(private val tx: DatabaseTx) : OrderSta
             it[orderId] = entry.orderId
             it[status] = entry.status.name
             it[comment] = entry.comment
-            it[ts] = CurrentTimestamp()
+            it[ts] = entry.ts
             it[actorId] = entry.actorId
         }.requireGeneratedId(OrderStatusHistoryTable.id)
     }
 
-    override suspend fun list(orderId: String): List<OrderStatusEntry> = tx.tx {
-        OrderStatusHistoryTable
+    override suspend fun list(orderId: String, limit: Int?): List<OrderStatusEntry> = tx.tx {
+        val sortOrder = if (limit != null) SortOrder.DESC else SortOrder.ASC
+        val query = OrderStatusHistoryTable
             .selectAll()
             .where { OrderStatusHistoryTable.orderId eq orderId }
-            .orderBy(OrderStatusHistoryTable.ts to SortOrder.ASC)
-            .map {
-                OrderStatusEntry(
-                    id = it[OrderStatusHistoryTable.id],
-                    orderId = it[OrderStatusHistoryTable.orderId],
-                    status = OrderStatus.valueOf(it[OrderStatusHistoryTable.status]),
-                    comment = it[OrderStatusHistoryTable.comment],
-                    actorId = it[OrderStatusHistoryTable.actorId]
-                )
-            }
+            .orderBy(OrderStatusHistoryTable.ts to sortOrder)
+        if (limit != null) {
+            query.limit(limit)
+        }
+        query.map {
+            OrderStatusEntry(
+                id = it[OrderStatusHistoryTable.id],
+                orderId = it[OrderStatusHistoryTable.orderId],
+                status = OrderStatus.valueOf(it[OrderStatusHistoryTable.status]),
+                comment = it[OrderStatusHistoryTable.comment],
+                actorId = it[OrderStatusHistoryTable.actorId],
+                ts = it[OrderStatusHistoryTable.ts]
+            )
+        }
     }
 }
 

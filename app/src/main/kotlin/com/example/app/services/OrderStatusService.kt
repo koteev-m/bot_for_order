@@ -1,0 +1,109 @@
+package com.example.app.services
+
+import com.example.bots.TelegramClients
+import com.example.db.OrderStatusHistoryRepository
+import com.example.db.OrdersRepository
+import com.example.domain.Order
+import com.example.domain.OrderStatus
+import com.example.domain.OrderStatusEntry
+import com.pengrad.telegrambot.request.SendMessage
+import java.time.Clock
+import java.time.Instant
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+
+class OrderStatusService(
+    private val ordersRepository: OrdersRepository,
+    private val historyRepository: OrderStatusHistoryRepository,
+    private val clients: TelegramClients,
+    private val clock: Clock = Clock.systemUTC()
+) {
+
+    private val log: Logger = LoggerFactory.getLogger(OrderStatusService::class.java)
+
+    suspend fun changeStatus(
+        orderId: String,
+        newStatus: OrderStatus,
+        actorId: Long,
+        comment: String?
+    ): ChangeResult {
+        val order = ordersRepository.get(orderId)
+            ?: throw IllegalArgumentException("order not found: $orderId")
+        if (order.status == newStatus) {
+            return ChangeResult(order = order, changed = false)
+        }
+
+        val allowedTargets = ALLOWED_TRANSITIONS[order.status].orEmpty()
+        require(allowedTargets.contains(newStatus)) {
+            "transition ${order.status} -> $newStatus is not allowed"
+        }
+
+        ordersRepository.setStatus(orderId, newStatus)
+        val entry = OrderStatusEntry(
+            id = 0,
+            orderId = orderId,
+            status = newStatus,
+            comment = comment,
+            actorId = actorId,
+            ts = Instant.now(clock)
+        )
+        historyRepository.append(entry)
+        val fresh = ordersRepository.get(orderId) ?: order.copy(status = newStatus)
+        log.info("order status updated orderId={} status={} actorId={}", orderId, newStatus, actorId)
+        notifyBuyer(fresh, comment)
+        return ChangeResult(order = fresh, changed = true)
+    }
+
+    private fun notifyBuyer(order: Order, comment: String?) {
+        val template = STATUS_NOTIFICATIONS[order.status] ?: return
+        val message = buildString {
+            append(template)
+            val note = comment?.takeIf { it.isNotBlank() }
+            if (note != null) {
+                append('\n')
+                append("Комментарий: ")
+                append(note)
+            }
+        }
+        runCatching {
+            clients.shopBot.execute(SendMessage(order.userId, message))
+        }.onFailure { error ->
+            log.warn(
+                "order status notify failed orderId={} status={} reason={}",
+                order.id,
+                order.status,
+                error.message
+            )
+        }
+    }
+
+    data class ChangeResult(
+        val order: Order,
+        val changed: Boolean
+    )
+
+    companion object {
+        private val ALLOWED_TRANSITIONS: Map<OrderStatus, Set<OrderStatus>> = mapOf(
+            OrderStatus.pending to setOf(OrderStatus.paid, OrderStatus.canceled),
+            OrderStatus.paid to setOf(OrderStatus.fulfillment, OrderStatus.canceled),
+            OrderStatus.fulfillment to setOf(OrderStatus.shipped, OrderStatus.canceled),
+            OrderStatus.shipped to setOf(OrderStatus.delivered, OrderStatus.canceled),
+            OrderStatus.delivered to emptySet(),
+            OrderStatus.canceled to emptySet()
+        )
+
+        private val STATUS_NOTIFICATIONS: Map<OrderStatus, String> = mapOf(
+            OrderStatus.paid to PAID_MESSAGE,
+            OrderStatus.fulfillment to FULFILLMENT_MESSAGE,
+            OrderStatus.shipped to SHIPPED_MESSAGE,
+            OrderStatus.delivered to DELIVERED_MESSAGE,
+            OrderStatus.canceled to CANCELED_MESSAGE
+        )
+
+        private const val PAID_MESSAGE = "✅ Оплата получена. Заказ передан на комплектацию."
+        private const val FULFILLMENT_MESSAGE = "📦 Заказ в комплектации."
+        private const val SHIPPED_MESSAGE = "🚚 Заказ отправлен."
+        private const val DELIVERED_MESSAGE = "📬 Заказ доставлен. Спасибо за покупку!"
+        private const val CANCELED_MESSAGE = "❌ Заказ отменён."
+    }
+}

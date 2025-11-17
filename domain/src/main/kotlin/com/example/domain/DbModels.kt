@@ -1,5 +1,7 @@
 package com.example.domain
 
+import com.example.domain.serialization.InstantIsoSerializer
+import java.time.Instant
 import kotlinx.serialization.Serializable
 
 @Suppress("EnumNaming")
@@ -83,7 +85,7 @@ data class Offer(
 
 @Suppress("EnumNaming")
 @Serializable
-enum class OrderStatus { pending, paid, fulfillment, shipped, delivered, canceled, refunded }
+enum class OrderStatus { pending, paid, fulfillment, shipped, delivered, canceled }
 
 @Serializable
 data class Order(
@@ -100,7 +102,9 @@ data class Order(
     val providerChargeId: String?,
     val telegramPaymentChargeId: String? = null,
     val invoiceMessageId: Int? = null,
-    val status: OrderStatus
+    val status: OrderStatus,
+    @Serializable(with = InstantIsoSerializer::class)
+    val updatedAt: Instant
 )
 
 @Serializable
@@ -109,7 +113,9 @@ data class OrderStatusEntry(
     val orderId: String,
     val status: OrderStatus,
     val comment: String?,
-    val actorId: Long?
+    val actorId: Long?,
+    @Serializable(with = InstantIsoSerializer::class)
+    val ts: Instant
 )
 
 @Suppress("EnumNaming")

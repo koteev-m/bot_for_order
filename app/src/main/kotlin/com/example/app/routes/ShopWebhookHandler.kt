@@ -33,6 +33,7 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
+import java.time.Instant
 import kotlinx.serialization.json.Json
 import org.koin.ktor.ext.inject
 import org.slf4j.LoggerFactory
@@ -289,7 +290,8 @@ private suspend fun handleSuccessfulPayment(
                     orderId = orderId,
                     status = OrderStatus.paid,
                     comment = "telegram_payment",
-                    actorId = message.from?.id
+                    actorId = message.from?.id,
+                    ts = Instant.now()
                 )
             )
             reply = PAYMENT_CONFIRMED_REPLY.format(orderId)
