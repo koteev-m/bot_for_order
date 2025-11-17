@@ -19,7 +19,8 @@ data class ReservePayload(
     val variantId: String?,
     val qty: Int,
     val userId: Long?,
-    val createdAtEpochSec: Long
+    val createdAtEpochSec: Long,
+    val ttlSec: Long
 )
 
 /**

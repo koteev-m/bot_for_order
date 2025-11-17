@@ -31,10 +31,15 @@ import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
+import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
+import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.statements.InsertStatement
 
@@ -272,32 +277,65 @@ class OffersRepositoryExposed(private val tx: DatabaseTx) : OffersRepository {
             .selectAll()
             .where { OffersTable.id eq id }
             .singleOrNull()
-            ?.let {
-                Offer(
-                    id = it[OffersTable.id],
-                    itemId = it[OffersTable.itemId],
-                    variantId = it[OffersTable.variantId],
-                    userId = it[OffersTable.userId],
-                    offerAmountMinor = it[OffersTable.offerAmountMinor],
-                    status = OfferStatus.valueOf(it[OffersTable.status]),
-                    countersUsed = it[OffersTable.countersUsed],
-                    expiresAtIso = it[OffersTable.expiresAt]?.toString(),
-                    lastCounterAmount = it[OffersTable.lastCounterAmount]
-                )
-            }
+            ?.toOffer()
     }
 
-    override suspend fun setStatus(id: String, status: OfferStatus, countersUsed: Int, lastCounterAmount: Long?) {
+    override suspend fun findActiveByUserAndItem(
+        userId: Long,
+        itemId: String,
+        variantId: String?
+    ): Offer? = tx.tx {
+        val now = Instant.now()
+        val variantExpr = variantId?.let { OffersTable.variantId eq it } ?: OffersTable.variantId.isNull()
+        OffersTable
+            .selectAll()
+            .where { OffersTable.userId eq userId }
+            .andWhere { OffersTable.itemId eq itemId }
+            .andWhere { variantExpr }
+            .andWhere { OffersTable.status inList ACTIVE_STATUS_NAMES }
+            .andWhere { OffersTable.expiresAt.isNull() or (OffersTable.expiresAt greater now) }
+            .orderBy(OffersTable.createdAt to SortOrder.DESC)
+            .limit(1)
+            .singleOrNull()
+            ?.toOffer()
+    }
+
+    override suspend fun updateStatusAndCounters(
+        id: String,
+        status: OfferStatus,
+        countersUsed: Int,
+        lastCounterAmount: Long?,
+        expiresAt: Instant?
+    ) {
         tx.tx {
             OffersTable.update({ OffersTable.id eq id }) {
                 it[OffersTable.status] = status.name
                 it[OffersTable.countersUsed] = countersUsed
                 it[OffersTable.lastCounterAmount] = lastCounterAmount
+                it[OffersTable.expiresAt] = expiresAt
                 it[OffersTable.updatedAt] = CurrentTimestamp()
             }
         }
     }
 }
+
+private val ACTIVE_STATUS_NAMES = listOf(
+    OfferStatus.new.name,
+    OfferStatus.auto_accept.name,
+    OfferStatus.countered.name
+)
+
+private fun ResultRow.toOffer(): Offer = Offer(
+    id = this[OffersTable.id],
+    itemId = this[OffersTable.itemId],
+    variantId = this[OffersTable.variantId],
+    userId = this[OffersTable.userId],
+    offerAmountMinor = this[OffersTable.offerAmountMinor],
+    status = OfferStatus.valueOf(this[OffersTable.status]),
+    countersUsed = this[OffersTable.countersUsed],
+    expiresAtIso = this[OffersTable.expiresAt]?.toString(),
+    lastCounterAmount = this[OffersTable.lastCounterAmount]
+)
 
 class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
     override suspend fun create(order: Order) {

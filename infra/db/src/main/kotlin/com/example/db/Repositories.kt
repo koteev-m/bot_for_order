@@ -14,6 +14,7 @@ import com.example.domain.PricesDisplay
 import com.example.domain.Variant
 import com.example.domain.WatchEntry
 import com.example.domain.WatchTrigger
+import java.time.Instant
 
 interface ItemsRepository {
     suspend fun create(item: Item)
@@ -47,7 +48,14 @@ interface PostsRepository {
 interface OffersRepository {
     suspend fun create(offer: Offer)
     suspend fun get(id: String): Offer?
-    suspend fun setStatus(id: String, status: OfferStatus, countersUsed: Int, lastCounterAmount: Long?)
+    suspend fun findActiveByUserAndItem(userId: Long, itemId: String, variantId: String?): Offer?
+    suspend fun updateStatusAndCounters(
+        id: String,
+        status: OfferStatus,
+        countersUsed: Int,
+        lastCounterAmount: Long?,
+        expiresAt: Instant?
+    )
 }
 
 interface OrdersRepository {
