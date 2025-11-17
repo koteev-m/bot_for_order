@@ -53,6 +53,7 @@ interface OffersRepository {
 interface OrdersRepository {
     suspend fun create(order: Order)
     suspend fun get(id: String): Order?
+    suspend fun listByUser(userId: Long): List<Order>
     suspend fun setStatus(id: String, status: OrderStatus)
     suspend fun setInvoiceMessage(id: String, invoiceMessageId: Int)
     suspend fun markPaid(id: String, provider: String, providerChargeId: String, telegramPaymentChargeId: String)
@@ -60,7 +61,7 @@ interface OrdersRepository {
 
 interface OrderStatusHistoryRepository {
     suspend fun append(entry: OrderStatusEntry): Long
-    suspend fun list(orderId: String): List<OrderStatusEntry>
+    suspend fun list(orderId: String, limit: Int? = null): List<OrderStatusEntry>
 }
 
 interface WatchlistRepository {

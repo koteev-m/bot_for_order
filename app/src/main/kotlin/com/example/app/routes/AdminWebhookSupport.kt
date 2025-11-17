@@ -1,7 +1,9 @@
 package com.example.app.routes
 
 import com.example.app.services.ItemsService
+import com.example.app.services.OrderStatusService
 import com.example.bots.TelegramClients
+import com.example.domain.OrderStatus
 import com.pengrad.telegrambot.model.LinkPreviewOptions
 import com.pengrad.telegrambot.model.request.ParseMode
 import com.pengrad.telegrambot.request.SendMessage
@@ -14,6 +16,10 @@ internal fun splitCommand(text: String): Pair<String, String> {
         text.substring(0, spaceIndex) to text.substring(spaceIndex + 1).trim()
     }
 }
+
+internal const val STATUS_COMMAND = "/status"
+internal const val STATUS_USAGE =
+    "/status <ORDER_ID> <paid|fulfillment|shipped|delivered|canceled> [comment]"
 
 internal fun parseNewArgs(args: String): Pair<String, String> {
     if (args.isBlank()) return "Untitled" to "No description"
@@ -96,3 +102,48 @@ internal fun TelegramClients.replyHtml(chatId: Long, text: String) {
 
 internal fun SendMessage.disablePreview(): SendMessage =
     linkPreviewOptions(LinkPreviewOptions().isDisabled(true))
+
+@Suppress("TooGenericExceptionCaught")
+internal suspend fun handleStatusCommand(
+    args: String,
+    actorId: Long,
+    service: OrderStatusService,
+    reply: (String) -> Unit
+) {
+    val parsed = try {
+        parseStatusArgs(args)
+    } catch (error: IllegalArgumentException) {
+        val message = error.message ?: STATUS_USAGE
+        reply("⚠️ $message")
+        return
+    }
+
+    val commentDisplay = parsed.comment ?: "none"
+    try {
+        val result = service.changeStatus(parsed.orderId, parsed.status, actorId, parsed.comment)
+        reply("ОК: order=${result.order.id}, status=${result.order.status.name}, note=$commentDisplay")
+    } catch (error: Exception) {
+        val reason = error.message ?: "Не удалось изменить статус"
+        reply("⚠️ $reason")
+    }
+}
+
+private fun parseStatusArgs(args: String): StatusCommandArgs {
+    val trimmed = args.trim()
+    val parts = trimmed.split(" ", limit = 3)
+    val orderId = parts.getOrNull(0)?.takeIf { it.isNotBlank() }
+    val statusRaw = parts.getOrNull(1)?.takeIf { it.isNotBlank() }
+    if (orderId == null || statusRaw == null) {
+        throw IllegalArgumentException(STATUS_USAGE)
+    }
+    val status = OrderStatus.entries.firstOrNull { it.name.equals(statusRaw, ignoreCase = true) }
+        ?: throw IllegalArgumentException("Unknown status: $statusRaw")
+    val comment = parts.getOrNull(2)?.takeIf { it.isNotBlank() }
+    return StatusCommandArgs(orderId = orderId, status = status, comment = comment)
+}
+
+private data class StatusCommandArgs(
+    val orderId: String,
+    val status: OrderStatus,
+    val comment: String?
+)

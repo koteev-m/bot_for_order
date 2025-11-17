@@ -2,6 +2,7 @@ package com.example.app.di
 
 import com.example.app.services.ItemsService
 import com.example.app.services.MediaStateStore
+import com.example.app.services.OrderStatusService
 import com.example.app.services.PostService
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemsRepository
@@ -12,4 +13,5 @@ val adminModule = module {
     single { ItemsService(get<ItemsRepository>()) }
     single { MediaStateStore() }
     single { PostService(get(), get(), get<ItemsRepository>(), get<ItemMediaRepository>(), get<PostsRepository>()) }
+    single { OrderStatusService(get(), get(), get()) }
 }
