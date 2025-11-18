@@ -1,6 +1,7 @@
 package com.example.app.routes
 
 import com.example.app.services.ItemsService
+import com.example.app.services.OffersService
 import com.example.app.services.OrderStatusService
 import com.example.bots.TelegramClients
 import com.example.domain.OrderStatus
@@ -20,6 +21,8 @@ internal fun splitCommand(text: String): Pair<String, String> {
 internal const val STATUS_COMMAND = "/status"
 internal const val STATUS_USAGE =
     "/status <ORDER_ID> <paid|fulfillment|shipped|delivered|canceled> [comment]"
+internal const val COUNTER_COMMAND = "/counter"
+internal const val COUNTER_USAGE = "/counter <OFFER_ID> <amountMinor>"
 
 internal fun parseNewArgs(args: String): Pair<String, String> {
     if (args.isBlank()) return "Untitled" to "No description"
@@ -45,6 +48,7 @@ internal val HELP_REPLY = """
     2) /preview &lt;ITEM_ID&gt; → проверить альбом
     3) <b>/post &lt;ITEM_ID&gt;</b> → отправить альбом в канал и добавить кнопку «Купить»
     В канале используется URL-кнопка (Direct Link Mini App ?startapp=).
+    <b>/counter &lt;OFFER_ID&gt; &lt;amount&gt;</b> — отправить контр-офер покупателю
 """.trimIndent()
 
 internal fun buildDraftCreatedReply(id: String): String = buildString {
@@ -122,9 +126,37 @@ internal suspend fun handleStatusCommand(
     try {
         val result = service.changeStatus(parsed.orderId, parsed.status, actorId, parsed.comment)
         reply("ОК: order=${result.order.id}, status=${result.order.status.name}, note=$commentDisplay")
-    } catch (error: Exception) {
-        val reason = error.message ?: "Не удалось изменить статус"
-        reply("⚠️ $reason")
+    } catch (error: IllegalArgumentException) {
+        reply("⚠️ ${error.message ?: "Не удалось изменить статус"}")
+    } catch (error: IllegalStateException) {
+        reply("⚠️ ${error.message ?: "Не удалось изменить статус"}")
+    }
+}
+
+internal suspend fun handleCounterCommand(
+    args: String,
+    adminId: Long,
+    offersService: OffersService,
+    reply: (String) -> Unit
+) {
+    val trimmed = args.trim()
+    val parts = trimmed.split(" ", limit = 2)
+    val offerId = parts.getOrNull(0)?.takeIf { it.isNotBlank() }
+    val amountRaw = parts.getOrNull(1)?.takeIf { it.isNotBlank() }
+    val amountMinor = amountRaw?.toLongOrNull()
+    if (offerId == null || amountMinor == null || amountMinor <= 0) {
+        reply("⚠️ $COUNTER_USAGE")
+        return
+    }
+    try {
+        val result = offersService.adminCounter(offerId, amountMinor, adminId)
+        reply(
+            "OK: counter sent (offer=${result.offerId}, amount=${result.lastCounterAmount}, ttl=${result.ttlSec}s)"
+        )
+    } catch (error: IllegalArgumentException) {
+        reply("⚠️ ${error.message ?: "Не удалось отправить контр-офер"}")
+    } catch (error: IllegalStateException) {
+        reply("⚠️ ${error.message ?: "Не удалось отправить контр-офер"}")
     }
 }
 

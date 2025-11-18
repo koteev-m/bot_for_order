@@ -19,6 +19,7 @@ object ConfigLoader {
 
         val publicBaseUrl = requireNonBlank("PUBLIC_BASE_URL")
         validateHttps(publicBaseUrl)
+        val offersExpireSweepSec = parsePositiveIntEnv("OFFERS_EXPIRE_SWEEP_SEC", defaultValue = 30)
 
         val providerToken = requireNonBlank("PROVIDER_TOKEN")
         val invoiceCurrency = requireNonBlank("INVOICE_CURRENCY").uppercase()
@@ -57,7 +58,8 @@ object ConfigLoader {
                 shippingBaseExpMinor = shippingExpMinor
             ),
             server = ServerConfig(
-                publicBaseUrl = publicBaseUrl
+                publicBaseUrl = publicBaseUrl,
+                offersExpireSweepSec = offersExpireSweepSec
             ),
             fx = FxConfig(
                 displayCurrencies = displayCurrencies,
@@ -154,5 +156,13 @@ private fun parseMinorAmount(raw: String?): Long {
     val value = raw.trim().toLongOrNull()
         ?: error("Shipping price must be numeric (got '$raw')")
     require(value >= 0) { "Shipping price must be >= 0" }
+    return value
+}
+
+private fun parsePositiveIntEnv(name: String, defaultValue: Int): Int {
+    val raw = System.getenv(name)?.takeIf { it.isNotBlank() } ?: return defaultValue
+    val value = raw.trim().toIntOrNull()
+        ?: error("Env $name must be a number (got '$raw')")
+    require(value > 0) { "Env $name must be > 0" }
     return value
 }

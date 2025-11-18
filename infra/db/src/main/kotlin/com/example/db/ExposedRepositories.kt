@@ -30,17 +30,23 @@ import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.Column
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.SqlExpressionBuilder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.plus
 import org.jetbrains.exposed.sql.andWhere
+import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
+import org.jetbrains.exposed.sql.intLiteral
 import org.jetbrains.exposed.sql.statements.InsertStatement
 
 private val json = Json
@@ -264,7 +270,7 @@ class OffersRepositoryExposed(private val tx: DatabaseTx) : OffersRepository {
                 it[offerAmountMinor] = offer.offerAmountMinor
                 it[status] = offer.status.name
                 it[countersUsed] = offer.countersUsed
-                it[expiresAt] = offer.expiresAtIso?.let(Instant::parse)
+                it[expiresAt] = offer.expiresAt
                 it[lastCounterAmount] = offer.lastCounterAmount
                 it[createdAt] = CurrentTimestamp()
                 it[updatedAt] = CurrentTimestamp()
@@ -317,6 +323,31 @@ class OffersRepositoryExposed(private val tx: DatabaseTx) : OffersRepository {
             }
         }
     }
+
+    override suspend fun updateCounter(id: String, amountMinor: Long, expiresAt: Instant) {
+        tx.tx {
+            OffersTable.update({ OffersTable.id eq id }) {
+                it[OffersTable.status] = OfferStatus.countered.name
+                it[OffersTable.lastCounterAmount] = amountMinor
+                it[OffersTable.expiresAt] = expiresAt
+                with(SqlExpressionBuilder) {
+                    it.update(OffersTable.countersUsed, OffersTable.countersUsed + intLiteral(1))
+                }
+                it[OffersTable.updatedAt] = CurrentTimestamp()
+            }
+        }
+    }
+
+    override suspend fun expireWhereDue(now: Instant): Int = tx.tx {
+        OffersTable.update({
+            OffersTable.expiresAt.isNotNull()
+                .and(OffersTable.expiresAt lessEq now)
+                .and(OffersTable.status inList ACTIVE_STATUS_NAMES)
+        }) {
+            it[OffersTable.status] = OfferStatus.expired.name
+            it[OffersTable.updatedAt] = CurrentTimestamp()
+        }
+    }
 }
 
 private val ACTIVE_STATUS_NAMES = listOf(
@@ -333,7 +364,7 @@ private fun ResultRow.toOffer(): Offer = Offer(
     offerAmountMinor = this[OffersTable.offerAmountMinor],
     status = OfferStatus.valueOf(this[OffersTable.status]),
     countersUsed = this[OffersTable.countersUsed],
-    expiresAtIso = this[OffersTable.expiresAt]?.toString(),
+    expiresAt = this[OffersTable.expiresAt],
     lastCounterAmount = this[OffersTable.lastCounterAmount]
 )
 

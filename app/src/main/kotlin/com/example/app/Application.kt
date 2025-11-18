@@ -10,11 +10,12 @@ import com.example.app.di.fxModule
 import com.example.app.di.offersModule
 import com.example.app.di.paymentsModule
 import com.example.app.di.redisBindingsModule
-import com.example.app.services.installFxRefresher
 import com.example.app.routes.installAdminWebhook
 import com.example.app.routes.installApiRoutes
 import com.example.app.routes.installShopWebhook
 import com.example.app.routes.installStaticAppRoutes
+import com.example.app.services.installFxRefresher
+import com.example.app.services.installOffersExpiryJob
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -44,6 +45,7 @@ fun Application.module() {
     configureDependencyInjection(cfg)
     runMigrations(log)
     installFxRefresher(cfg)
+    installOffersExpiryJob(cfg)
     configureServerPlugins()
 
     installAdminWebhook()

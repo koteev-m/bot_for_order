@@ -38,7 +38,8 @@ data class PaymentsConfig(
 )
 
 data class ServerConfig(
-    val publicBaseUrl: String
+    val publicBaseUrl: String,
+    val offersExpireSweepSec: Int
 )
 
 data class FxConfig(

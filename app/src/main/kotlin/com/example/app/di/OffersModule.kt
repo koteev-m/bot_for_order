@@ -1,6 +1,7 @@
 package com.example.app.di
 
 import com.example.app.services.OfferRepositories
+import com.example.app.services.OfferServicesDeps
 import com.example.app.services.OffersService
 import org.koin.dsl.module
 
@@ -11,11 +12,17 @@ val offersModule = module {
                 items = get(),
                 variants = get(),
                 prices = get(),
-                offers = get()
+                offers = get(),
+                orders = get()
             ),
-            holdService = get(),
-            lockManager = get(),
-            redisson = get()
+            deps = OfferServicesDeps(
+                holdService = get(),
+                lockManager = get(),
+                redisson = get(),
+                paymentsService = get(),
+                clients = get(),
+                config = get()
+            )
         )
     }
 }
