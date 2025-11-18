@@ -16,6 +16,7 @@ import com.example.app.routes.installShopWebhook
 import com.example.app.routes.installStaticAppRoutes
 import com.example.app.services.installFxRefresher
 import com.example.app.services.installOffersExpiryJob
+import com.example.app.services.installReservesSweepJob
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -46,6 +47,7 @@ fun Application.module() {
     runMigrations(log)
     installFxRefresher(cfg)
     installOffersExpiryJob(cfg)
+    installReservesSweepJob(cfg)
     configureServerPlugins()
 
     installAdminWebhook()

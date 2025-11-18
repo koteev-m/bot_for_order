@@ -13,5 +13,5 @@ val adminModule = module {
     single { ItemsService(get<ItemsRepository>()) }
     single { MediaStateStore() }
     single { PostService(get(), get(), get<ItemsRepository>(), get<ItemMediaRepository>(), get<PostsRepository>()) }
-    single { OrderStatusService(get(), get(), get()) }
+    single { OrderStatusService(get(), get(), get(), get()) }
 }

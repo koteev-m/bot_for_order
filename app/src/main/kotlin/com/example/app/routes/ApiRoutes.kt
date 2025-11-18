@@ -10,6 +10,8 @@ import com.example.db.OrdersRepository
 import com.example.db.PricesDisplayRepository
 import com.example.db.VariantsRepository
 import com.example.app.security.installInitDataAuth
+import com.example.domain.hold.HoldService
+import com.example.domain.hold.LockManager
 import io.ktor.server.application.Application
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
@@ -24,6 +26,8 @@ fun Application.installApiRoutes() {
     val historyRepo by inject<OrderStatusHistoryRepository>()
     val paymentsService by inject<PaymentsService>()
     val offersService by inject<OffersService>()
+    val holdService by inject<HoldService>()
+    val lockManager by inject<LockManager>()
     val cfg by inject<AppConfig>()
 
     val orderDeps = OrderRoutesDeps(
@@ -31,7 +35,9 @@ fun Application.installApiRoutes() {
         variantsRepository = variantsRepo,
         ordersRepository = ordersRepo,
         historyRepository = historyRepo,
-        paymentsService = paymentsService
+        paymentsService = paymentsService,
+        holdService = holdService,
+        lockManager = lockManager
     )
 
     routing {

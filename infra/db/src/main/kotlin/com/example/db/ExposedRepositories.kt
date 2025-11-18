@@ -33,6 +33,7 @@ import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.greater
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
@@ -181,6 +182,37 @@ class VariantsRepositoryExposed(private val tx: DatabaseTx) : VariantsRepository
             VariantsTable.update({ VariantsTable.id eq variantId }) {
                 it[VariantsTable.stock] = stock
             }
+        }
+    }
+
+    override suspend fun getById(id: String): Variant? = tx.tx {
+        VariantsTable
+            .selectAll()
+            .where { VariantsTable.id eq id }
+            .singleOrNull()
+            ?.let {
+                Variant(
+                    id = it[VariantsTable.id],
+                    itemId = it[VariantsTable.itemId],
+                    size = it[VariantsTable.size],
+                    sku = it[VariantsTable.sku],
+                    stock = it[VariantsTable.stock],
+                    active = it[VariantsTable.active]
+                )
+            }
+    }
+
+    override suspend fun decrementStock(variantId: String, qty: Int): Boolean {
+        require(qty > 0) { "qty must be > 0" }
+        return tx.tx {
+            val updated = VariantsTable.update({
+                (VariantsTable.id eq variantId) and (VariantsTable.stock greaterEq qty)
+            }) {
+                with(SqlExpressionBuilder) {
+                    it.update(VariantsTable.stock, VariantsTable.stock - intLiteral(qty))
+                }
+            }
+            updated > 0
         }
     }
 }
@@ -477,6 +509,31 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
                 it[OrdersTable.updatedAt] = CurrentTimestamp()
             }
         }
+    }
+
+    override suspend fun listPendingOlderThan(cutoff: Instant): List<Order> = tx.tx {
+        OrdersTable
+            .selectAll()
+            .where { (OrdersTable.status eq OrderStatus.pending.name) and (OrdersTable.updatedAt lessEq cutoff) }
+            .map {
+                Order(
+                    id = it[OrdersTable.id],
+                    userId = it[OrdersTable.userId],
+                    itemId = it[OrdersTable.itemId],
+                    variantId = it[OrdersTable.variantId],
+                    qty = it[OrdersTable.qty],
+                    currency = it[OrdersTable.currency],
+                    amountMinor = it[OrdersTable.amountMinor],
+                    deliveryOption = it[OrdersTable.deliveryOption],
+                    addressJson = it[OrdersTable.addressJson],
+                    provider = it[OrdersTable.provider],
+                    providerChargeId = it[OrdersTable.providerChargeId],
+                    telegramPaymentChargeId = it[OrdersTable.telegramPaymentChargeId],
+                    invoiceMessageId = it[OrdersTable.invoiceMessageId],
+                    status = OrderStatus.valueOf(it[OrdersTable.status]),
+                    updatedAt = it[OrdersTable.updatedAt]
+                )
+            }
     }
 }
 

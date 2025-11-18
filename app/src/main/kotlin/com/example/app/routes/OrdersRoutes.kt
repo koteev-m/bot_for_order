@@ -17,6 +17,11 @@ import com.example.domain.Item
 import com.example.domain.ItemStatus
 import com.example.domain.Order
 import com.example.domain.OrderStatus
+import com.example.domain.hold.HoldService
+import com.example.domain.hold.LockManager
+import com.example.domain.hold.ReserveSource
+import com.example.domain.hold.ReserveWriteResult
+import com.example.domain.hold.StockReservePayload
 import java.time.Instant
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
@@ -25,15 +30,20 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import org.slf4j.LoggerFactory
 
 private const val ORDER_HISTORY_LIMIT = 3
+private const val ORDER_STOCK_LOCK_WAIT_MS = 500L
+private val ordersLog = LoggerFactory.getLogger("OrdersRoutes")
 
 data class OrderRoutesDeps(
     val itemsRepository: ItemsRepository,
     val variantsRepository: VariantsRepository,
     val ordersRepository: OrdersRepository,
     val historyRepository: OrderStatusHistoryRepository,
-    val paymentsService: PaymentsService
+    val paymentsService: PaymentsService,
+    val holdService: HoldService,
+    val lockManager: LockManager
 )
 
 private data class OrderCreationDeps(
@@ -88,6 +98,26 @@ private suspend fun handleCreateOrder(
         updatedAt = Instant.now()
     )
     deps.routesDeps.ordersRepository.create(order)
+    val reserveTtl = deps.config.server.orderReserveTtlSec.toLong()
+    val reserveResult = try {
+        ensureDirectOrderReserve(order, reserveTtl, deps)
+    } catch (error: StockGuardException) {
+        ordersLog.warn(
+            "order_reserve_failed orderId={} item={} variant={}",
+            orderId,
+            order.itemId,
+            order.variantId,
+            error
+        )
+        deps.routesDeps.ordersRepository.setStatus(orderId, OrderStatus.canceled)
+        call.respond(HttpStatusCode.BadRequest, ApiError("variant not available", HttpStatusCode.BadRequest))
+        return
+    }
+    if (reserveResult == ReserveWriteResult.REFRESHED) {
+        ordersLog.info("order_reserve_refreshed orderId={} item={} variant={}", orderId, order.itemId, order.variantId)
+        call.respond(HttpStatusCode.Accepted, OrderCreateResponse(orderId = orderId, status = order.status.name))
+        return
+    }
 
     deps.routesDeps.paymentsService.createAndSendInvoice(order, item.title, photoUrl = null)
 
@@ -144,3 +174,72 @@ private suspend fun handleOrdersMe(
     }
     call.respond(OrdersPage(items = cards))
 }
+
+private suspend fun ensureDirectOrderReserve(
+    order: Order,
+    ttlSec: Long,
+    deps: OrderCreationDeps
+): ReserveWriteResult? {
+    if (ttlSec <= 0) return null
+    val payload = StockReservePayload(
+        itemId = order.itemId,
+        variantId = order.variantId,
+        qty = order.qty,
+        userId = order.userId,
+        ttlSec = ttlSec,
+        from = ReserveSource.ORDER
+    )
+    return withStockLock(
+        deps.routesDeps.lockManager,
+        order.itemId,
+        order.variantId,
+        deps.config.server.reserveStockLockSec
+    ) {
+        validateVariantStock(order.itemId, order.variantId, order.qty, deps.routesDeps.variantsRepository)
+        val result = deps.routesDeps.holdService.createOrderReserve(order.id, payload, ttlSec)
+        ordersLog.info(
+            "order_reserve_set orderId={} item={} variant={} qty={} ttl={}s refreshed={}",
+            order.id,
+            order.itemId,
+            order.variantId,
+            order.qty,
+            ttlSec,
+            result == ReserveWriteResult.REFRESHED
+        )
+        result
+    }
+}
+
+private suspend fun <T> withStockLock(
+    lockManager: LockManager,
+    itemId: String,
+    variantId: String?,
+    leaseSec: Int,
+    block: suspend () -> T
+): T {
+    val leaseMs = leaseSec.coerceAtLeast(1) * 1_000L
+    val key = buildStockLockKey(itemId, variantId)
+    return lockManager.withLock(key, ORDER_STOCK_LOCK_WAIT_MS, leaseMs, block)
+}
+
+private suspend fun validateVariantStock(
+    itemId: String,
+    variantId: String?,
+    qty: Int,
+    variantsRepository: VariantsRepository
+) {
+    if (variantId == null) return
+    val variant = variantsRepository.getById(variantId)
+        ?: throw StockGuardException("variant missing")
+    check(variant.itemId == itemId) { "variant mismatch" }
+    if (!variant.active || variant.stock < qty) {
+        throw StockGuardException("variant not available")
+    }
+}
+
+private fun buildStockLockKey(itemId: String, variantId: String?): String {
+    val variantKey = variantId ?: "_"
+    return "stock:$itemId:$variantKey"
+}
+
+private class StockGuardException(message: String) : IllegalStateException(message)

@@ -1,6 +1,8 @@
 package com.example.app.services
 
 import com.example.app.config.AppConfig
+import com.example.app.routes.escapeHtml
+import com.example.app.routes.formatMoney
 import com.example.bots.TelegramClients
 import com.example.db.ItemsRepository
 import com.example.db.OffersRepository
@@ -18,9 +20,9 @@ import com.example.domain.Variant
 import com.example.domain.evaluateOffer
 import com.example.domain.hold.HoldService
 import com.example.domain.hold.LockManager
-import com.example.domain.hold.ReserveKind
-import com.example.domain.hold.ReserveKey
-import com.example.domain.hold.ReservePayload
+import com.example.domain.hold.ReserveSource
+import com.example.domain.hold.ReserveWriteResult
+import com.example.domain.hold.StockReservePayload
 import com.pengrad.telegrambot.model.LinkPreviewOptions
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
@@ -36,13 +38,13 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlin.math.abs
 import org.redisson.api.RedissonClient
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
 private const val OFFER_LOCK_WAIT_MS = 200L
 private const val OFFER_LOCK_LEASE_MS = 3_000L
+private const val STOCK_LOCK_WAIT_MS = 500L
 private const val OFFER_QTY_MIN = 1
 private const val COOLDOWN_KEY_PREFIX = "cooldown:offer"
 private const val ACCEPT_BUTTON_TEXT = "Принять"
@@ -102,6 +104,11 @@ data class OfferAcceptResult(
     val status: OrderStatus
 )
 
+private data class OrderPrice(
+    val currency: String,
+    val amountMinor: Long
+)
+
 class OffersService(
     private val repositories: OfferRepositories,
     private val deps: OfferServicesDeps
@@ -116,6 +123,7 @@ class OffersService(
     private val clock = deps.clock
 
     private val log = LoggerFactory.getLogger(OffersService::class.java)
+    private val reserveManager = ReserveManager(holdService, lockManager, repositories, config, log)
 
     suspend fun createAndEvaluate(
         userId: Long,
@@ -209,24 +217,25 @@ class OffersService(
         require(amountMinor > 0) { "amount must be > 0" }
 
         val currency = config.payments.invoiceCurrency.uppercase()
-        val order = Order(
-            id = generateOrderId(userId),
-            userId = userId,
-            itemId = offer.itemId,
-            variantId = offer.variantId,
-            qty = qty,
-            currency = currency,
-            amountMinor = amountMinor,
-            deliveryOption = null,
-            addressJson = null,
-            provider = null,
-            providerChargeId = null,
-            telegramPaymentChargeId = null,
-            invoiceMessageId = null,
-            status = OrderStatus.pending,
-            updatedAt = now
-        )
+        val orderId = generateOrderId(userId)
+        val orderPrice = OrderPrice(currency = currency, amountMinor = amountMinor)
+        val order = offer.toPendingOrder(orderId, userId, qty, orderPrice, now)
         repositories.orders.create(order)
+        val orderReserveTtl = config.server.orderReserveTtlSec.toLong()
+        try {
+            reserveManager.ensureOrderReserve(order, offer.id, orderReserveTtl)
+        } catch (error: InsufficientStockException) {
+            log.warn(
+                "order_reserve_failed orderId={} offerId={} item={} variant={} qty={}",
+                order.id,
+                offer.id,
+                order.itemId,
+                order.variantId,
+                order.qty,
+                error
+            )
+            throw IllegalStateException("variant not available", error)
+        }
         paymentsService.createAndSendInvoice(order, item.title, photoUrl = null)
         repositories.offers.updateStatusAndCounters(
             offerId,
@@ -289,6 +298,27 @@ class OffersService(
         expiresAt: Instant,
         context: OfferContext
     ): OfferResult {
+        val reserveTtl = config.server.offerReserveTtlSec.toLong()
+        try {
+            reserveManager.createOfferReserve(offer, context, reserveTtl)
+        } catch (error: InsufficientStockException) {
+            repositories.offers.updateStatusAndCounters(
+                offer.id,
+                OfferStatus.declined,
+                countersUsed = 0,
+                lastCounterAmount = null,
+                expiresAt = expiresAt
+            )
+            log.warn(
+                "offer_auto_accept_denied_stock id={} item={} variant={} qty={}",
+                offer.id,
+                context.itemId,
+                context.variantId,
+                context.qty,
+                error
+            )
+            return OfferResult(OfferDecisionType.REJECT)
+        }
         repositories.offers.updateStatusAndCounters(
             offer.id,
             OfferStatus.auto_accept,
@@ -296,7 +326,6 @@ class OffersService(
             lastCounterAmount = decision.amountMinor,
             expiresAt = expiresAt
         )
-        createHold(holdService, clock, log, offer.id, context)
         log.info(
             "offer_decision id={} type=auto_accept item={} variant={} qty={}",
             offer.id,
@@ -423,34 +452,158 @@ private suspend fun loadVariant(
     return variant
 }
 
-private suspend fun createHold(
-    holdService: HoldService,
-    clock: Clock,
-    log: Logger,
-    offerId: String,
-    context: OfferContext
+private fun buildStockLockKey(itemId: String, variantId: String?): String {
+    val variantKey = variantId ?: "_"
+    return "stock:$itemId:$variantKey"
+}
+
+private fun Offer.toPendingOrder(
+    orderId: String,
+    userId: Long,
+    qty: Int,
+    price: OrderPrice,
+    now: Instant
+): Order = Order(
+    id = orderId,
+    userId = userId,
+    itemId = itemId,
+    variantId = variantId,
+    qty = qty,
+    currency = price.currency,
+    amountMinor = price.amountMinor,
+    deliveryOption = null,
+    addressJson = null,
+    provider = null,
+    providerChargeId = null,
+    telegramPaymentChargeId = null,
+    invoiceMessageId = null,
+    status = OrderStatus.pending,
+    updatedAt = now
+)
+
+private class ReserveManager(
+    private val holdService: HoldService,
+    private val lockManager: LockManager,
+    private val repositories: OfferRepositories,
+    private val config: AppConfig,
+    private val log: Logger
 ) {
-    if (context.ttlSec <= 0) return
-    val key = ReserveKey(ReserveKind.OFFER, offerId)
-    val payload = ReservePayload(
-        itemId = context.itemId,
-        variantId = context.variantId,
-        qty = context.qty,
-        userId = context.userId,
-        createdAtEpochSec = clock.instant().epochSecond,
-        ttlSec = context.ttlSec
-    )
-    val created = holdService.putIfAbsent(key, payload, context.ttlSec)
-    if (!created) {
-        log.warn(
-            "offer_hold_exists id={} item={} variant={} qty={}",
-            offerId,
-            context.itemId,
-            context.variantId,
-            context.qty
+
+    suspend fun createOfferReserve(offer: Offer, context: OfferContext, ttlSec: Long) {
+        if (ttlSec <= 0) return
+        val payload = StockReservePayload(
+            itemId = context.itemId,
+            variantId = context.variantId,
+            qty = context.qty,
+            userId = offer.userId,
+            ttlSec = ttlSec,
+            from = ReserveSource.OFFER,
+            offerId = offer.id
         )
+        withStockLock(context.itemId, context.variantId) {
+            ensureStockAvailable(context.itemId, context.variantId, context.qty)
+            val result = holdService.createOfferReserve(offer.id, payload, ttlSec)
+            log.info(
+                "offer_reserve_set offerId={} item={} variant={} qty={} ttl={}s refreshed={}",
+                offer.id,
+                context.itemId,
+                context.variantId,
+                context.qty,
+                ttlSec,
+                result == ReserveWriteResult.REFRESHED
+            )
+        }
+    }
+
+    suspend fun ensureOrderReserve(order: Order, offerId: String?, ttlSec: Long) {
+        if (ttlSec <= 0) return
+        val converted = offerId?.let { convertOfferReserve(it, order, ttlSec) } ?: false
+        if (converted) return
+        val payload = StockReservePayload(
+            itemId = order.itemId,
+            variantId = order.variantId,
+            qty = order.qty,
+            userId = order.userId,
+            ttlSec = ttlSec,
+            from = ReserveSource.ORDER,
+            offerId = offerId
+        )
+        withStockLock(order.itemId, order.variantId) {
+            ensureStockAvailable(order.itemId, order.variantId, order.qty)
+            val result = holdService.createOrderReserve(order.id, payload, ttlSec)
+            log.info(
+                "order_reserve_set orderId={} item={} variant={} qty={} ttl={}s refreshed={}",
+                order.id,
+                order.itemId,
+                order.variantId,
+                order.qty,
+                ttlSec,
+                result == ReserveWriteResult.REFRESHED
+            )
+        }
+    }
+
+    private suspend fun convertOfferReserve(offerId: String, order: Order, ttlSec: Long): Boolean {
+        val converted = holdService.convertOfferToOrderReserve(
+            offerId = offerId,
+            orderId = order.id,
+            extendTtlSec = ttlSec
+        ) { payload ->
+            payload.copy(
+                itemId = order.itemId,
+                variantId = order.variantId,
+                qty = order.qty,
+                userId = order.userId,
+                ttlSec = ttlSec,
+                offerId = payload.offerId ?: offerId,
+                from = ReserveSource.ORDER
+            )
+        }
+        if (converted) {
+            log.info(
+                "order_reserve_converted orderId={} offerId={} item={} variant={} qty={} ttl={}s",
+                order.id,
+                offerId,
+                order.itemId,
+                order.variantId,
+                order.qty,
+                ttlSec
+            )
+        } else {
+            log.info(
+                "order_reserve_convert_miss orderId={} offerId={} item={} variant={} qty={}",
+                order.id,
+                offerId,
+                order.itemId,
+                order.variantId,
+                order.qty
+            )
+        }
+        return converted
+    }
+
+    private suspend fun ensureStockAvailable(itemId: String, variantId: String?, qty: Int) {
+        if (variantId == null) return
+        val variant = repositories.variants.getById(variantId)
+            ?: throw InsufficientStockException("variant missing")
+        check(variant.itemId == itemId) { "variant mismatch" }
+        if (!variant.active || variant.stock < qty) {
+            throw InsufficientStockException("variant not available")
+        }
+    }
+
+    private suspend fun <T> withStockLock(
+        itemId: String,
+        variantId: String?,
+        block: suspend () -> T
+    ): T {
+        val leaseMs = config.server.reserveStockLockSec.coerceAtLeast(1) * 1_000L
+        val key = buildStockLockKey(itemId, variantId)
+        return lockManager.withLock(key, STOCK_LOCK_WAIT_MS, leaseMs, block)
     }
 }
+
+private class InsufficientStockException(message: String) : IllegalStateException(message)
 
 private fun OfferDecision.Reject.toResult(): OfferResult = OfferResult(OfferDecisionType.REJECT)
 
@@ -473,17 +626,5 @@ private fun Offer.toOfferResult(now: Instant): OfferResult {
         else -> OfferResult(OfferDecisionType.REJECT)
     }
 }
-
-private fun formatMoney(amountMinor: Long, currency: String): String {
-    val absAmount = abs(amountMinor)
-    val major = absAmount / 100
-    val minor = (absAmount % 100).toInt()
-    val number = "%d.%02d".format(major, minor)
-    val sign = if (amountMinor < 0) "-" else ""
-    return "$sign$number ${currency.uppercase()}"
-}
-
-private fun escapeHtml(value: String): String =
-    value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 private fun generateOrderId(userId: Long): String = "ord_${System.currentTimeMillis()}_$userId"

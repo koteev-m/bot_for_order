@@ -33,6 +33,8 @@ interface VariantsRepository {
     suspend fun upsert(variant: Variant)
     suspend fun listByItem(itemId: String): List<Variant>
     suspend fun setStock(variantId: String, stock: Int)
+    suspend fun getById(id: String): Variant?
+    suspend fun decrementStock(variantId: String, qty: Int): Boolean
 }
 
 interface PricesDisplayRepository {
@@ -74,6 +76,7 @@ interface OrdersRepository {
     suspend fun setStatus(id: String, status: OrderStatus)
     suspend fun setInvoiceMessage(id: String, invoiceMessageId: Int)
     suspend fun markPaid(id: String, provider: String, providerChargeId: String, telegramPaymentChargeId: String)
+    suspend fun listPendingOlderThan(cutoff: Instant): List<Order>
 }
 
 interface OrderStatusHistoryRepository {

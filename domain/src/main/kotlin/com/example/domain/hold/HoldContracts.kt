@@ -1,46 +1,57 @@
 package com.example.domain.hold
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class ReserveKind { OFFER, ORDER }
+enum class ReserveSource {
+    @SerialName("offer")
+    OFFER,
 
-@Serializable
-data class ReserveKey(
-    val kind: ReserveKind,
-    val id: String
-) {
-    fun toRedisKey(): String = "reserve:${kind.name.lowercase()}:$id"
+    @SerialName("order")
+    ORDER
 }
 
 @Serializable
-data class ReservePayload(
+data class StockReservePayload(
     val itemId: String,
     val variantId: String?,
     val qty: Int,
     val userId: Long?,
-    val createdAtEpochSec: Long,
-    val ttlSec: Long
+    val ttlSec: Long,
+    val from: ReserveSource,
+    val offerId: String? = null
 )
 
-/**
- * Управляет резервами с ограниченным временем жизни.
- */
+enum class ReserveWriteResult {
+    CREATED,
+    REFRESHED
+}
+
 interface HoldService {
-    /**
-     * Атомарно создаёт резерв, если ключ отсутствует (идемпотентность).
-     * @return true — создан, false — уже существует
-     */
-    suspend fun putIfAbsent(key: ReserveKey, payload: ReservePayload, ttlSec: Long): Boolean
+    suspend fun createOfferReserve(
+        offerId: String,
+        payload: StockReservePayload,
+        ttlSec: Long
+    ): ReserveWriteResult
 
-    suspend fun get(key: ReserveKey): ReservePayload?
-    suspend fun exists(key: ReserveKey): Boolean
+    suspend fun createOrderReserve(
+        orderId: String,
+        payload: StockReservePayload,
+        ttlSec: Long
+    ): ReserveWriteResult
 
-    /** Продлить TTL существующего резерва. */
-    suspend fun prolong(key: ReserveKey, ttlSec: Long): Boolean
+    suspend fun convertOfferToOrderReserve(
+        offerId: String,
+        orderId: String,
+        extendTtlSec: Long,
+        updatePayload: (StockReservePayload) -> StockReservePayload
+    ): Boolean
 
-    /** Снять резерв (удалить ключ). */
-    suspend fun release(key: ReserveKey): Boolean
+    suspend fun deleteReserveByOrder(orderId: String): Boolean
+    suspend fun deleteReserveByOffer(offerId: String): Boolean
+    suspend fun hasOrderReserve(orderId: String): Boolean
+    suspend fun releaseExpired()
 }
 
 /**
