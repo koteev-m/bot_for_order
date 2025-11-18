@@ -17,9 +17,8 @@ import com.example.db.PricesDisplayRepository
 import com.example.db.VariantsRepository
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
+import com.example.domain.hold.HoldService
 import com.example.domain.hold.LockManager
-import com.pengrad.telegrambot.model.request.InlineKeyboardButton
-import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
 import com.pengrad.telegrambot.model.request.ParseMode
 import com.pengrad.telegrambot.model.request.ShippingOption
 import com.pengrad.telegrambot.request.SendMessage
@@ -48,6 +47,7 @@ fun Application.installShopWebhook() {
     val orderStatusRepo by inject<OrderStatusHistoryRepository>()
     val paymentsService by inject<PaymentsService>()
     val lockManager by inject<LockManager>()
+    val holdService by inject<HoldService>()
 
     val deps = ShopWebhookDeps(
         config = cfg,
@@ -59,6 +59,7 @@ fun Application.installShopWebhook() {
         orderStatusRepository = orderStatusRepo,
         paymentsService = paymentsService,
         lockManager = lockManager,
+        holdService = holdService,
         json = Json { ignoreUnknownKeys = true }
     )
 
@@ -70,7 +71,7 @@ fun Application.installShopWebhook() {
     }
 }
 
-private data class ShopWebhookDeps(
+internal data class ShopWebhookDeps(
     val config: AppConfig,
     val clients: TelegramClients,
     val itemsRepository: ItemsRepository,
@@ -80,10 +81,9 @@ private data class ShopWebhookDeps(
     val orderStatusRepository: OrderStatusHistoryRepository,
     val paymentsService: PaymentsService,
     val lockManager: LockManager,
+    val holdService: HoldService,
     val json: Json
 )
-
-private val shopLog = LoggerFactory.getLogger("ShopWebhook")
 
 private const val PRECHECK_TIMEOUT_MS = 9_000L
 private const val PAYMENT_LOCK_WAIT_MS = 2_000L
@@ -96,9 +96,12 @@ private const val PRECHECK_GENERIC_ERROR = "payment_validation_failed"
 private const val PRECHECK_AMOUNT_ERROR = "amount_mismatch"
 private const val PRECHECK_STATUS_ERROR = "order_status_invalid"
 private const val PRECHECK_CURRENCY_ERROR = "currency_mismatch"
+private const val PRECHECK_RESERVE_ERROR = "reserve_expired"
 private const val PAYMENT_CONFIRMED_REPLY = "✅ Оплата получена! Заказ <code>%s</code> передан в обработку."
 private const val PAYMENT_ALREADY_CONFIRMED_REPLY = "ℹ️ Заказ <code>%s</code> уже оплачен."
 private const val PAYMENT_UNKNOWN_ORDER_REPLY = "❌ Заказ не найден. Проверьте ID или свяжитесь с поддержкой."
+private const val PAYMENT_STOCK_FAILED_REPLY =
+    "❌ Не удалось завершить оплату: товар закончился. Попробуйте оформить заново."
 
 private data class ShippingDecision(
     val ok: Boolean,
@@ -277,7 +280,12 @@ private suspend fun handleSuccessfulPayment(
                 reply = PAYMENT_ALREADY_CONFIRMED_REPLY.format(orderId)
                 return@withLock
             }
-
+            val stockOk = decrementStock(order, deps)
+            if (!stockOk) {
+                handleStockFailure(order, deps)
+                reply = PAYMENT_STOCK_FAILED_REPLY
+                return@withLock
+            }
             deps.ordersRepository.markPaid(
                 orderId,
                 provider = "telegram",
@@ -294,8 +302,15 @@ private suspend fun handleSuccessfulPayment(
                     ts = Instant.now()
                 )
             )
+            deps.holdService.deleteReserveByOrder(orderId)
             reply = PAYMENT_CONFIRMED_REPLY.format(orderId)
-            shopLog.info("order paid orderId={}", orderId)
+            shopLog.info(
+                "order paid orderId={} item={} variant={} qty={}",
+                orderId,
+                order.itemId,
+                order.variantId,
+                order.qty
+            )
         }
     } catch (error: IllegalStateException) {
         reply = PAYMENT_UNKNOWN_ORDER_REPLY
@@ -338,6 +353,12 @@ private suspend fun evaluatePreCheckout(
                 "expected=${order.amountMinor} actual=${query.totalAmount}",
             warn = true
         )
+        !deps.holdService.hasOrderReserve(orderId) -> PreCheckoutDecision(
+            ok = false,
+            errorMessage = PRECHECK_RESERVE_ERROR,
+            logMessage = "pre_checkout reserve missing orderId=$orderId",
+            warn = true
+        )
         else -> PreCheckoutDecision(
             ok = true,
             logMessage = "pre_checkout approved orderId=$orderId",
@@ -346,46 +367,6 @@ private suspend fun evaluatePreCheckout(
     }
 }
 
-
-private suspend fun sendItemCard(chatId: Long, itemId: String, deps: ShopWebhookDeps) {
-    val item = deps.itemsRepository.getById(itemId) ?: run {
-        deps.clients.replyShopHtml(
-            chatId,
-            "❌ Товар не найден: <code>${escapeHtml(itemId)}</code>"
-        )
-        return
-    }
-    val price = deps.pricesRepository.get(item.id)
-    val variants = deps.variantsRepository.listByItem(item.id)
-
-    val priceLine = price?.let {
-        "Цена: <b>${escapeHtml(formatMoney(it.baseAmountMinor, it.baseCurrency))}</b>"
-    } ?: "Цена: <i>уточняется</i>"
-
-    val sizes = variants.mapNotNull { it.size }.distinct()
-    val sizesLine = if (sizes.isNotEmpty()) "Варианты: ${escapeHtml(sizes.joinToString(", "))}" else null
-
-    val caption = buildString {
-        append("<b>").append(escapeHtml(item.title)).append("</b>\n")
-        append(escapeHtml(item.description.take(400))).append("\n")
-        append(priceLine)
-        sizesLine?.let {
-            append("\n").append(it)
-        }
-    }
-
-    val miniAppUrl = "${deps.config.server.publicBaseUrl.removeSuffix("/")}/app/?item=${item.id}"
-    val kb = InlineKeyboardMarkup(
-        InlineKeyboardButton("Оформить").url(miniAppUrl)
-    )
-
-    deps.clients.shopBot.execute(
-        SendMessage(chatId, caption)
-            .parseMode(ParseMode.HTML)
-            .disablePreview()
-            .replyMarkup(kb)
-    )
-}
 
 private val WELCOME_MESSAGE = """
     👋 Добро пожаловать! Отправьте ссылку с параметром или команду <code>/open &lt;ITEM_ID&gt;</code>.

@@ -6,6 +6,7 @@ import com.example.db.OrdersRepository
 import com.example.domain.Order
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
+import com.example.domain.hold.HoldService
 import com.pengrad.telegrambot.request.SendMessage
 import java.time.Clock
 import java.time.Instant
@@ -16,6 +17,7 @@ class OrderStatusService(
     private val ordersRepository: OrdersRepository,
     private val historyRepository: OrderStatusHistoryRepository,
     private val clients: TelegramClients,
+    private val holdService: HoldService,
     private val clock: Clock = Clock.systemUTC()
 ) {
 
@@ -39,6 +41,9 @@ class OrderStatusService(
         }
 
         ordersRepository.setStatus(orderId, newStatus)
+        if (newStatus == OrderStatus.canceled) {
+            holdService.deleteReserveByOrder(orderId)
+        }
         val entry = OrderStatusEntry(
             id = 0,
             orderId = orderId,
