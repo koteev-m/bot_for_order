@@ -5,6 +5,7 @@ import com.example.app.services.ItemsService
 import com.example.app.services.MediaStateStore
 import com.example.app.services.MediaType
 import com.example.app.services.OrderStatusService
+import com.example.app.services.OffersService
 import com.example.app.services.PendingMedia
 import com.example.app.services.PostService
 import com.example.app.tg.TgMessage
@@ -41,6 +42,7 @@ fun Application.installAdminWebhook() {
     val mediaStateStore by inject<MediaStateStore>()
     val postService by inject<PostService>()
     val orderStatusService by inject<OrderStatusService>()
+    val offersService by inject<OffersService>()
 
     val json = Json { ignoreUnknownKeys = true }
     val deps = AdminWebhookDeps(
@@ -52,7 +54,8 @@ fun Application.installAdminWebhook() {
         itemMediaRepository = itemMediaRepository,
         mediaStateStore = mediaStateStore,
         postService = postService,
-        orderStatusService = orderStatusService
+        orderStatusService = orderStatusService,
+        offersService = offersService
     )
 
     routing {
@@ -72,7 +75,8 @@ private data class AdminWebhookDeps(
     val itemMediaRepository: ItemMediaRepository,
     val mediaStateStore: MediaStateStore,
     val postService: PostService,
-    val orderStatusService: OrderStatusService
+    val orderStatusService: OrderStatusService,
+    val offersService: OffersService
 )
 
 private suspend fun handleAdminUpdate(
@@ -135,6 +139,7 @@ private suspend fun handleAdminCommand(
         "/preview" -> handlePreview(chatId, args, deps.itemMediaRepository, deps.clients, reply)
         "/post" -> handlePost(args, deps.postService, reply)
         STATUS_COMMAND -> handleStatusCommand(args, fromId, deps.orderStatusService, reply)
+        COUNTER_COMMAND -> handleCounterCommand(args, fromId, deps.offersService, reply)
         else -> reply("Неизвестная команда. Напишите <code>/help</code>.")
     }
 }

@@ -56,6 +56,15 @@ interface OffersRepository {
         lastCounterAmount: Long?,
         expiresAt: Instant?
     )
+    suspend fun updateCounter(id: String, amountMinor: Long, expiresAt: Instant)
+    suspend fun expireWhereDue(now: Instant): Int
+}
+
+fun OffersRepository.canCounter(offer: Offer, rules: BargainRules, now: Instant): Boolean {
+    val statusAllowed = offer.status == OfferStatus.new || offer.status == OfferStatus.countered
+    val countersAvailable = offer.countersUsed < rules.maxCounters
+    val ttlActive = offer.expiresAt?.isAfter(now) ?: false
+    return statusAllowed && countersAvailable && ttlActive
 }
 
 interface OrdersRepository {

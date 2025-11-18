@@ -36,6 +36,9 @@ class ApiClient(
     suspend fun postOffer(req: OfferRequest): OfferDecisionResponse =
         client.post("$baseUrl/api/offer") { setBody(req) }.body()
 
+    suspend fun acceptOffer(req: OfferAcceptRequest): OfferAcceptResponse =
+        client.post("$baseUrl/api/offer/accept") { setBody(req) }.body()
+
     suspend fun postOrder(req: OrderCreateRequest): OrderCreateResponse =
         client.post("$baseUrl/api/orders") { setBody(req) }.body()
 }

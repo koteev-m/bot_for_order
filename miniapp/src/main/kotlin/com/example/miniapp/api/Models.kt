@@ -57,6 +57,18 @@ data class OfferDecisionResponse(
 )
 
 @Serializable
+data class OfferAcceptRequest(
+    val offerId: String,
+    val qty: Int? = null
+)
+
+@Serializable
+data class OfferAcceptResponse(
+    val orderId: String,
+    val status: String
+)
+
+@Serializable
 data class OrderCreateRequest(
     val itemId: String,
     val variantId: String? = null,

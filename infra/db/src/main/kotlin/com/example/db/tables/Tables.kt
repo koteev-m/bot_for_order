@@ -69,6 +69,11 @@ object OffersTable : Table("offers") {
     val createdAt = timestamp("created_at")
     val updatedAt = timestamp("updated_at")
     override val primaryKey = PrimaryKey(id)
+
+    init {
+        index(false, expiresAt)
+        index(false, itemId, userId, status)
+    }
 }
 
 object OrdersTable : Table("orders") {

@@ -79,7 +79,8 @@ data class Offer(
     val offerAmountMinor: Long,
     val status: OfferStatus,
     val countersUsed: Int,
-    val expiresAtIso: String?,
+    @Serializable(with = InstantIsoSerializer::class)
+    val expiresAt: Instant?,
     val lastCounterAmount: Long?
 )
 

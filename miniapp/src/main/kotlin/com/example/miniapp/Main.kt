@@ -2,6 +2,7 @@ package com.example.miniapp
 
 import com.example.miniapp.api.ApiClient
 import com.example.miniapp.api.ItemResponse
+import com.example.miniapp.api.OfferAcceptRequest
 import com.example.miniapp.api.OfferRequest
 import com.example.miniapp.api.OrderCreateRequest
 import com.example.miniapp.startapp.StartAppCodecJs
@@ -122,6 +123,13 @@ class MiniApp : Application() {
                 } else {
                     loadItem(itemId, titleEl, descEl, priceEl, infoEl, variantSelect)
                 }
+                val offerIdParam = qp["offer"]
+                val actionParam = qp["action"]
+                if (offerIdParam != null && actionParam == "accept") {
+                    val qty = qp["qty"]?.toIntOrNull()?.coerceAtLeast(DEFAULT_QUANTITY)
+                        ?: DEFAULT_QUANTITY
+                    acceptOfferFromQuery(offerIdParam, qty, statusOk, statusErr)
+                }
             }
         }
     }
@@ -163,6 +171,25 @@ class MiniApp : Application() {
             .filter { it.active }
             .map { it.id to (it.size ?: it.sku ?: it.id) }
         variantSelect.options = options
+    }
+
+    private fun acceptOfferFromQuery(offerId: String, qty: Int, ok: Div, err: Div) {
+        ok.content = "Обрабатываем контр-офер..."
+        err.content = ""
+        scope.launch {
+            runCatching {
+                api.acceptOffer(
+                    OfferAcceptRequest(
+                        offerId = offerId,
+                        qty = qty
+                    )
+                )
+            }.onSuccess { resp ->
+                ok.content = "Контр-офер принят: заказ ${resp.orderId} (статус ${resp.status})."
+            }.onFailure { e ->
+                err.content = "Не удалось принять офер: ${e.message ?: e.toString()}"
+            }
+        }
     }
 
     private fun onBuyClicked(
