@@ -5,6 +5,8 @@ import com.example.app.services.DisplayPriceServiceImpl
 import com.example.app.services.FxServiceStub
 import com.example.domain.DisplayPriceService
 import com.example.domain.FxService
+import com.example.domain.watchlist.PriceDropNotifier
+import com.example.domain.watchlist.WatchlistRepository
 import org.koin.dsl.module
 
 fun fxModule(cfg: AppConfig) = module {
@@ -22,7 +24,9 @@ fun fxModule(cfg: AppConfig) = module {
             cfg = cfg,
             fxService = get(),
             itemsRepository = get(),
-            pricesDisplayRepository = get()
+            pricesDisplayRepository = get(),
+            watchlistRepository = get<WatchlistRepository>(),
+            priceDropNotifier = get<PriceDropNotifier>()
         )
     }
 }

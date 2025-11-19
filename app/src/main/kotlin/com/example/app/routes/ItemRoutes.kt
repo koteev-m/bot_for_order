@@ -61,6 +61,7 @@ private suspend fun handleGetItem(
 private fun PricesDisplay.toDisplayPrices() = DisplayPrices(
     baseCurrency = baseCurrency,
     baseAmountMinor = baseAmountMinor,
+    invoiceMinor = invoiceCurrencyAmountMinor,
     rub = displayRub,
     usd = displayUsd,
     eur = displayEur,

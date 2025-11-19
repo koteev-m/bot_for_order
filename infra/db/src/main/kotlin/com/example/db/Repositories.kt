@@ -12,8 +12,6 @@ import com.example.domain.OrderStatusEntry
 import com.example.domain.Post
 import com.example.domain.PricesDisplay
 import com.example.domain.Variant
-import com.example.domain.WatchEntry
-import com.example.domain.WatchTrigger
 import java.time.Instant
 
 interface ItemsRepository {
@@ -82,9 +80,4 @@ interface OrdersRepository {
 interface OrderStatusHistoryRepository {
     suspend fun append(entry: OrderStatusEntry): Long
     suspend fun list(orderId: String, limit: Int? = null): List<OrderStatusEntry>
-}
-
-interface WatchlistRepository {
-    suspend fun add(entry: WatchEntry): Long
-    suspend fun listByUser(userId: Long): List<WatchEntry>
 }

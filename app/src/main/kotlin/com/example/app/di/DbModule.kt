@@ -19,8 +19,8 @@ import com.example.db.PricesDisplayRepository
 import com.example.db.PricesDisplayRepositoryExposed
 import com.example.db.VariantsRepository
 import com.example.db.VariantsRepositoryExposed
-import com.example.db.WatchlistRepository
 import com.example.db.WatchlistRepositoryExposed
+import com.example.domain.watchlist.WatchlistRepository
 import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
 import org.koin.dsl.module

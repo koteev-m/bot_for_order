@@ -12,6 +12,7 @@ import com.example.db.VariantsRepository
 import com.example.app.security.installInitDataAuth
 import com.example.domain.hold.HoldService
 import com.example.domain.hold.LockManager
+import com.example.domain.watchlist.WatchlistRepository
 import io.ktor.server.application.Application
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
@@ -29,6 +30,7 @@ fun Application.installApiRoutes() {
     val holdService by inject<HoldService>()
     val lockManager by inject<LockManager>()
     val cfg by inject<AppConfig>()
+    val watchlistRepo by inject<WatchlistRepository>()
 
     val orderDeps = OrderRoutesDeps(
         itemsRepository = itemsRepo,
@@ -46,6 +48,7 @@ fun Application.installApiRoutes() {
             registerItemRoutes(itemsRepo, mediaRepo, variantsRepo, pricesRepo, cfg)
             registerOfferRoutes(offersService)
             registerOrdersRoutes(cfg, orderDeps)
+            registerWatchlistRoutes(itemsRepo, watchlistRepo, cfg)
         }
     }
 }

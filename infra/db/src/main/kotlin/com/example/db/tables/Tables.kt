@@ -39,6 +39,7 @@ object PricesDisplayTable : Table("prices_display") {
     val itemId = reference("item_id", ItemsTable.id, onDelete = ReferenceOption.CASCADE)
     val baseCurrency = char("base_currency", 3)
     val baseAmountMinor = long("base_amount_minor")
+    val invoiceAmountMinor = long("invoice_amount_minor").nullable()
     val displayRub = long("display_rub").nullable()
     val displayUsd = long("display_usd").nullable()
     val displayEur = long("display_eur").nullable()
@@ -115,4 +116,9 @@ object WatchlistTable : Table("watchlist") {
     val params = text("params").nullable()
     val createdAt = timestamp("created_at")
     override val primaryKey = PrimaryKey(id)
+
+    init {
+        index(false, triggerType, itemId)
+        index(false, userId, triggerType)
+    }
 }
