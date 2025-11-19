@@ -66,3 +66,19 @@ internal fun parsePositiveIntEnv(name: String, defaultValue: Int): Int {
     require(value > 0) { "Env $name must be > 0" }
     return value
 }
+
+internal fun parseNonNegativeLongEnv(name: String, defaultValue: Long): Long {
+    val raw = System.getenv(name)?.takeIf { it.isNotBlank() } ?: return defaultValue
+    val value = raw.trim().toLongOrNull()
+        ?: error("Env $name must be a number (got '$raw')")
+    require(value >= 0) { "Env $name must be >= 0" }
+    return value
+}
+
+internal fun parseNonNegativeDoubleEnv(name: String, defaultValue: Double): Double {
+    val raw = System.getenv(name)?.takeIf { it.isNotBlank() } ?: return defaultValue
+    val value = raw.trim().toDoubleOrNull()
+        ?: error("Env $name must be numeric (got '$raw')")
+    require(value >= 0.0) { "Env $name must be >= 0" }
+    return value
+}

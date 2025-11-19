@@ -52,6 +52,7 @@ data class PricesDisplay(
     val itemId: String,
     val baseCurrency: String,
     val baseAmountMinor: Long,
+    val invoiceCurrencyAmountMinor: Long?,
     val displayRub: Long?,
     val displayUsd: Long?,
     val displayEur: Long?,
@@ -119,9 +120,8 @@ data class OrderStatusEntry(
     val ts: Instant
 )
 
-@Suppress("EnumNaming")
 @Serializable
-enum class WatchTrigger { price_drop, restock }
+enum class WatchTrigger { PRICE_DROP, RESTOCK }
 
 @Serializable
 data class WatchEntry(

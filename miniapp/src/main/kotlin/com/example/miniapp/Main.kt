@@ -5,6 +5,7 @@ import com.example.miniapp.api.ItemResponse
 import com.example.miniapp.api.OfferAcceptRequest
 import com.example.miniapp.api.OfferRequest
 import com.example.miniapp.api.OrderCreateRequest
+import com.example.miniapp.api.WatchlistSubscribeRequest
 import com.example.miniapp.startapp.StartAppCodecJs
 import com.example.miniapp.tg.TelegramBridge
 import com.example.miniapp.tg.UrlQuery
@@ -56,6 +57,9 @@ class MiniApp : Application() {
                 val nameInput = TextInput(InputType.TEXT).apply { placeholder = "Ваше имя" }
                 val phoneInput = TextInput(InputType.TEL).apply { placeholder = "Телефон" }
                 val addrInput = TextArea(rows = 3).apply { placeholder = "Адрес доставки (если требуется)" }
+                val targetInput = TextInput(InputType.TEXT).apply {
+                    placeholder = "Целевая цена (опционально)"
+                }
 
                 val statusOk = Div(className = "ok")
                 val statusErr = Div(className = "err")
@@ -103,6 +107,20 @@ class MiniApp : Application() {
                                     onOfferClicked(
                                         qtyInput.value,
                                         variantSelect.value,
+                                        statusOk,
+                                        statusErr
+                                    )
+                                }
+                            }
+                        )
+                    })
+                    add(Div(className = "watchlist").apply {
+                        add(targetInput)
+                        add(
+                            Button("Сообщить при снижении цены", className = "secondary").apply {
+                                onClick {
+                                    onSubscribePriceDrop(
+                                        targetInput.value,
                                         statusOk,
                                         statusErr
                                     )
@@ -279,6 +297,39 @@ class MiniApp : Application() {
         }
     }
 
+    private fun onSubscribePriceDrop(targetRaw: String?, ok: Div, err: Div) {
+        ok.content = ""
+        err.content = ""
+        val item = currentItem ?: run {
+            err.content = "Товар не загружен."
+            return
+        }
+        val normalized = targetRaw?.trim().orEmpty()
+        val targetMinor = if (normalized.isEmpty()) {
+            null
+        } else {
+            parseMoneyToMinor(normalized) ?: run {
+                err.content = "Неверная целевая цена."
+                return
+            }
+        }
+        scope.launch {
+            runCatching {
+                api.subscribePriceDrop(
+                    WatchlistSubscribeRequest(
+                        itemId = item.id,
+                        trigger = "price_drop",
+                        targetMinor = targetMinor
+                    )
+                )
+            }.onSuccess {
+                ok.content = "Мы сообщим, когда цена снизится."
+            }.onFailure { e ->
+                err.content = "Не удалось сохранить подписку: ${e.message ?: e.toString()}"
+            }
+        }
+    }
+
     private fun buildPriceLine(item: ItemResponse): String {
         val invoiceCurrency = item.invoiceCurrency.uppercase()
         val prices = item.prices ?: return "Цена: <i>уточняется</i> (инвойс: $invoiceCurrency)"
@@ -288,6 +339,10 @@ class MiniApp : Application() {
             if (amount != null && code.uppercase() != baseCode) {
                 parts += formatMoney(amount, code)
             }
+        }
+        val invoiceAmount = prices.invoiceMinor
+        if (invoiceAmount != null && invoiceCurrency != baseCode) {
+            parts += formatMoney(invoiceAmount, invoiceCurrency)
         }
         append("USD", prices.usd)
         append("EUR", prices.eur)

@@ -21,9 +21,11 @@ import com.example.domain.OrderStatusEntry
 import com.example.domain.Post
 import com.example.domain.PricesDisplay
 import com.example.domain.Variant
-import com.example.domain.WatchEntry
 import com.example.domain.WatchTrigger
+import com.example.domain.watchlist.PriceDropSubscription
+import com.example.domain.watchlist.WatchlistRepository
 import java.time.Instant
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -223,6 +225,7 @@ class PricesDisplayRepositoryExposed(private val tx: DatabaseTx) : PricesDisplay
             val updated = PricesDisplayTable.update({ PricesDisplayTable.itemId eq p.itemId }) {
                 it[baseCurrency] = p.baseCurrency
                 it[baseAmountMinor] = p.baseAmountMinor
+                it[invoiceAmountMinor] = p.invoiceCurrencyAmountMinor
                 it[displayRub] = p.displayRub
                 it[displayUsd] = p.displayUsd
                 it[displayEur] = p.displayEur
@@ -235,6 +238,7 @@ class PricesDisplayRepositoryExposed(private val tx: DatabaseTx) : PricesDisplay
                     it[itemId] = p.itemId
                     it[baseCurrency] = p.baseCurrency
                     it[baseAmountMinor] = p.baseAmountMinor
+                    it[invoiceAmountMinor] = p.invoiceCurrencyAmountMinor
                     it[displayRub] = p.displayRub
                     it[displayUsd] = p.displayUsd
                     it[displayEur] = p.displayEur
@@ -256,6 +260,7 @@ class PricesDisplayRepositoryExposed(private val tx: DatabaseTx) : PricesDisplay
                     itemId = it[PricesDisplayTable.itemId],
                     baseCurrency = it[PricesDisplayTable.baseCurrency],
                     baseAmountMinor = it[PricesDisplayTable.baseAmountMinor],
+                    invoiceCurrencyAmountMinor = it[PricesDisplayTable.invoiceAmountMinor],
                     displayRub = it[PricesDisplayTable.displayRub],
                     displayUsd = it[PricesDisplayTable.displayUsd],
                     displayEur = it[PricesDisplayTable.displayEur],
@@ -571,31 +576,64 @@ class OrderStatusHistoryRepositoryExposed(private val tx: DatabaseTx) : OrderSta
 }
 
 class WatchlistRepositoryExposed(private val tx: DatabaseTx) : WatchlistRepository {
-    override suspend fun add(entry: WatchEntry): Long = tx.tx {
-        WatchlistTable.insert {
-            it[userId] = entry.userId
-            it[itemId] = entry.itemId
-            it[variantId] = entry.variantId
-            it[triggerType] = entry.triggerType.name
-            it[params] = entry.params
-            it[createdAt] = CurrentTimestamp()
-        }.requireGeneratedId(WatchlistTable.id)
+    override suspend fun upsertPriceDrop(sub: PriceDropSubscription) {
+        tx.tx {
+            val paramsJson = json.encodeToString(PriceDropParams(sub.targetMinor))
+            val updated = WatchlistTable.update({
+                (WatchlistTable.userId eq sub.userId) and
+                    (WatchlistTable.itemId eq sub.itemId) and
+                    (WatchlistTable.triggerType eq WatchTrigger.PRICE_DROP.name)
+            }) {
+                it[params] = paramsJson
+            }
+            if (updated == 0) {
+                WatchlistTable.insert {
+                    it[userId] = sub.userId
+                    it[itemId] = sub.itemId
+                    it[variantId] = null
+                    it[triggerType] = WatchTrigger.PRICE_DROP.name
+                    it[params] = paramsJson
+                    it[createdAt] = CurrentTimestamp()
+                }
+            }
+        }
     }
 
-    override suspend fun listByUser(userId: Long): List<WatchEntry> = tx.tx {
+    override suspend fun deletePriceDrop(userId: Long, itemId: String) {
+        tx.tx {
+            WatchlistTable.deleteWhere {
+                (WatchlistTable.userId eq userId) and
+                    (WatchlistTable.itemId eq itemId) and
+                    (WatchlistTable.triggerType eq WatchTrigger.PRICE_DROP.name)
+            }
+        }
+    }
+
+    override suspend fun listPriceDropByItem(itemId: String): List<PriceDropSubscription> = tx.tx {
         WatchlistTable
             .selectAll()
-            .where { WatchlistTable.userId eq userId }
+            .where {
+                (WatchlistTable.itemId eq itemId) and
+                    (WatchlistTable.triggerType eq WatchTrigger.PRICE_DROP.name)
+            }
             .map {
-                WatchEntry(
-                    id = it[WatchlistTable.id],
+                PriceDropSubscription(
                     userId = it[WatchlistTable.userId],
                     itemId = it[WatchlistTable.itemId],
-                    variantId = it[WatchlistTable.variantId],
-                    triggerType = WatchTrigger.valueOf(it[WatchlistTable.triggerType]),
-                    params = it[WatchlistTable.params]
+                    targetMinor = parsePriceDropParams(it[WatchlistTable.params]).targetMinor
                 )
             }
+    }
+
+    @Serializable
+    private data class PriceDropParams(val targetMinor: Long?)
+
+    private fun parsePriceDropParams(payload: String?): PriceDropParams {
+        if (payload.isNullOrBlank()) {
+            return PriceDropParams(targetMinor = null)
+        }
+        return runCatching { json.decodeFromString<PriceDropParams>(payload) }
+            .getOrElse { PriceDropParams(targetMinor = null) }
     }
 }
 

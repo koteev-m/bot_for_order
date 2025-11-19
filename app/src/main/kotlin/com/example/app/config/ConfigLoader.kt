@@ -46,13 +46,21 @@ object ConfigLoader {
         val orderReserveTtlSec = parsePositiveIntEnv("ORDER_RESERVE_TTL_SEC", defaultValue = 1_800)
         val reservesSweepSec = parsePositiveIntEnv("RESERVES_SWEEP_SEC", defaultValue = 60)
         val reserveStockLockSec = parsePositiveIntEnv("RESERVE_STOCK_LOCK_SEC", defaultValue = 5)
+        val watchlistEnabled = parseBooleanEnv("WATCHLIST_PRICE_DROP_ENABLED", defaultValue = true)
+        val priceDropCooldown = parsePositiveIntEnv("PRICE_DROP_NOTIFY_COOLDOWN_SEC", defaultValue = 86_400)
+        val priceDropMinAbsMinor = parseNonNegativeLongEnv("PRICE_DROP_MIN_ABS_MINOR", defaultValue = 0)
+        val priceDropMinRelPct = parseNonNegativeDoubleEnv("PRICE_DROP_MIN_REL_PCT", defaultValue = 0.0)
         return ServerConfig(
             publicBaseUrl = publicBaseUrl,
             offersExpireSweepSec = offersExpireSweepSec,
             offerReserveTtlSec = offerReserveTtlSec,
             orderReserveTtlSec = orderReserveTtlSec,
             reservesSweepSec = reservesSweepSec,
-            reserveStockLockSec = reserveStockLockSec
+            reserveStockLockSec = reserveStockLockSec,
+            watchlistPriceDropEnabled = watchlistEnabled,
+            priceDropNotifyCooldownSec = priceDropCooldown,
+            priceDropMinAbsMinor = priceDropMinAbsMinor,
+            priceDropMinRelPct = priceDropMinRelPct
         )
     }
 

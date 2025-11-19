@@ -43,7 +43,11 @@ data class ServerConfig(
     val offerReserveTtlSec: Int,
     val orderReserveTtlSec: Int,
     val reservesSweepSec: Int,
-    val reserveStockLockSec: Int
+    val reserveStockLockSec: Int,
+    val watchlistPriceDropEnabled: Boolean,
+    val priceDropNotifyCooldownSec: Int,
+    val priceDropMinAbsMinor: Long,
+    val priceDropMinRelPct: Double
 )
 
 data class FxConfig(

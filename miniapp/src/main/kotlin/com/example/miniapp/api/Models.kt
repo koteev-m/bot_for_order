@@ -19,6 +19,7 @@ data class ItemResponse(
 data class DisplayPrices(
     val baseCurrency: String,
     val baseAmountMinor: Long,
+    val invoiceMinor: Long? = null,
     val rub: Long? = null,
     val usd: Long? = null,
     val eur: Long? = null,
@@ -83,4 +84,16 @@ data class OrderCreateRequest(
 data class OrderCreateResponse(
     val orderId: String,
     val status: String
+)
+
+@Serializable
+data class WatchlistSubscribeRequest(
+    val itemId: String,
+    val trigger: String = "price_drop",
+    val targetMinor: Long? = null
+)
+
+@Serializable
+data class SimpleResponse(
+    val ok: Boolean = true
 )
