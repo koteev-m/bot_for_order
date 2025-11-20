@@ -127,6 +127,17 @@ class MiniApp : Application() {
                                 }
                             }
                         )
+                        add(
+                            Button("Сообщить о наличии", className = "secondary").apply {
+                                onClick {
+                                    onSubscribeRestock(
+                                        variantSelect.value,
+                                        statusOk,
+                                        statusErr
+                                    )
+                                }
+                            }
+                        )
                     })
                     add(statusOk)
                     add(statusErr)
@@ -315,15 +326,41 @@ class MiniApp : Application() {
         }
         scope.launch {
             runCatching {
-                api.subscribePriceDrop(
+                api.subscribeWatchlist(
                     WatchlistSubscribeRequest(
                         itemId = item.id,
                         trigger = "price_drop",
+                        variantId = null,
                         targetMinor = targetMinor
                     )
                 )
             }.onSuccess {
                 ok.content = "Мы сообщим, когда цена снизится."
+            }.onFailure { e ->
+                err.content = "Не удалось сохранить подписку: ${e.message ?: e.toString()}"
+            }
+        }
+    }
+
+    private fun onSubscribeRestock(variantId: String?, ok: Div, err: Div) {
+        ok.content = ""
+        err.content = ""
+        val item = currentItem ?: run {
+            err.content = "Товар не загружен."
+            return
+        }
+        val normalizedVariant = variantId?.takeIf { it.isNotBlank() }
+        scope.launch {
+            runCatching {
+                api.subscribeWatchlist(
+                    WatchlistSubscribeRequest(
+                        itemId = item.id,
+                        trigger = "restock",
+                        variantId = normalizedVariant
+                    )
+                )
+            }.onSuccess {
+                ok.content = "Сообщим, когда вернётся в наличии."
             }.onFailure { e ->
                 err.content = "Не удалось сохранить подписку: ${e.message ?: e.toString()}"
             }

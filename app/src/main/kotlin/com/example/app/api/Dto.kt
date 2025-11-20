@@ -115,6 +115,7 @@ data class OrdersPage(
 data class WatchlistSubscribeRequest(
     val itemId: String,
     val trigger: String = "price_drop",
+    val variantId: String? = null,
     val targetMinor: Long? = null
 )
 

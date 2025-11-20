@@ -118,7 +118,7 @@ object WatchlistTable : Table("watchlist") {
     override val primaryKey = PrimaryKey(id)
 
     init {
-        index(false, triggerType, itemId)
+        index(false, triggerType, itemId, variantId)
         index(false, userId, triggerType)
     }
 }

@@ -47,7 +47,11 @@ data class ServerConfig(
     val watchlistPriceDropEnabled: Boolean,
     val priceDropNotifyCooldownSec: Int,
     val priceDropMinAbsMinor: Long,
-    val priceDropMinRelPct: Double
+    val priceDropMinRelPct: Double,
+    val watchlistRestockEnabled: Boolean,
+    val restockNotifyCooldownSec: Int,
+    val restockNotifyConsume: Boolean,
+    val restockScanSec: Int
 )
 
 data class FxConfig(

@@ -30,7 +30,7 @@ interface ItemMediaRepository {
 interface VariantsRepository {
     suspend fun upsert(variant: Variant)
     suspend fun listByItem(itemId: String): List<Variant>
-    suspend fun setStock(variantId: String, stock: Int)
+    suspend fun setStock(variantId: String, stock: Int): StockChange?
     suspend fun getById(id: String): Variant?
     suspend fun decrementStock(variantId: String, qty: Int): Boolean
 }
