@@ -23,6 +23,7 @@ import com.example.domain.PricesDisplay
 import com.example.domain.Variant
 import com.example.domain.WatchTrigger
 import com.example.domain.watchlist.PriceDropSubscription
+import com.example.domain.watchlist.RestockSubscription
 import com.example.domain.watchlist.WatchlistRepository
 import java.time.Instant
 import kotlinx.serialization.Serializable
@@ -45,6 +46,7 @@ import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
 import org.jetbrains.exposed.sql.or
@@ -179,12 +181,22 @@ class VariantsRepositoryExposed(private val tx: DatabaseTx) : VariantsRepository
             }
     }
 
-    override suspend fun setStock(variantId: String, stock: Int) {
-        tx.tx {
-            VariantsTable.update({ VariantsTable.id eq variantId }) {
-                it[VariantsTable.stock] = stock
-            }
+    override suspend fun setStock(variantId: String, stock: Int): StockChange? = tx.tx {
+        val row = VariantsTable
+            .select { VariantsTable.id eq variantId }
+            .forUpdate()
+            .singleOrNull()
+            ?: return@tx null
+        val previous = row[VariantsTable.stock]
+        VariantsTable.update({ VariantsTable.id eq variantId }) {
+            it[VariantsTable.stock] = stock
         }
+        StockChange(
+            variantId = variantId,
+            itemId = row[VariantsTable.itemId],
+            oldStock = previous,
+            newStock = stock
+        )
     }
 
     override suspend fun getById(id: String): Variant? = tx.tx {
@@ -625,6 +637,61 @@ class WatchlistRepositoryExposed(private val tx: DatabaseTx) : WatchlistReposito
             }
     }
 
+    override suspend fun upsertRestock(sub: RestockSubscription) {
+        tx.tx {
+            val updated = WatchlistTable.update({
+                (WatchlistTable.userId eq sub.userId) and
+                    (WatchlistTable.itemId eq sub.itemId) and
+                    (WatchlistTable.triggerType eq WatchTrigger.RESTOCK.name) and
+                    restockVariantCondition(sub.variantId)
+            }) {
+                it[params] = null
+            }
+            if (updated == 0) {
+                WatchlistTable.insert {
+                    it[userId] = sub.userId
+                    it[itemId] = sub.itemId
+                    it[variantId] = sub.variantId
+                    it[triggerType] = WatchTrigger.RESTOCK.name
+                    it[params] = null
+                    it[createdAt] = CurrentTimestamp()
+                }
+            }
+        }
+    }
+
+    override suspend fun deleteRestock(userId: Long, itemId: String, variantId: String?) {
+        tx.tx {
+            WatchlistTable.deleteWhere {
+                (WatchlistTable.userId eq userId) and
+                    (WatchlistTable.itemId eq itemId) and
+                    (WatchlistTable.triggerType eq WatchTrigger.RESTOCK.name) and
+                    restockVariantCondition(variantId)
+            }
+        }
+    }
+
+    override suspend fun listRestockByItemVariant(
+        itemId: String,
+        variantId: String?
+    ): List<RestockSubscription> = tx.tx {
+        WatchlistTable
+            .selectAll()
+            .where {
+                (WatchlistTable.itemId eq itemId) and
+                    (WatchlistTable.triggerType eq WatchTrigger.RESTOCK.name) and
+                    restockVariantCondition(variantId)
+            }
+            .map { it.toRestockSubscription() }
+    }
+
+    override suspend fun listRestockSubscriptions(): List<RestockSubscription> = tx.tx {
+        WatchlistTable
+            .selectAll()
+            .where { WatchlistTable.triggerType eq WatchTrigger.RESTOCK.name }
+            .map { it.toRestockSubscription() }
+    }
+
     @Serializable
     private data class PriceDropParams(val targetMinor: Long?)
 
@@ -635,6 +702,19 @@ class WatchlistRepositoryExposed(private val tx: DatabaseTx) : WatchlistReposito
         return runCatching { json.decodeFromString<PriceDropParams>(payload) }
             .getOrElse { PriceDropParams(targetMinor = null) }
     }
+    private fun restockVariantCondition(variantId: String?) = with(SqlExpressionBuilder) {
+        if (variantId == null) {
+            WatchlistTable.variantId.isNull()
+        } else {
+            WatchlistTable.variantId eq variantId
+        }
+    }
+
+    private fun ResultRow.toRestockSubscription(): RestockSubscription = RestockSubscription(
+        userId = this[WatchlistTable.userId],
+        itemId = this[WatchlistTable.itemId],
+        variantId = this[WatchlistTable.variantId]
+    )
 }
 
 private fun <T> InsertStatement<*>.requireGeneratedId(column: Column<T>): T =

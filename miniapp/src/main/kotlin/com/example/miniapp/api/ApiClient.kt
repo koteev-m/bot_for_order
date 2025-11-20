@@ -42,6 +42,6 @@ class ApiClient(
     suspend fun postOrder(req: OrderCreateRequest): OrderCreateResponse =
         client.post("$baseUrl/api/orders") { setBody(req) }.body()
 
-    suspend fun subscribePriceDrop(req: WatchlistSubscribeRequest): SimpleResponse =
+    suspend fun subscribeWatchlist(req: WatchlistSubscribeRequest): SimpleResponse =
         client.post("$baseUrl/api/watchlist") { setBody(req) }.body()
 }

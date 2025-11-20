@@ -48,7 +48,7 @@ fun Application.installApiRoutes() {
             registerItemRoutes(itemsRepo, mediaRepo, variantsRepo, pricesRepo, cfg)
             registerOfferRoutes(offersService)
             registerOrdersRoutes(cfg, orderDeps)
-            registerWatchlistRoutes(itemsRepo, watchlistRepo, cfg)
+            registerWatchlistRoutes(itemsRepo, variantsRepo, watchlistRepo, cfg)
         }
     }
 }

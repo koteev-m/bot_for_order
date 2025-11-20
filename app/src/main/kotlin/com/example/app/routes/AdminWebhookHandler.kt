@@ -1,6 +1,7 @@
 package com.example.app.routes
 
 import com.example.app.config.AppConfig
+import com.example.app.services.InventoryService
 import com.example.app.services.ItemsService
 import com.example.app.services.MediaStateStore
 import com.example.app.services.MediaType
@@ -43,6 +44,7 @@ fun Application.installAdminWebhook() {
     val postService by inject<PostService>()
     val orderStatusService by inject<OrderStatusService>()
     val offersService by inject<OffersService>()
+    val inventoryService by inject<InventoryService>()
 
     val json = Json { ignoreUnknownKeys = true }
     val deps = AdminWebhookDeps(
@@ -55,7 +57,8 @@ fun Application.installAdminWebhook() {
         mediaStateStore = mediaStateStore,
         postService = postService,
         orderStatusService = orderStatusService,
-        offersService = offersService
+        offersService = offersService,
+        inventoryService = inventoryService
     )
 
     routing {
@@ -76,7 +79,8 @@ private data class AdminWebhookDeps(
     val mediaStateStore: MediaStateStore,
     val postService: PostService,
     val orderStatusService: OrderStatusService,
-    val offersService: OffersService
+    val offersService: OffersService,
+    val inventoryService: InventoryService
 )
 
 private suspend fun handleAdminUpdate(
@@ -140,6 +144,7 @@ private suspend fun handleAdminCommand(
         "/post" -> handlePost(args, deps.postService, reply)
         STATUS_COMMAND -> handleStatusCommand(args, fromId, deps.orderStatusService, reply)
         COUNTER_COMMAND -> handleCounterCommand(args, fromId, deps.offersService, reply)
+        STOCK_COMMAND -> handleStockCommand(args, deps.inventoryService, reply)
         else -> reply("Неизвестная команда. Напишите <code>/help</code>.")
     }
 }

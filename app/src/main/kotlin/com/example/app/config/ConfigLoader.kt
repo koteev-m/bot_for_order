@@ -50,6 +50,10 @@ object ConfigLoader {
         val priceDropCooldown = parsePositiveIntEnv("PRICE_DROP_NOTIFY_COOLDOWN_SEC", defaultValue = 86_400)
         val priceDropMinAbsMinor = parseNonNegativeLongEnv("PRICE_DROP_MIN_ABS_MINOR", defaultValue = 0)
         val priceDropMinRelPct = parseNonNegativeDoubleEnv("PRICE_DROP_MIN_REL_PCT", defaultValue = 0.0)
+        val restockWatchEnabled = parseBooleanEnv("WATCHLIST_RESTOCK_ENABLED", defaultValue = true)
+        val restockCooldown = parsePositiveIntEnv("RESTOCK_NOTIFY_COOLDOWN_SEC", defaultValue = 172_800)
+        val restockConsume = parseBooleanEnv("RESTOCK_NOTIFY_CONSUME", defaultValue = true)
+        val restockScanSec = parsePositiveIntEnv("RESTOCK_SCAN_SEC", defaultValue = 60)
         return ServerConfig(
             publicBaseUrl = publicBaseUrl,
             offersExpireSweepSec = offersExpireSweepSec,
@@ -60,7 +64,11 @@ object ConfigLoader {
             watchlistPriceDropEnabled = watchlistEnabled,
             priceDropNotifyCooldownSec = priceDropCooldown,
             priceDropMinAbsMinor = priceDropMinAbsMinor,
-            priceDropMinRelPct = priceDropMinRelPct
+            priceDropMinRelPct = priceDropMinRelPct,
+            watchlistRestockEnabled = restockWatchEnabled,
+            restockNotifyCooldownSec = restockCooldown,
+            restockNotifyConsume = restockConsume,
+            restockScanSec = restockScanSec
         )
     }
 
