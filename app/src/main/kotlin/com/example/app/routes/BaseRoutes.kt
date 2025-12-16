@@ -1,7 +1,11 @@
 package com.example.app.routes
 
+import com.example.app.api.respondApiError
 import com.example.app.config.AppConfig
+import com.example.app.observability.BuildInfoProvider
+import com.example.app.util.CidrMatcher
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.call
@@ -9,8 +13,11 @@ import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
+import io.ktor.server.request.header
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
+import java.nio.charset.StandardCharsets
+import java.util.Base64
 import kotlin.system.measureTimeMillis
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.Dispatchers
@@ -35,9 +42,47 @@ fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
             val status = if (overallUp) HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable
             call.respond(status, HealthResponse(status = if (overallUp) "UP" else "DOWN", checks = checks))
         }
+        get("/build") {
+            call.respond(BuildInfoProvider.current())
+        }
         if (cfg.metrics.prometheusEnabled && registry is PrometheusMeterRegistry) {
             get("/metrics") {
-                call.respondText(registry.scrape(), ContentType.Text.Plain)
+                val requestLogger = environment.log
+                val clientIp = call.request.header(HttpHeaders.XForwardedFor)
+                    ?.split(",")
+                    ?.firstOrNull()
+                    ?.trim()
+                    ?: call.request.local.remoteHost
+
+                if (cfg.metrics.ipAllowlist.isNotEmpty() && !CidrMatcher.isAllowed(clientIp, cfg.metrics.ipAllowlist)) {
+                    call.respondApiError(requestLogger, HttpStatusCode.Forbidden, "forbidden", warn = true)
+                    return@get
+                }
+
+                val expectedAuth = cfg.metrics.basicAuth
+                if (expectedAuth != null) {
+                    val isValid = call.request.header(HttpHeaders.Authorization)
+                        ?.takeIf { it.startsWith("Basic", ignoreCase = true) }
+                        ?.removePrefix("Basic")
+                        ?.trim()
+                        ?.let { blob ->
+                            runCatching {
+                                val decoded = Base64.getDecoder().decode(blob).toString(StandardCharsets.UTF_8)
+                                val parts = decoded.split(":", limit = 2)
+                                parts.size == 2 && parts[0] == expectedAuth.user && parts[1] == expectedAuth.password
+                            }.getOrNull()
+                        } ?: false
+                    if (!isValid) {
+                        call.response.headers.append(HttpHeaders.WWWAuthenticate, "Basic realm=\"metrics\"")
+                        call.respondApiError(requestLogger, HttpStatusCode.Unauthorized, "unauthorized", warn = true)
+                        return@get
+                    }
+                }
+
+                call.respondText(
+                    registry.scrape(),
+                    ContentType.parse("text/plain; version=0.0.4; charset=utf-8")
+                )
             }
         }
     }
@@ -47,10 +92,11 @@ private suspend fun databaseHealthCheck(database: Database, timeoutMs: Long): He
     var ok = false
     val duration = measureTimeMillis {
         ok = withTimeoutOrNull(timeoutMs) {
-            newSuspendedTransaction(Dispatchers.IO, database) {
-                exec("SELECT 1") { it.next() }
-            }
-            true
+            runCatching {
+                newSuspendedTransaction(Dispatchers.IO, database) {
+                    exec("SELECT 1") { it.next() }
+                }
+            }.isSuccess
         } ?: false
     }
     return HealthCheckResult("db", if (ok) "UP" else "DOWN", duration)

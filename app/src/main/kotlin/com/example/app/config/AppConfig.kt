@@ -67,9 +67,16 @@ data class LoggingConfig(
     val json: Boolean
 )
 
+data class BasicAuth(
+    val user: String,
+    val password: String,
+)
+
 data class MetricsConfig(
     val enabled: Boolean,
-    val prometheusEnabled: Boolean
+    val prometheusEnabled: Boolean,
+    val basicAuth: BasicAuth?,
+    val ipAllowlist: Set<String>,
 )
 
 data class HealthConfig(
