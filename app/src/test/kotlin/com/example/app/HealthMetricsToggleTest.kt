@@ -1,15 +1,8 @@
 package com.example.app
 
-import com.example.app.config.AppConfig
-import com.example.app.config.DbConfig
-import com.example.app.config.FxConfig
 import com.example.app.config.HealthConfig
-import com.example.app.config.LoggingConfig
 import com.example.app.config.MetricsConfig
-import com.example.app.config.PaymentsConfig
 import com.example.app.config.RedisConfig
-import com.example.app.config.ServerConfig
-import com.example.app.config.TelegramConfig
 import com.example.app.routes.installBaseRoutes
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -43,7 +36,15 @@ class HealthMetricsToggleTest : StringSpec({
             every { config } returns redisConfig
             every { getRedisNodes(any<RedisNodes<BaseRedisNodes>>()) } returns nodesGroup
         }
-        val cfg = testConfig(prometheusEnabled = true)
+        val cfg = baseTestConfig(
+            metrics = MetricsConfig(
+                enabled = true,
+                prometheusEnabled = true,
+                basicAuth = null,
+                ipAllowlist = emptySet()
+            ),
+            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
+        )
         val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
 
         testApplication {
@@ -85,7 +86,15 @@ class HealthMetricsToggleTest : StringSpec({
             every { config } returns redisConfig
             every { getRedisNodes(any<RedisNodes<BaseRedisNodes>>()) } returns nodesGroup
         }
-        val cfg = testConfig(prometheusEnabled = false)
+        val cfg = baseTestConfig(
+            metrics = MetricsConfig(
+                enabled = true,
+                prometheusEnabled = false,
+                basicAuth = null,
+                ipAllowlist = emptySet()
+            ),
+            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
+        )
         val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
 
         testApplication {
@@ -115,62 +124,3 @@ class HealthMetricsToggleTest : StringSpec({
         }
     }
 })
-
-private fun testConfig(prometheusEnabled: Boolean): AppConfig {
-    return AppConfig(
-        telegram = TelegramConfig(
-            adminToken = "token",
-            shopToken = "token",
-            adminIds = emptySet(),
-            channelId = 0L
-        ),
-        db = DbConfig(
-            url = "jdbc:postgresql://localhost:5432/db",
-            user = "user",
-            password = "pass"
-        ),
-        redis = RedisConfig(url = "redis://localhost:6379"),
-        payments = PaymentsConfig(
-            providerToken = "provider",
-            invoiceCurrency = "USD",
-            allowTips = false,
-            suggestedTipAmountsMinor = emptyList(),
-            shippingEnabled = false,
-            shippingRegionAllowlist = emptySet(),
-            shippingBaseStdMinor = 0,
-            shippingBaseExpMinor = 0
-        ),
-        server = ServerConfig(
-            publicBaseUrl = "http://localhost",
-            offersExpireSweepSec = 0,
-            offerReserveTtlSec = 0,
-            orderReserveTtlSec = 0,
-            reservesSweepSec = 0,
-            reserveStockLockSec = 0,
-            watchlistPriceDropEnabled = false,
-            priceDropNotifyCooldownSec = 0,
-            priceDropMinAbsMinor = 0,
-            priceDropMinRelPct = 0.0,
-            watchlistRestockEnabled = false,
-            restockNotifyCooldownSec = 0,
-            restockNotifyConsume = false,
-            restockScanSec = 0
-        ),
-        fx = FxConfig(
-            displayCurrencies = emptySet(),
-            refreshIntervalSec = 0
-        ),
-        logging = LoggingConfig(
-            level = "INFO",
-            json = true
-        ),
-        metrics = MetricsConfig(
-            enabled = true,
-            prometheusEnabled = prometheusEnabled
-        ),
-        health = HealthConfig(
-            dbTimeoutMs = 50,
-            redisTimeoutMs = 50
-        )
-    )
-}

@@ -23,7 +23,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.Transaction
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import org.koin.dsl.module
 import org.koin.ktor.plugin.Koin
@@ -32,16 +31,16 @@ import org.redisson.api.redisnode.BaseRedisNodes
 import org.redisson.api.redisnode.RedisNodes
 import org.redisson.config.Config
 
-class RedisHealthTest : StringSpec({
-    "returns DOWN when redis ping fails" {
+class DbHealthTest : StringSpec({
+    "returns DOWN when db transaction fails" {
         mockkStatic("org.jetbrains.exposed.sql.transactions.experimental.TransactionsKt")
         val database = mockk<Database>()
-        coEvery { newSuspendedTransaction<Any>(context = any(), db = any<Database>(), statement = any()) } coAnswers {
-            val tx = mockk<Transaction>(relaxed = true)
-            thirdArg<suspend Transaction.() -> Any>().invoke(tx)
-        }
+        coEvery {
+            newSuspendedTransaction<Any>(context = any(), db = any<Database>(), statement = any())
+        } throws IllegalStateException("db down")
+
         val redisConfig = Config().apply { useSingleServer().address = "redis://localhost:6379" }
-        val nodesGroup = mockk<BaseRedisNodes> { every { pingAll() } throws RuntimeException("redis down") }
+        val nodesGroup = mockk<BaseRedisNodes> { every { pingAll() } returns true }
         val redisson = mockk<RedissonClient> {
             every { config } returns redisConfig
             every { getRedisNodes(any<RedisNodes<BaseRedisNodes>>()) } returns nodesGroup
@@ -53,7 +52,7 @@ class RedisHealthTest : StringSpec({
                 basicAuth = null,
                 ipAllowlist = emptySet()
             ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 10)
+            health = HealthConfig(dbTimeoutMs = 10, redisTimeoutMs = 50)
         )
 
         try {
@@ -84,6 +83,14 @@ class RedisHealthTest : StringSpec({
                 response.status shouldBe HttpStatusCode.ServiceUnavailable
                 val payload = Json.parseToJsonElement(response.bodyAsText()).jsonObject
                 payload["status"]?.jsonPrimitive?.content shouldBe "DOWN"
+                val dbStatus = payload["checks"]
+                    ?.jsonArray
+                    ?.first { it.jsonObject["name"]?.jsonPrimitive?.content == "db" }
+                    ?.jsonObject
+                    ?.get("status")
+                    ?.jsonPrimitive
+                    ?.content
+                dbStatus shouldBe "DOWN"
                 val redisStatus = payload["checks"]
                     ?.jsonArray
                     ?.first { it.jsonObject["name"]?.jsonPrimitive?.content == "redis" }
@@ -91,7 +98,7 @@ class RedisHealthTest : StringSpec({
                     ?.get("status")
                     ?.jsonPrimitive
                     ?.content
-                redisStatus shouldBe "DOWN"
+                redisStatus shouldBe "UP"
             }
         } finally {
             unmockkStatic("org.jetbrains.exposed.sql.transactions.experimental.TransactionsKt")

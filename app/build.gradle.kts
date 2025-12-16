@@ -1,3 +1,8 @@
+import java.io.ByteArrayOutputStream
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.ktor)
@@ -54,6 +59,40 @@ ktor {
     }
 }
 
+val generateBuildInfo = tasks.register("generateBuildInfo") {
+    val outputFile = layout.projectDirectory.file("src/main/resources/build-info.json")
+    outputs.file(outputFile)
+    outputs.upToDateWhen { false }
+
+    doLast {
+        val version = project.version.toString()
+        val commit = project.execAndCapture("git", "rev-parse", "--short", "HEAD")
+            ?: System.getenv("GIT_COMMIT")
+            ?: "unknown"
+        val branch = project.execAndCapture("git", "rev-parse", "--abbrev-ref", "HEAD")
+            ?: System.getenv("GIT_BRANCH")
+            ?: "unknown"
+        val builtAt = DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(Instant.now().atOffset(ZoneOffset.UTC))
+        val payload = """{"version":"$version","commit":"$commit","branch":"$branch","builtAt":"$builtAt"}"""
+        outputFile.asFile.apply {
+            parentFile.mkdirs()
+            writeText(payload + "\n")
+        }
+    }
+}
+
 tasks.named("processResources") {
+    dependsOn(generateBuildInfo)
     dependsOn(":miniapp:copyMiniAppToApp")
+}
+
+fun Project.execAndCapture(vararg command: String): String? {
+    val buffer = ByteArrayOutputStream()
+    return runCatching {
+        exec {
+            commandLine(*command)
+            standardOutput = buffer
+        }
+        buffer.toString().trim().takeIf { it.isNotEmpty() }
+    }.getOrNull()
 }

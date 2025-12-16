@@ -114,9 +114,13 @@ object ConfigLoader {
     private fun loadMetricsConfig(): MetricsConfig {
         val enabled = parseBooleanEnv("METRICS_ENABLED", defaultValue = true)
         val prometheus = parseBooleanEnv("PROMETHEUS_ENABLED", defaultValue = true)
+        val basicAuth = parseBasicAuthEnv("METRICS_BASIC_AUTH")
+        val ipAllowlist = parseIpAllowlistEnv("METRICS_IP_ALLOWLIST")
         return MetricsConfig(
             enabled = enabled,
-            prometheusEnabled = prometheus
+            prometheusEnabled = prometheus,
+            basicAuth = basicAuth,
+            ipAllowlist = ipAllowlist
         )
     }
 

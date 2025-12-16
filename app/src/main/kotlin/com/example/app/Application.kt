@@ -11,6 +11,7 @@ import com.example.app.di.fxModule
 import com.example.app.di.offersModule
 import com.example.app.di.paymentsModule
 import com.example.app.di.redisBindingsModule
+import com.example.app.observability.registerBuildInfoMeter
 import com.example.app.observability.REQUEST_ID_MDC_KEY
 import com.example.app.observability.USER_ID_MDC_KEY
 import com.example.app.routes.installAdminWebhook
@@ -237,6 +238,8 @@ private fun Application.configureMetrics(cfg: AppConfig): MeterRegistry? {
             ProcessorMetrics()
         )
     }
+
+    registerBuildInfoMeter(registry)
 
     return registry
 }
