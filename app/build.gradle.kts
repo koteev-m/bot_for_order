@@ -23,6 +23,8 @@ dependencies {
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.ktor.server.call.logging)
     implementation(libs.ktor.server.status.pages)
+    implementation(libs.ktor.server.call.id)
+    implementation(libs.ktor.server.metrics.micrometer)
 
     implementation(project(":bots"))
     implementation(project(":domain"))
@@ -31,14 +33,19 @@ dependencies {
 
     implementation(libs.redisson)
     implementation(libs.pengrad)
+    implementation(libs.micrometer.registry.prometheus)
     implementation(libs.koin.core)
     implementation(libs.koin.ktor)
     implementation(libs.koin.logger)
     runtimeOnly(libs.logback.classic)
+    runtimeOnly(libs.logstash.logback.encoder)
 
     testImplementation(libs.kotest.runner)
     testImplementation(libs.kotest.assertions)
     testImplementation(libs.mockk)
+    testImplementation(libs.ktor.server.test.host)
+    testImplementation(libs.ktor.client.content.negotiation)
+    testImplementation(libs.ktor.serialization.kotlinx.json.client)
 }
 
 ktor {

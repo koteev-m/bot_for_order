@@ -1,12 +1,30 @@
-<configuration>
-  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-    <encoder>
-      <!-- Короткий ключ-значение формат без секретов -->
-      <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ} level=%-5level trace=%X{traceId:-} logger=%logger{36} msg="%msg" %n</pattern>
-    </encoder>
-  </appender>
+<configuration scan="true">
+    <timestamp key="timestamp" datePattern="yyyy-MM-dd'T'HH:mm:ss.SSS'Z'" timeZone="UTC"/>
 
-  <root level="INFO">
-    <appender-ref ref="STDOUT"/>
-  </root>
+    <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <fieldNames>
+                <timestamp>timestamp</timestamp>
+                <level>level</level>
+                <logger>logger</logger>
+                <thread>thread</thread>
+                <message>message</message>
+                <mdc>mdc</mdc>
+                <stackTrace>exception</stackTrace>
+            </fieldNames>
+            <includeMdcKeyName>requestId</includeMdcKeyName>
+            <includeMdcKeyName>userId</includeMdcKeyName>
+            <includeStackTrace>true</includeStackTrace>
+            <jsonGeneratorDecorator class="net.logstash.logback.mask.MaskingJsonGeneratorDecorator">
+                <valueMask>
+                    <value>(?i)"(authorization|x-telegram-init-data)"\s*:\s*"[^"]*"</value>
+                    <value>(?i)"[^"]*token[^"]*"\s*:\s*"[^"]*"</value>
+                </valueMask>
+            </jsonGeneratorDecorator>
+        </encoder>
+    </appender>
+
+    <root level="${LOG_LEVEL:-INFO}">
+        <appender-ref ref="JSON"/>
+    </root>
 </configuration>
