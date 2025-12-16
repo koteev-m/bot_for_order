@@ -116,11 +116,13 @@ object ConfigLoader {
         val prometheus = parseBooleanEnv("PROMETHEUS_ENABLED", defaultValue = true)
         val basicAuth = parseBasicAuthEnv("METRICS_BASIC_AUTH")
         val ipAllowlist = parseIpAllowlistEnv("METRICS_IP_ALLOWLIST")
+        val trustedProxyAllowlist = parseIpAllowlistEnv("METRICS_TRUSTED_PROXY_ALLOWLIST")
         return MetricsConfig(
             enabled = enabled,
             prometheusEnabled = prometheus,
             basicAuth = basicAuth,
-            ipAllowlist = ipAllowlist
+            ipAllowlist = ipAllowlist,
+            trustedProxyAllowlist = trustedProxyAllowlist
         )
     }
 

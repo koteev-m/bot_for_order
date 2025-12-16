@@ -51,7 +51,8 @@ class RedisHealthTest : StringSpec({
                 enabled = true,
                 prometheusEnabled = true,
                 basicAuth = null,
-                ipAllowlist = emptySet()
+                ipAllowlist = emptySet(),
+                trustedProxyAllowlist = emptySet()
             ),
             health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 10)
         )

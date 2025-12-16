@@ -50,7 +50,8 @@ class DbHealthTest : StringSpec({
                 enabled = true,
                 prometheusEnabled = true,
                 basicAuth = null,
-                ipAllowlist = emptySet()
+                ipAllowlist = emptySet(),
+                trustedProxyAllowlist = emptySet()
             ),
             health = HealthConfig(dbTimeoutMs = 10, redisTimeoutMs = 50)
         )
