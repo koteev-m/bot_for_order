@@ -16,7 +16,8 @@ internal fun baseTestConfig(
         enabled = true,
         prometheusEnabled = true,
         basicAuth = null,
-        ipAllowlist = emptySet()
+        ipAllowlist = emptySet(),
+        trustedProxyAllowlist = emptySet()
     ),
     health: HealthConfig = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50),
 ): AppConfig = AppConfig(

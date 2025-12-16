@@ -3,6 +3,7 @@ package com.example.app.routes
 import com.example.app.api.respondApiError
 import com.example.app.config.AppConfig
 import com.example.app.observability.BuildInfoProvider
+import com.example.app.util.ClientIpResolver
 import com.example.app.util.CidrMatcher
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -28,6 +29,7 @@ import org.koin.ktor.ext.inject
 import org.redisson.api.RedissonClient
 import org.redisson.api.redisnode.RedisNodes
 
+@Suppress("LongMethod")
 fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
     val database by inject<Database>()
     val redisson by inject<RedissonClient>()
@@ -43,16 +45,24 @@ fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
             call.respond(status, HealthResponse(status = if (overallUp) "UP" else "DOWN", checks = checks))
         }
         get("/build") {
+            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
             call.respond(BuildInfoProvider.current())
         }
         if (cfg.metrics.prometheusEnabled && registry is PrometheusMeterRegistry) {
             get("/metrics") {
                 val requestLogger = environment.log
-                val clientIp = call.request.header(HttpHeaders.XForwardedFor)
-                    ?.split(",")
-                    ?.firstOrNull()
-                    ?.trim()
-                    ?: call.request.local.remoteHost
+                // Кэш и вариативность должны присутствовать на любом исходе маршрута
+                val varyValue = listOf(
+                    HttpHeaders.Authorization,
+                    HttpHeaders.XForwardedFor,
+                    HttpHeaders.Forwarded,
+                    "X-Real-IP",
+                    "CF-Connecting-IP",
+                    "True-Client-IP"
+                ).joinToString(", ")
+                call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+                call.response.headers.append(HttpHeaders.Vary, varyValue)
+                val clientIp = ClientIpResolver.resolve(call, cfg.metrics.trustedProxyAllowlist)
 
                 if (cfg.metrics.ipAllowlist.isNotEmpty() && !CidrMatcher.isAllowed(clientIp, cfg.metrics.ipAllowlist)) {
                     call.respondApiError(requestLogger, HttpStatusCode.Forbidden, "forbidden", warn = true)

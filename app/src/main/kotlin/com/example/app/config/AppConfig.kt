@@ -77,6 +77,7 @@ data class MetricsConfig(
     val prometheusEnabled: Boolean,
     val basicAuth: BasicAuth?,
     val ipAllowlist: Set<String>,
+    val trustedProxyAllowlist: Set<String>,
 )
 
 data class HealthConfig(

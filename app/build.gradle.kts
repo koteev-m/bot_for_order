@@ -1,4 +1,5 @@
 import java.io.ByteArrayOutputStream
+import org.gradle.api.tasks.Copy
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -60,8 +61,9 @@ ktor {
 }
 
 val generateBuildInfo = tasks.register("generateBuildInfo") {
-    val outputFile = layout.projectDirectory.file("src/main/resources/build-info.json")
+    val outputFile = layout.buildDirectory.file("generated-resources/build/build-info.json")
     outputs.file(outputFile)
+    // Гарантируем, что build-info.json всегда пересоздается
     outputs.upToDateWhen { false }
 
     doLast {
@@ -74,16 +76,20 @@ val generateBuildInfo = tasks.register("generateBuildInfo") {
             ?: "unknown"
         val builtAt = DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(Instant.now().atOffset(ZoneOffset.UTC))
         val payload = """{"version":"$version","commit":"$commit","branch":"$branch","builtAt":"$builtAt"}"""
-        outputFile.asFile.apply {
+        outputFile.get().asFile.apply {
             parentFile.mkdirs()
             writeText(payload + "\n")
         }
     }
 }
 
-tasks.named("processResources") {
+tasks.named<Copy>("processResources") {
+    val buildInfo = layout.buildDirectory.file("generated-resources/build/build-info.json")
     dependsOn(generateBuildInfo)
     dependsOn(":miniapp:copyMiniAppToApp")
+    from(buildInfo) {
+        rename { "build-info.json" }
+    }
 }
 
 fun Project.execAndCapture(vararg command: String): String? {

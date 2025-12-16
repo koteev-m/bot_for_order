@@ -41,7 +41,8 @@ class HealthMetricsToggleTest : StringSpec({
                 enabled = true,
                 prometheusEnabled = true,
                 basicAuth = null,
-                ipAllowlist = emptySet()
+                ipAllowlist = emptySet(),
+                trustedProxyAllowlist = emptySet()
             ),
             health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
         )
@@ -91,7 +92,8 @@ class HealthMetricsToggleTest : StringSpec({
                 enabled = true,
                 prometheusEnabled = false,
                 basicAuth = null,
-                ipAllowlist = emptySet()
+                ipAllowlist = emptySet(),
+                trustedProxyAllowlist = emptySet()
             ),
             health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
         )
