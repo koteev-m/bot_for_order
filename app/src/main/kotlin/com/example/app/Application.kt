@@ -1,6 +1,7 @@
 package com.example.app
 
 import com.example.app.api.installApiErrors
+import com.example.app.api.respondApiError
 import com.example.app.config.AppConfig
 import com.example.app.config.ConfigLoader
 import com.example.app.di.adminModule
@@ -10,41 +11,63 @@ import com.example.app.di.fxModule
 import com.example.app.di.offersModule
 import com.example.app.di.paymentsModule
 import com.example.app.di.redisBindingsModule
+import com.example.app.observability.REQUEST_ID_MDC_KEY
+import com.example.app.observability.USER_ID_MDC_KEY
 import com.example.app.routes.installAdminWebhook
 import com.example.app.routes.installApiRoutes
+import com.example.app.routes.installBaseRoutes
 import com.example.app.routes.installShopWebhook
 import com.example.app.routes.installStaticAppRoutes
+import com.example.app.security.InitDataAuth
 import com.example.app.services.installFxRefresher
 import com.example.app.services.installOffersExpiryJob
 import com.example.app.services.installReservesSweepJob
 import com.example.app.services.installRestockScannerJob
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import kotlinx.serialization.json.Json
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
+import io.ktor.server.metrics.micrometer.MicrometerMetrics
 import io.ktor.server.netty.EngineMain
+import io.ktor.server.plugins.BadRequestException
+import io.ktor.server.plugins.NotFoundException
+import io.ktor.server.plugins.callid.CallId
+import io.ktor.server.plugins.callid.callId
+import io.ktor.server.plugins.callid.callIdMdc
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
-import io.ktor.server.plugins.statuspages.exception
-import io.ktor.server.response.respondText
-import io.ktor.server.routing.get
-import io.ktor.server.routing.routing
-import java.net.URI
+import io.ktor.server.request.path
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.binder.jvm.JvmGcMetrics
+import io.micrometer.core.instrument.binder.jvm.JvmMemoryMetrics
+import io.micrometer.core.instrument.binder.system.ProcessorMetrics
+import io.micrometer.core.instrument.distribution.DistributionStatisticConfig
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.micrometer.prometheusmetrics.PrometheusConfig
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
+import java.time.Duration
+import java.util.UUID
 import org.flywaydb.core.Flyway
 import org.koin.ktor.ext.inject
 import org.koin.ktor.plugin.Koin
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.slf4j.event.Level
 
-fun main() = EngineMain.main(emptyArray())
+fun main() {
+    EngineMain.main(emptyArray())
+}
 
 @Suppress("unused")
 fun Application.module() {
     val log = LoggerFactory.getLogger("Boot")
 
     val cfg = loadConfiguration(log)
-    configureDependencyInjection(cfg)
+    val meterRegistry = configureMetrics(cfg)
+    configureDependencyInjection(cfg, meterRegistry)
     runMigrations(log)
     installFxRefresher(cfg)
     installOffersExpiryJob(cfg)
@@ -56,7 +79,7 @@ fun Application.module() {
     installShopWebhook()
     installApiRoutes()
     installStaticAppRoutes()
-    installBaseRoutes(cfg)
+    installBaseRoutes(cfg, meterRegistry)
 
     logStartup(log, cfg)
 }
@@ -73,10 +96,10 @@ private fun loadConfiguration(log: Logger): AppConfig {
     }
 }
 
-private fun Application.configureDependencyInjection(cfg: AppConfig) {
+private fun Application.configureDependencyInjection(cfg: AppConfig, meterRegistry: MeterRegistry?) {
     install(Koin) {
         modules(
-            appModule(cfg),
+            appModule(cfg, meterRegistry),
             dbModule(cfg),
             redisBindingsModule,
             adminModule,
@@ -98,60 +121,122 @@ private fun Application.runMigrations(log: Logger) {
 }
 
 private fun Application.configureServerPlugins() {
-    install(CallLogging)
+    installCallIdPlugin()
+    installCallLoggingPlugin()
+    installStatusPageHandlers()
+    install(ContentNegotiation) {
+        json(
+            Json {
+                ignoreUnknownKeys = true
+                explicitNulls = false
+                encodeDefaults = false
+            }
+        )
+    }
+}
+
+private fun Application.installCallIdPlugin() {
+    install(CallId) {
+        retrieveFromHeader(HttpHeaders.XRequestId)
+        generate { UUID.randomUUID().toString() }
+        verify { it.isNotBlank() }
+        replyToHeader(HttpHeaders.XRequestId)
+    }
+}
+
+private fun Application.installCallLoggingPlugin() {
+    install(CallLogging) {
+        level = Level.INFO
+        callIdMdc(REQUEST_ID_MDC_KEY)
+        mdc(USER_ID_MDC_KEY) { call ->
+            if (call.attributes.contains(InitDataAuth.VERIFIED_USER_ATTR)) {
+                call.attributes[InitDataAuth.VERIFIED_USER_ATTR].toString()
+            } else {
+                null
+            }
+        }
+        filter { call ->
+            val path = call.request.path()
+            !path.startsWith("/health") && !path.startsWith("/metrics")
+        }
+    }
+}
+
+private fun Application.installStatusPageHandlers() {
+    val appLog = environment.log
     install(StatusPages) {
-        installApiErrors()
+        installApiErrors(appLog)
+        exception<BadRequestException> { call, cause ->
+            call.respondApiError(
+                appLog,
+                HttpStatusCode.BadRequest,
+                cause.message ?: "bad_request",
+                warn = true,
+                cause = cause
+            )
+        }
+        exception<NotFoundException> { call, cause ->
+            call.respondApiError(
+                appLog,
+                HttpStatusCode.NotFound,
+                cause.message ?: "not_found",
+                warn = true,
+                cause = cause
+            )
+        }
+        status(
+            HttpStatusCode.Unauthorized,
+            HttpStatusCode.Forbidden,
+            HttpStatusCode.NotFound,
+            HttpStatusCode.UnprocessableEntity
+        ) { call, status ->
+            call.respondApiError(
+                appLog,
+                status,
+                status.description.lowercase().replace(" ", "_"),
+                warn = status.value < 500
+            )
+        }
         exception<Throwable> { call, cause ->
-            call.respondText("Internal error", status = HttpStatusCode.InternalServerError)
-            this@configureServerPlugins.environment.log.error("Unhandled", cause)
-        }
-    }
-    install(ContentNegotiation) { json() }
-}
-
-private fun Application.installBaseRoutes(cfg: AppConfig) {
-    routing {
-        get("/health") { call.respondText("OK") }
-        get("/") { call.respondText("tg-shop-monorepo up") }
-        get("/_diag") {
-            val maskedRedis = maskRedisUrl(cfg)
-            val masked = buildString {
-                append("admins=")
-                append(cfg.telegram.adminIds.size)
-                append(", channelId=")
-                append(cfg.telegram.channelId)
-                append(", redis=")
-                append(maskedRedis)
-                append(", currency=")
-                append(cfg.payments.invoiceCurrency)
-                append(", baseUrl=")
-                append(cfg.server.publicBaseUrl)
-            }
-            call.respondText("cfg:$masked")
+            call.respondApiError(
+                appLog,
+                HttpStatusCode.InternalServerError,
+                "internal_error",
+                warn = false,
+                cause = cause
+            )
         }
     }
 }
 
-private fun maskRedisUrl(cfg: AppConfig): String {
-    return runCatching { URI(cfg.redis.url) }
-        .map { uri ->
-            buildString {
-                append(uri.scheme)
-                append("://")
-                append(uri.host ?: uri.authority ?: "unknown")
-                if (uri.port != -1) {
-                    append(":${uri.port}")
-                }
-            }
-        }
-        .getOrElse { "redis://invalid" }
-}
+private fun Application.configureMetrics(cfg: AppConfig): MeterRegistry? {
+    if (!cfg.metrics.enabled) return null
 
-private fun logStartup(log: Logger, cfg: AppConfig) {
-    log.info(
-        "Application started. baseUrl={}, currency={}, admins={}",
-        cfg.server.publicBaseUrl,
-        cfg.payments.invoiceCurrency,
-        cfg.telegram.adminIds.size
-    )
+    val registry: MeterRegistry = if (cfg.metrics.prometheusEnabled) {
+        PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+    } else {
+        SimpleMeterRegistry()
+    }
+    registry.config().commonTags("service", "tg-shop")
+
+    install(MicrometerMetrics) {
+        metricName = "http.server.requests"
+        this.registry = registry
+        distributionStatisticConfig = DistributionStatisticConfig
+            .builder()
+            .serviceLevelObjectives(
+                Duration.ofMillis(100).toNanos().toDouble(),
+                Duration.ofMillis(500).toNanos().toDouble()
+            )
+            .maximumExpectedValue(Duration.ofSeconds(20).toNanos().toDouble())
+            .percentilesHistogram(true)
+            .build()
+        meterBinders = listOf(
+            JvmGcMetrics(),
+            JvmMemoryMetrics(),
+            ProcessorMetrics()
+        )
+    }
+
+    return registry
 }

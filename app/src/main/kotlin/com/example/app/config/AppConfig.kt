@@ -6,7 +6,10 @@ data class AppConfig(
     val redis: RedisConfig,
     val payments: PaymentsConfig,
     val server: ServerConfig,
-    val fx: FxConfig
+    val fx: FxConfig,
+    val logging: LoggingConfig,
+    val metrics: MetricsConfig,
+    val health: HealthConfig
 )
 
 data class TelegramConfig(
@@ -57,4 +60,19 @@ data class ServerConfig(
 data class FxConfig(
     val displayCurrencies: Set<String>,
     val refreshIntervalSec: Int
+)
+
+data class LoggingConfig(
+    val level: String,
+    val json: Boolean
+)
+
+data class MetricsConfig(
+    val enabled: Boolean,
+    val prometheusEnabled: Boolean
+)
+
+data class HealthConfig(
+    val dbTimeoutMs: Long,
+    val redisTimeoutMs: Long
 )

@@ -110,8 +110,7 @@ private suspend fun handleCreateOrder(
             error
         )
         deps.routesDeps.ordersRepository.setStatus(orderId, OrderStatus.canceled)
-        call.respond(HttpStatusCode.BadRequest, ApiError("variant not available", HttpStatusCode.BadRequest))
-        return
+        throw ApiError("variant not available", HttpStatusCode.BadRequest)
     }
     if (reserveResult == ReserveWriteResult.REFRESHED) {
         ordersLog.info("order_reserve_refreshed orderId={} item={} variant={}", orderId, order.itemId, order.variantId)

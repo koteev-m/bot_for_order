@@ -9,13 +9,18 @@ import com.example.bots.TelegramClients
 import com.example.domain.watchlist.PriceDropNotifier
 import com.example.domain.watchlist.RestockNotifier
 import com.example.redis.RedisClientFactory
+import io.micrometer.core.instrument.MeterRegistry
 import org.koin.dsl.module
 import org.redisson.api.RedissonClient
 
-fun appModule(config: AppConfig) = module {
+fun appModule(config: AppConfig, meterRegistry: MeterRegistry?) = module {
     single<AppConfig> { config }
 
-    single { TelegramClients(config.telegram.adminToken, config.telegram.shopToken) }
+    meterRegistry?.let { registry ->
+        single<MeterRegistry> { registry }
+    }
+
+    single { TelegramClients(config.telegram.adminToken, config.telegram.shopToken, meterRegistry) }
 
     single<RedissonClient> { RedisClientFactory.create(config.redis.url) }
 

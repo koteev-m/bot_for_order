@@ -10,7 +10,10 @@ object ConfigLoader {
         redis = loadRedisConfig(),
         payments = loadPaymentsConfig(),
         server = loadServerConfig(),
-        fx = loadFxConfig()
+        fx = loadFxConfig(),
+        logging = loadLoggingConfig(),
+        metrics = loadMetricsConfig(),
+        health = loadHealthConfig()
     )
 
     private fun loadTelegramConfig(): TelegramConfig {
@@ -101,4 +104,24 @@ object ConfigLoader {
             refreshIntervalSec = refreshIntervalSec
         )
     }
+
+    private fun loadLoggingConfig(): LoggingConfig {
+        val level = parseLogLevelEnv("LOG_LEVEL", defaultValue = "INFO")
+        val json = parseBooleanEnv("LOG_JSON", defaultValue = true)
+        return LoggingConfig(level = level, json = json)
+    }
+
+    private fun loadMetricsConfig(): MetricsConfig {
+        val enabled = parseBooleanEnv("METRICS_ENABLED", defaultValue = true)
+        val prometheus = parseBooleanEnv("PROMETHEUS_ENABLED", defaultValue = true)
+        return MetricsConfig(
+            enabled = enabled,
+            prometheusEnabled = prometheus
+        )
+    }
+
+    private fun loadHealthConfig(): HealthConfig = HealthConfig(
+        dbTimeoutMs = parsePositiveLongEnv("HEALTH_DB_TIMEOUT_MS", defaultValue = 500),
+        redisTimeoutMs = parsePositiveLongEnv("HEALTH_REDIS_TIMEOUT_MS", defaultValue = 500)
+    )
 }
