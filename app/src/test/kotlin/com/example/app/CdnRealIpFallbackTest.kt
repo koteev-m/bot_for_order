@@ -21,35 +21,8 @@ import kotlinx.serialization.json.Json
 import org.koin.dsl.module
 import org.koin.ktor.plugin.Koin
 
-class ClientIpResolverMoreEdgeCasesTest : StringSpec({
-    "uses Forwarded with quoted bracketed IPv6 and port" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("2001:db8::/32"),
-                trustedProxyAllowlist = setOf("127.0.0.1")
-            ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-        testApplication {
-            application {
-                install(ServerContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-            val resp = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header(HttpHeaders.Forwarded, """for="[2001:db8::1]:443";proto=https, for=127.0.0.1""")
-            }
-            resp.status shouldBe HttpStatusCode.OK
-        }
-    }
-
-    "ignores obfuscated Forwarded for=_hidden and uses next hop" {
+class CdnRealIpFallbackTest : StringSpec({
+    "uses CF-Connecting-IP when remote is trusted and XFF/Forwarded absent" {
         val (database, redisson) = healthDeps()
         val cfg = baseTestConfig(
             metrics = MetricsConfig(
@@ -70,20 +43,20 @@ class ClientIpResolverMoreEdgeCasesTest : StringSpec({
             }
             val resp = client.get("/metrics") {
                 header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header(HttpHeaders.Forwarded, """for=_hidden;proto=https, for=203.0.113.5, for=127.0.0.1""")
+                header("CF-Connecting-IP", "203.0.113.5")
             }
             resp.status shouldBe HttpStatusCode.OK
         }
     }
 
-    "accepts IPv6 with zone-id in Forwarded" {
+    "uses X-Real-IP when remote is trusted and XFF/Forwarded absent" {
         val (database, redisson) = healthDeps()
         val cfg = baseTestConfig(
             metrics = MetricsConfig(
                 enabled = true,
                 prometheusEnabled = true,
                 basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("fe80::/10"),
+                ipAllowlist = setOf("198.51.100.0/24"),
                 trustedProxyAllowlist = setOf("127.0.0.1")
             ),
             health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
@@ -97,13 +70,40 @@ class ClientIpResolverMoreEdgeCasesTest : StringSpec({
             }
             val resp = client.get("/metrics") {
                 header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header(HttpHeaders.Forwarded, """for="[fe80::1%eth0]";proto=https, for=127.0.0.1""")
+                header("X-Real-IP", "198.51.100.23")
             }
             resp.status shouldBe HttpStatusCode.OK
         }
     }
 
-    "accepts IPv4-mapped IPv6 ::ffff: form" {
+    "uses True-Client-IP when remote is trusted and XFF/Forwarded absent" {
+        val (database, redisson) = healthDeps()
+        val cfg = baseTestConfig(
+            metrics = MetricsConfig(
+                enabled = true,
+                prometheusEnabled = true,
+                basicAuth = BasicAuth("metrics", "secret"),
+                ipAllowlist = setOf("198.51.100.0/24"),
+                trustedProxyAllowlist = setOf("127.0.0.1")
+            ),
+            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
+        )
+        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+        testApplication {
+            application {
+                install(ServerContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                install(Koin) { modules(module { single { database }; single { redisson } }) }
+                routing { installBaseRoutes(cfg, registry) }
+            }
+            val resp = client.get("/metrics") {
+                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
+                header("True-Client-IP", "198.51.100.99")
+            }
+            resp.status shouldBe HttpStatusCode.OK
+        }
+    }
+
+    "ignores CF-Connecting-IP when remote is untrusted" {
         val (database, redisson) = healthDeps()
         val cfg = baseTestConfig(
             metrics = MetricsConfig(
@@ -111,7 +111,7 @@ class ClientIpResolverMoreEdgeCasesTest : StringSpec({
                 prometheusEnabled = true,
                 basicAuth = BasicAuth("metrics", "secret"),
                 ipAllowlist = setOf("203.0.113.0/24"),
-                trustedProxyAllowlist = setOf("127.0.0.1")
+                trustedProxyAllowlist = emptySet()
             ),
             health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
         )
@@ -122,11 +122,12 @@ class ClientIpResolverMoreEdgeCasesTest : StringSpec({
                 install(Koin) { modules(module { single { database }; single { redisson } }) }
                 routing { installBaseRoutes(cfg, registry) }
             }
+            // remote не в trustedProxyAllowlist -> фолбэк по CF-Connecting-IP игнорируется, проверяется реальный remote
             val resp = client.get("/metrics") {
                 header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header(HttpHeaders.XForwardedFor, "::ffff:203.0.113.5, 127.0.0.1")
+                header("CF-Connecting-IP", "203.0.113.5")
             }
-            resp.status shouldBe HttpStatusCode.OK
+            resp.status shouldBe HttpStatusCode.Forbidden
         }
     }
 })

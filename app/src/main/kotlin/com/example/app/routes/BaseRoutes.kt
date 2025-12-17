@@ -18,6 +18,7 @@ import io.ktor.server.request.header
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import java.nio.charset.StandardCharsets
+import kotlin.math.min
 import java.util.Base64
 import kotlin.system.measureTimeMillis
 import kotlin.time.Duration.Companion.milliseconds
@@ -29,7 +30,49 @@ import org.koin.ktor.ext.inject
 import org.redisson.api.RedissonClient
 import org.redisson.api.redisnode.RedisNodes
 
-@Suppress("LongMethod")
+private val METRICS_VARY_VALUE = listOf(
+    HttpHeaders.Authorization,
+    HttpHeaders.XForwardedFor,
+    HttpHeaders.Forwarded,
+    "X-Real-IP",
+    "CF-Connecting-IP",
+    "True-Client-IP"
+).joinToString(", ")
+
+private fun io.ktor.server.application.ApplicationCall.appendMetricsResponseHeaders() {
+    response.headers.append(HttpHeaders.CacheControl, "no-store")
+    response.headers.append(HttpHeaders.Vary, METRICS_VARY_VALUE)
+    response.headers.append("X-Content-Type-Options", "nosniff")
+}
+
+private fun constantTimeEquals(a: String, b: String): Boolean {
+    val ab = a.toByteArray(StandardCharsets.UTF_8)
+    val bb = b.toByteArray(StandardCharsets.UTF_8)
+    var r = ab.size xor bb.size
+    val n = min(ab.size, bb.size)
+    var i = 0
+    while (i < n) {
+        r = r or (ab[i].toInt() xor bb[i].toInt())
+        i++
+    }
+    return r == 0
+}
+
+private fun basicAuthValid(header: String?, expectedUser: String, expectedPass: String): Boolean {
+    val creds = header
+        ?.takeIf { it.startsWith("Basic", ignoreCase = true) }
+        ?.removePrefix("Basic")
+        ?.trim()
+        ?.let { blob ->
+            val decoded = runCatching { Base64.getDecoder().decode(blob).toString(StandardCharsets.UTF_8) }.getOrNull()
+            decoded?.split(":", limit = 2)?.takeIf { it.size == 2 }
+        }
+        ?: return false
+    val userOk = constantTimeEquals(creds[0], expectedUser)
+    val passOk = constantTimeEquals(creds[1], expectedPass)
+    return userOk && passOk
+}
+
 fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
     val database by inject<Database>()
     val redisson by inject<RedissonClient>()
@@ -52,16 +95,7 @@ fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
             get("/metrics") {
                 val requestLogger = environment.log
                 // Кэш и вариативность должны присутствовать на любом исходе маршрута
-                val varyValue = listOf(
-                    HttpHeaders.Authorization,
-                    HttpHeaders.XForwardedFor,
-                    HttpHeaders.Forwarded,
-                    "X-Real-IP",
-                    "CF-Connecting-IP",
-                    "True-Client-IP"
-                ).joinToString(", ")
-                call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-                call.response.headers.append(HttpHeaders.Vary, varyValue)
+                call.appendMetricsResponseHeaders()
                 val clientIp = ClientIpResolver.resolve(call, cfg.metrics.trustedProxyAllowlist)
 
                 if (cfg.metrics.ipAllowlist.isNotEmpty() && !CidrMatcher.isAllowed(clientIp, cfg.metrics.ipAllowlist)) {
@@ -71,17 +105,11 @@ fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
 
                 val expectedAuth = cfg.metrics.basicAuth
                 if (expectedAuth != null) {
-                    val isValid = call.request.header(HttpHeaders.Authorization)
-                        ?.takeIf { it.startsWith("Basic", ignoreCase = true) }
-                        ?.removePrefix("Basic")
-                        ?.trim()
-                        ?.let { blob ->
-                            runCatching {
-                                val decoded = Base64.getDecoder().decode(blob).toString(StandardCharsets.UTF_8)
-                                val parts = decoded.split(":", limit = 2)
-                                parts.size == 2 && parts[0] == expectedAuth.user && parts[1] == expectedAuth.password
-                            }.getOrNull()
-                        } ?: false
+                    val isValid = basicAuthValid(
+                        call.request.header(HttpHeaders.Authorization),
+                        expectedAuth.user,
+                        expectedAuth.password
+                    )
                     if (!isValid) {
                         call.response.headers.append(HttpHeaders.WWWAuthenticate, "Basic realm=\"metrics\"")
                         call.respondApiError(requestLogger, HttpStatusCode.Unauthorized, "unauthorized", warn = true)
