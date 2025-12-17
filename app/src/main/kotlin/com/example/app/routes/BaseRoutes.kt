@@ -18,7 +18,7 @@ import io.ktor.server.request.header
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import java.nio.charset.StandardCharsets
-import kotlin.math.min
+import kotlin.math.max
 import java.util.Base64
 import kotlin.system.measureTimeMillis
 import kotlin.time.Duration.Companion.milliseconds
@@ -45,14 +45,21 @@ private fun io.ktor.server.application.ApplicationCall.appendMetricsResponseHead
     response.headers.append("X-Content-Type-Options", "nosniff")
 }
 
+private fun io.ktor.server.application.ApplicationCall.appendNoStoreNoSniff() {
+    response.headers.append(HttpHeaders.CacheControl, "no-store")
+    response.headers.append("X-Content-Type-Options", "nosniff")
+}
+
 private fun constantTimeEquals(a: String, b: String): Boolean {
     val ab = a.toByteArray(StandardCharsets.UTF_8)
     val bb = b.toByteArray(StandardCharsets.UTF_8)
     var r = ab.size xor bb.size
-    val n = min(ab.size, bb.size)
+    val n = max(ab.size, bb.size)
     var i = 0
     while (i < n) {
-        r = r or (ab[i].toInt() xor bb[i].toInt())
+        val ai = if (i < ab.size) ab[i].toInt() else 0
+        val bi = if (i < bb.size) bb[i].toInt() else 0
+        r = r or (ai xor bi)
         i++
     }
     return r == 0
@@ -79,6 +86,7 @@ fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
 
     routing {
         get("/health") {
+            call.appendNoStoreNoSniff()
             val checks = listOf(
                 databaseHealthCheck(database, cfg.health.dbTimeoutMs),
                 redisHealthCheck(redisson, cfg.health.redisTimeoutMs)
@@ -88,7 +96,7 @@ fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
             call.respond(status, HealthResponse(status = if (overallUp) "UP" else "DOWN", checks = checks))
         }
         get("/build") {
-            call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+            call.appendNoStoreNoSniff()
             call.respond(BuildInfoProvider.current())
         }
         if (cfg.metrics.prometheusEnabled && registry is PrometheusMeterRegistry) {
@@ -111,7 +119,10 @@ fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
                         expectedAuth.password
                     )
                     if (!isValid) {
-                        call.response.headers.append(HttpHeaders.WWWAuthenticate, "Basic realm=\"metrics\"")
+                        call.response.headers.append(
+                            HttpHeaders.WWWAuthenticate,
+                            "Basic realm=\"metrics\", charset=\"UTF-8\""
+                        )
                         call.respondApiError(requestLogger, HttpStatusCode.Unauthorized, "unauthorized", warn = true)
                         return@get
                     }
