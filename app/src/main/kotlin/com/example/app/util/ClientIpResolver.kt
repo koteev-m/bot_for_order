@@ -2,7 +2,6 @@ package com.example.app.util
 
 import io.ktor.http.HttpHeaders
 import io.ktor.server.application.ApplicationCall
-import io.ktor.server.request.ApplicationRequest
 
 object ClientIpResolver {
     /**
@@ -14,7 +13,8 @@ object ClientIpResolver {
      *  - On empty/malformed XFF fallback to remoteHost.
      */
     fun resolve(call: ApplicationCall, trustedProxies: Set<String>): String {
-        val remote = call.request.origin.remoteHost
+        // Используем штатный Ktor API: request.local.remoteHost — реальный адрес пира
+        val remote = call.request.local.remoteHost
         if (trustedProxies.isEmpty() || !CidrMatcher.isAllowed(remote, trustedProxies)) {
             return remote
         }
@@ -29,6 +29,7 @@ object ClientIpResolver {
             val tciIp = cleanIpToken(call.request.headers["True-Client-IP"])
             chain = listOfNotNull(realIp, cfIp, tciIp)
         }
+        // Идём справа-налево: пропускаем trusted прокси, первый не-trusted — это клиент
         val client = chain.asReversed().firstOrNull { ip -> !CidrMatcher.isAllowed(ip, trustedProxies) }
         return client ?: remote
     }
@@ -68,10 +69,13 @@ object ClientIpResolver {
         } else {
             trimmed
         }
-        val normalized = if (withoutBrackets.indexOf('.') >= 0) {
-            withoutBrackets.substringBeforeLast(':')
+        // Отрезаем zone-id (fe80::1%eth0) если встретится
+        val noZone = withoutBrackets.substringBefore('%')
+        // IPv4 с :port -> отбрасываем порт
+        val normalized = if (noZone.indexOf('.') >= 0) {
+            noZone.substringBeforeLast(':')
         } else {
-            withoutBrackets
+            noZone
         }
 
         var value = normalized
@@ -87,8 +91,3 @@ object ClientIpResolver {
         }
     }
 }
-
-private val ApplicationRequest.origin: OriginConnectionPoint
-    get() = OriginConnectionPoint(local.remoteHost)
-
-private data class OriginConnectionPoint(val remoteHost: String)
