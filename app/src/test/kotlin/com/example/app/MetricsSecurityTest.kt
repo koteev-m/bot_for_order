@@ -61,7 +61,7 @@ class MetricsSecurityTest : StringSpec({
 
             val missing = client.get("/metrics")
             missing.status shouldBe HttpStatusCode.Unauthorized
-            missing.headers[HttpHeaders.WWWAuthenticate] shouldBe "Basic realm=\"metrics\""
+            missing.headers[HttpHeaders.WWWAuthenticate] shouldBe "Basic realm=\"metrics\", charset=\"UTF-8\""
             missing.headers[HttpHeaders.CacheControl] shouldBe "no-store"
             missing.headers[HttpHeaders.Vary] shouldBe expectedVary
 
