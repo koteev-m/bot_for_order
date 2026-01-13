@@ -7,6 +7,7 @@ import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.response.ResponseHeaders
 import io.ktor.util.AttributeKey
 import java.lang.reflect.Method
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import org.slf4j.Logger
 
@@ -53,7 +54,7 @@ val ObservabilityHeaders = createApplicationPlugin(
     val canonicalVary = pluginConfig.canonicalVary
     val extraCommonHeaders = pluginConfig.extraCommonHeaders
     val aggressiveReplaceStrictHeaders = pluginConfig.aggressiveReplaceStrictHeaders
-    val strictHeaders = pluginConfig.strictHeaders.map { it.lowercase() }.toSet()
+    val strictHeaders = pluginConfig.strictHeaders.map { it.lowercase(Locale.ROOT) }.toSet()
     val logger = application.environment.log
     val removalSupport = HeaderRemovalSupport(logger)
 
@@ -81,7 +82,7 @@ private fun writeCommonHeaders(
     removalSupport: HeaderRemovalSupport,
 ) {
     headers.forEach { (name, value) ->
-        val isStrict = aggressiveReplaceStrictHeaders && name.lowercase() in strictHeaders
+        val isStrict = aggressiveReplaceStrictHeaders && name.lowercase(Locale.ROOT) in strictHeaders
         val removed = if (isStrict) removalSupport.remove(call.response.headers, name) else false
         if (!removed && call.response.headers[name] == value) return@forEach
         call.response.headers.append(name, value)
@@ -106,7 +107,7 @@ private fun writeVary(
     fun addToken(token: String) {
         val trimmed = token.trim()
         if (trimmed.isEmpty()) return
-        val lower = trimmed.lowercase()
+        val lower = trimmed.lowercase(Locale.ROOT)
         val canonical = canonicalVary[lower] ?: trimmed
         seen.putIfAbsent(lower, canonical)
     }
@@ -138,6 +139,7 @@ private fun writeVary(
     if (existingValues.size == 1 && existingValues.first() == joined) return
     if (existingValues.isNotEmpty()) {
         removalSupport.remove(call.response.headers, name)
+        if (call.response.headers.values(name).isNotEmpty()) return
     }
     call.response.headers.append(name, joined)
 }
@@ -150,7 +152,7 @@ private fun maybeAppendHsts(
     removalSupport: HeaderRemovalSupport,
 ) {
     if (!hsts.enabled) return
-    val forwardedProto = call.request.headers["X-Forwarded-Proto"]?.lowercase()
+    val forwardedProto = call.request.headers["X-Forwarded-Proto"]?.lowercase(Locale.ROOT)
     val forwardedHdr = call.request.headers[HttpHeaders.Forwarded]
     val viaForwarded = forwardedProtoIsHttps(forwardedHdr)
     val isHttps = viaForwarded || forwardedProto == "https" || call.request.local.scheme == "https"
@@ -163,7 +165,7 @@ private fun maybeAppendHsts(
     }.joinToString("; ")
 
     val name = "Strict-Transport-Security"
-    val isStrict = aggressiveReplaceStrictHeaders && name.lowercase() in strictHeaders
+    val isStrict = aggressiveReplaceStrictHeaders && name.lowercase(Locale.ROOT) in strictHeaders
     val removed = if (isStrict) removalSupport.remove(call.response.headers, name) else false
     if (!removed && call.response.headers[name] == directives) return
     call.response.headers.append(name, directives)

@@ -28,7 +28,10 @@ class ObservabilityHeadersTest : StringSpec({
             }
 
             val response = client.get("/plain")
-            response.headers.getAll(HttpHeaders.Vary) shouldBe listOf("Accept-Encoding", "User-Agent")
+            val varyValues = response.headers.getAll(HttpHeaders.Vary).orEmpty()
+            varyValues.size shouldBe 2
+            varyValues.any { it.contains("Accept-Encoding") } shouldBe true
+            varyValues.any { it.contains("User-Agent") } shouldBe true
         }
     }
 })

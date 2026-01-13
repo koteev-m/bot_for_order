@@ -25,6 +25,7 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation as ServerCon
 import io.ktor.server.routing.routing
 import io.ktor.server.routing.intercept
 import io.ktor.server.testing.testApplication
+import java.util.Locale
 import io.micrometer.prometheusmetrics.PrometheusConfig
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import kotlinx.serialization.json.Json
@@ -222,8 +223,8 @@ class MetricsSecurityTest : StringSpec({
                 ?: emptyList()
 
             varyTokens.any { it.equals(HttpHeaders.Authorization, ignoreCase = true) } shouldBe true
-            val normalized = varyTokens.map { it.lowercase() }.toSet()
-            normalized shouldBe (setOf("accept-encoding") + metricsVaryTokens.map { it.lowercase() }.toSet())
+            val normalized = varyTokens.map { it.lowercase(Locale.ROOT) }.toSet()
+            normalized shouldBe (setOf("accept-encoding") + metricsVaryTokens.map { it.lowercase(Locale.ROOT) }.toSet())
         }
     }
 
@@ -266,8 +267,8 @@ class MetricsSecurityTest : StringSpec({
                 ?: emptyList()
 
             varyTokens.count { it.equals("x-custom-foo", ignoreCase = true) } shouldBe 1
-            val normalized = varyTokens.map { it.lowercase() }.toSet()
-            normalized shouldBe (metricsVaryTokens.map { it.lowercase() }.toSet() + "x-custom-foo")
+            val normalized = varyTokens.map { it.lowercase(Locale.ROOT) }.toSet()
+            normalized shouldBe (metricsVaryTokens.map { it.lowercase(Locale.ROOT) }.toSet() + "x-custom-foo")
         }
     }
 
