@@ -5,8 +5,10 @@ import com.example.app.config.AppConfig
 import com.example.app.config.BasicAuthCompatConfig
 import com.example.app.observability.BuildInfoProvider
 import com.example.app.plugins.OBS_COMMON_ENABLED
+import com.example.app.plugins.OBS_EXTRA_HEADERS
 import com.example.app.plugins.OBS_VARY_TOKENS
 import com.example.app.plugins.ObservabilityHeaders
+import com.example.app.plugins.ObservabilityHeadersConfig
 import com.example.app.util.CidrMatcher
 import com.example.app.util.ClientIpResolver
 import io.ktor.http.ContentType
@@ -35,7 +37,6 @@ import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransacti
 import org.koin.ktor.ext.inject
 import org.redisson.api.RedissonClient
 import org.redisson.api.redisnode.RedisNodes
-import io.ktor.util.AttributeKey
 
 private val METRICS_VARY_TOKENS = listOf(
     HttpHeaders.Authorization,
@@ -47,8 +48,6 @@ private val METRICS_VARY_TOKENS = listOf(
 )
 
 private val VARY_CANONICAL = METRICS_VARY_TOKENS.associateBy { it.lowercase() }
-
-internal val PRESET_VARY_TOKENS = AttributeKey<Set<String>>("preset-vary-tokens")
 
 private const val MAX_BASIC_AUTH_ENCODED = 8192
 private const val MAX_BASIC_AUTH_DECODED = 4096
@@ -111,13 +110,18 @@ private fun normalizedRealm(raw: String): String {
     return cleaned.replace("\\", "\\\\").replace("\"", "\\\"")
 }
 
-fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
+fun Application.installBaseRoutes(
+    cfg: AppConfig,
+    registry: MeterRegistry?,
+    observabilityConfig: ObservabilityHeadersConfig.() -> Unit = {},
+) {
     val database by inject<Database>()
     val redisson by inject<RedissonClient>()
 
     install(ObservabilityHeaders) {
         hsts = cfg.security.hsts
         canonicalVary = VARY_CANONICAL
+        observabilityConfig()
     }
 
     routing {
@@ -142,6 +146,9 @@ fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
                 val varyTokens = call.attributes.getOrNull(OBS_VARY_TOKENS)
                     ?: mutableSetOf<String>().also { call.attributes.put(OBS_VARY_TOKENS, it) }
                 varyTokens.addAll(METRICS_VARY_TOKENS)
+                val extraHeaders = call.attributes.getOrNull(OBS_EXTRA_HEADERS)
+                    ?: mutableMapOf<String, String>().also { call.attributes.put(OBS_EXTRA_HEADERS, it) }
+                extraHeaders["X-Content-Type-Options"] = "nosniff"
                 val clientIp = ClientIpResolver.resolve(call, cfg.metrics.trustedProxyAllowlist)
 
                 if (cfg.metrics.ipAllowlist.isNotEmpty() && !CidrMatcher.isAllowed(clientIp, cfg.metrics.ipAllowlist)) {

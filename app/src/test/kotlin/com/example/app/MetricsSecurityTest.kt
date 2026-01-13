@@ -4,8 +4,9 @@ import com.example.app.config.BasicAuth
 import com.example.app.config.MetricsConfig
 import com.example.app.config.HealthConfig
 import com.example.app.observability.registerBuildInfoMeter
-import com.example.app.routes.PRESET_VARY_TOKENS
 import com.example.app.routes.installBaseRoutes
+import com.example.app.plugins.OBS_EXTRA_HEADERS
+import com.example.app.plugins.PRESET_VARY_TOKENS
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.ktor.client.request.get
@@ -274,6 +275,88 @@ class MetricsSecurityTest : StringSpec({
                     resp.headers.getAll(name)?.size shouldBe 1
                 }
             }
+        }
+    }
+
+    "plugin replaces conflicting cache headers when enabled" {
+        val (database, redisson) = healthDeps()
+        val cfg = baseTestConfig(
+            metrics = MetricsConfig(
+                enabled = true,
+                prometheusEnabled = true,
+                basicAuth = BasicAuth("metrics", "secret"),
+                ipAllowlist = emptySet(),
+                trustedProxyAllowlist = emptySet()
+            ),
+            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
+        )
+        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) {
+                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
+                }
+                install(Koin) {
+                    modules(module { single { database }; single { redisson } })
+                }
+                install(createApplicationPlugin(name = "conflictingCacheControl") {
+                    onCallRespond { call, _ ->
+                        if (call.request.path() == "/metrics") {
+                            call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=60")
+                        }
+                    }
+                })
+                installBaseRoutes(cfg, registry) {
+                    aggressiveReplaceStrictHeaders = true
+                }
+            }
+
+            val resp = client.get("/metrics")
+            resp.status shouldBe HttpStatusCode.Unauthorized
+            resp.headers[HttpHeaders.CacheControl] shouldBe "no-store"
+            resp.headers.getAll(HttpHeaders.CacheControl)?.size shouldBe 1
+        }
+    }
+
+    "extra per-route headers merged" {
+        val (database, redisson) = healthDeps()
+        val cfg = baseTestConfig(
+            metrics = MetricsConfig(
+                enabled = true,
+                prometheusEnabled = true,
+                basicAuth = BasicAuth("metrics", "secret"),
+                ipAllowlist = emptySet(),
+                trustedProxyAllowlist = emptySet()
+            ),
+            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
+        )
+        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) {
+                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
+                }
+                install(Koin) {
+                    modules(module { single { database }; single { redisson } })
+                }
+                install(createApplicationPlugin(name = "extraHeaders") {
+                    onCall { call ->
+                        if (call.request.path() == "/metrics") {
+                            val extra = call.attributes.getOrNull(OBS_EXTRA_HEADERS)
+                                ?: mutableMapOf<String, String>().also { call.attributes.put(OBS_EXTRA_HEADERS, it) }
+                            extra["X-Robots-Tag"] = "noindex"
+                        }
+                    }
+                })
+                installBaseRoutes(cfg, registry)
+            }
+
+            val resp = client.get("/metrics")
+            resp.status shouldBe HttpStatusCode.Unauthorized
+            resp.headers["X-Robots-Tag"] shouldBe "noindex"
+            resp.headers.getAll("X-Robots-Tag")?.size shouldBe 1
         }
     }
 
