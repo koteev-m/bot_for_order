@@ -3,16 +3,18 @@ package com.example.app.routes
 import com.example.app.api.respondApiError
 import com.example.app.config.AppConfig
 import com.example.app.config.BasicAuthCompatConfig
-import com.example.app.config.HstsConfig
 import com.example.app.observability.BuildInfoProvider
+import com.example.app.plugins.OBS_COMMON_ENABLED
+import com.example.app.plugins.OBS_VARY_TOKENS
+import com.example.app.plugins.ObservabilityHeaders
 import com.example.app.util.CidrMatcher
 import com.example.app.util.ClientIpResolver
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
-import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
+import io.ktor.server.application.install
 import io.ktor.server.request.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
@@ -33,7 +35,6 @@ import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransacti
 import org.koin.ktor.ext.inject
 import org.redisson.api.RedissonClient
 import org.redisson.api.redisnode.RedisNodes
-import io.ktor.server.response.ResponseHeaders
 import io.ktor.util.AttributeKey
 
 private val METRICS_VARY_TOKENS = listOf(
@@ -56,100 +57,6 @@ private const val MAX_BASIC_PASS = 2048
 
 private fun hasControlChars(s: String): Boolean =
     s.any { ch -> ch <= '\u001F' || ch == '\u007F' }
-
-private fun forwardedProtoIsHttps(forwardedHeader: String?): Boolean {
-    if (forwardedHeader.isNullOrBlank()) return false
-    // Support multiple elements: Forwarded: for=..., proto=https;..., for=...
-    return forwardedHeader.split(',')
-        .asSequence()
-        .map { it.trim() }
-        .flatMap { elem -> elem.split(';').asSequence().map { it.trim() } }
-        .any { part -> part.startsWith("proto=", ignoreCase = true) && part.substringAfter('=').trim().trim('"').equals("https", ignoreCase = true) }
-}
-
-private fun io.ktor.server.application.ApplicationCall.maybeAppendHsts(hsts: HstsConfig) {
-    if (!hsts.enabled) return
-    val forwardedProto = request.headers["X-Forwarded-Proto"]?.lowercase()
-    val forwardedHdr = request.headers[HttpHeaders.Forwarded]
-    val viaForwarded = forwardedProtoIsHttps(forwardedHdr)
-    val isHttps = viaForwarded || forwardedProto == "https" || request.local.scheme == "https"
-    if (!isHttps) return
-
-    val directives = buildList {
-        add("max-age=${hsts.maxAgeSeconds}")
-        if (hsts.includeSubdomains) add("includeSubDomains")
-        if (hsts.preload) add("preload")
-    }.joinToString("; ")
-    setHeader("Strict-Transport-Security", directives)
-}
-
-private fun ResponseHeaders.removeExisting(name: String) {
-    runCatching { javaClass.getMethod("remove", String::class.java).invoke(this, name) }
-}
-
-private fun ApplicationCall.setHeader(name: String, value: String) {
-    if (response.headers[name] == value) return
-    response.headers.removeExisting(name)
-    response.headers.append(name, value)
-}
-
-private fun ApplicationCall.setCsvHeaderUnion(name: String, values: List<String>) {
-    val seen = LinkedHashMap<String, String>()
-
-    fun addToken(token: String) {
-        val t = token.trim()
-        if (t.isEmpty()) return
-        val lower = t.lowercase()
-        val canonical = VARY_CANONICAL[lower] ?: t
-        seen.putIfAbsent(lower, canonical)
-    }
-
-    val existing = response.headers.allValues()
-    if (existing is Map<*, *>) {
-        existing.entries.forEach { entry ->
-            val key = entry.key
-            val value = entry.value
-            if (key is String && key.equals(name, ignoreCase = true) && value is List<*>) {
-                value.filterIsInstance<String>().forEach { line ->
-                    line.split(',').forEach { token -> addToken(token) }
-                }
-            }
-        }
-    } else {
-        response.headers[name]?.let { line ->
-            line.split(',').forEach { token -> addToken(token) }
-        }
-    }
-    attributes.getOrNull(PRESET_VARY_TOKENS)?.forEach(::addToken)
-    values.forEach(::addToken)
-
-    val joined = seen.values.joinToString(", ")
-    if (response.headers[name] == joined) return
-    response.headers.removeExisting(name)
-    response.headers.append(name, joined)
-}
-
-private fun io.ktor.server.application.ApplicationCall.appendCommonSecurityHeaders(hsts: HstsConfig) {
-    setHeader(HttpHeaders.CacheControl, "no-store")
-    setHeader("X-Content-Type-Options", "nosniff")
-    setHeader("X-Frame-Options", "DENY")
-    setHeader("Referrer-Policy", "no-referrer")
-    setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
-    setHeader("Pragma", "no-cache")
-    setHeader("Cross-Origin-Resource-Policy", "same-origin")
-    setHeader("X-Permitted-Cross-Domain-Policies", "none")
-    setHeader("Expires", "0")
-    maybeAppendHsts(hsts)
-}
-
-private fun io.ktor.server.application.ApplicationCall.appendMetricsResponseHeaders(hsts: HstsConfig) {
-    appendCommonSecurityHeaders(hsts)
-    setCsvHeaderUnion(HttpHeaders.Vary, METRICS_VARY_TOKENS)
-}
-
-private fun io.ktor.server.application.ApplicationCall.appendNoStoreNoSniff(hsts: HstsConfig) {
-    appendCommonSecurityHeaders(hsts)
-}
 
 private fun constantTimeEquals(a: String, b: String): Boolean {
     val ab = a.toByteArray(StandardCharsets.UTF_8)
@@ -208,9 +115,14 @@ fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
     val database by inject<Database>()
     val redisson by inject<RedissonClient>()
 
+    install(ObservabilityHeaders) {
+        hsts = cfg.security.hsts
+        canonicalVary = VARY_CANONICAL
+    }
+
     routing {
         get("/health") {
-            call.appendNoStoreNoSniff(cfg.security.hsts)
+            call.attributes.put(OBS_COMMON_ENABLED, true)
             val checks = listOf(
                 databaseHealthCheck(database, cfg.health.dbTimeoutMs),
                 redisHealthCheck(redisson, cfg.health.redisTimeoutMs)
@@ -220,14 +132,16 @@ fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
             call.respond(status, HealthResponse(status = if (overallUp) "UP" else "DOWN", checks = checks))
         }
         get("/build") {
-            call.appendNoStoreNoSniff(cfg.security.hsts)
+            call.attributes.put(OBS_COMMON_ENABLED, true)
             call.respond(BuildInfoProvider.current())
         }
         if (cfg.metrics.prometheusEnabled && registry is PrometheusMeterRegistry) {
             get("/metrics") {
                 val requestLogger = environment.log
                 // Кэш и вариативность должны присутствовать на любом исходе маршрута
-                call.appendMetricsResponseHeaders(cfg.security.hsts)
+                val varyTokens = call.attributes.getOrNull(OBS_VARY_TOKENS)
+                    ?: mutableSetOf<String>().also { call.attributes.put(OBS_VARY_TOKENS, it) }
+                varyTokens.addAll(METRICS_VARY_TOKENS)
                 val clientIp = ClientIpResolver.resolve(call, cfg.metrics.trustedProxyAllowlist)
 
                 if (cfg.metrics.ipAllowlist.isNotEmpty() && !CidrMatcher.isAllowed(clientIp, cfg.metrics.ipAllowlist)) {
@@ -244,10 +158,10 @@ fun Application.installBaseRoutes(cfg: AppConfig, registry: MeterRegistry?) {
                         cfg.security.basicAuthCompat,
                     )
                     if (!isValid) {
-                        call.setHeader(
-                            HttpHeaders.WWWAuthenticate,
-                            "Basic realm=\"${normalizedRealm(cfg.metrics.basicRealm)}\", charset=\"UTF-8\""
-                        )
+                        val challenge = "Basic realm=\"${normalizedRealm(cfg.metrics.basicRealm)}\", charset=\"UTF-8\""
+                        if (call.response.headers[HttpHeaders.WWWAuthenticate] != challenge) {
+                            call.response.headers.append(HttpHeaders.WWWAuthenticate, challenge)
+                        }
                         call.respondApiError(requestLogger, HttpStatusCode.Unauthorized, "unauthorized", warn = true)
                         return@get
                     }
