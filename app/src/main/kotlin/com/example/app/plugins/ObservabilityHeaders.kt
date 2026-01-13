@@ -1,16 +1,18 @@
 package com.example.app.plugins
 
 import com.example.app.config.HstsConfig
-import com.example.app.routes.PRESET_VARY_TOKENS
 import io.ktor.http.HttpHeaders
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.application.onCall
 import io.ktor.server.application.onCallRespond
 import io.ktor.util.AttributeKey
+import org.slf4j.Logger
 
 val OBS_VARY_TOKENS = AttributeKey<MutableSet<String>>("obs-vary-tokens")
 val OBS_COMMON_ENABLED = AttributeKey<Boolean>("obs-common-enabled")
+val OBS_EXTRA_HEADERS = AttributeKey<MutableMap<String, String>>("obs-extra-headers")
+val PRESET_VARY_TOKENS = AttributeKey<Set<String>>("preset-vary-tokens")
 
 class ObservabilityHeadersConfig {
     var hsts: HstsConfig = HstsConfig()
@@ -26,6 +28,19 @@ class ObservabilityHeadersConfig {
         "X-Permitted-Cross-Domain-Policies" to "none",
         "Expires" to "0",
     )
+    var aggressiveReplaceStrictHeaders: Boolean = false
+    val strictHeaders: Set<String> = setOf(
+        HttpHeaders.CacheControl,
+        "Pragma",
+        "Expires",
+        "X-Frame-Options",
+        "X-Content-Type-Options",
+        "Referrer-Policy",
+        "Content-Security-Policy",
+        "Cross-Origin-Resource-Policy",
+        "X-Permitted-Cross-Domain-Policies",
+        "Strict-Transport-Security"
+    )
 }
 
 val ObservabilityHeaders = createApplicationPlugin(
@@ -35,6 +50,9 @@ val ObservabilityHeaders = createApplicationPlugin(
     val hstsConfig = pluginConfig.hsts
     val canonicalVary = pluginConfig.canonicalVary
     val extraCommonHeaders = pluginConfig.extraCommonHeaders
+    val aggressiveReplaceStrictHeaders = pluginConfig.aggressiveReplaceStrictHeaders
+    val strictHeaders = pluginConfig.strictHeaders
+    val logger = application.log
 
     onCall { call ->
         if (call.attributes.getOrNull(OBS_VARY_TOKENS) == null) {
@@ -43,20 +61,34 @@ val ObservabilityHeaders = createApplicationPlugin(
         if (call.attributes.getOrNull(OBS_COMMON_ENABLED) == null) {
             call.attributes.put(OBS_COMMON_ENABLED, true)
         }
+        if (call.attributes.getOrNull(OBS_EXTRA_HEADERS) == null) {
+            call.attributes.put(OBS_EXTRA_HEADERS, mutableMapOf())
+        }
     }
 
     onCallRespond { call, _ ->
         if (call.attributes.getOrNull(OBS_COMMON_ENABLED) == true) {
-            writeCommonHeaders(call, extraCommonHeaders)
+            val perRoute = call.attributes.getOrNull(OBS_EXTRA_HEADERS).orEmpty()
+            val mergedHeaders = LinkedHashMap(extraCommonHeaders)
+            perRoute.forEach { (name, value) -> mergedHeaders[name] = value }
+            writeCommonHeaders(call, mergedHeaders, aggressiveReplaceStrictHeaders, strictHeaders, logger)
         }
         writeVary(call, canonicalVary)
-        maybeAppendHsts(call, hstsConfig)
+        maybeAppendHsts(call, hstsConfig, aggressiveReplaceStrictHeaders, strictHeaders, logger)
     }
 }
 
-private fun writeCommonHeaders(call: ApplicationCall, headers: Map<String, String>) {
+private fun writeCommonHeaders(
+    call: ApplicationCall,
+    headers: Map<String, String>,
+    aggressiveReplaceStrictHeaders: Boolean,
+    strictHeaders: Set<String>,
+    logger: Logger,
+) {
     headers.forEach { (name, value) ->
-        if (call.response.headers[name] == value) return@forEach
+        val isStrict = aggressiveReplaceStrictHeaders && name in strictHeaders
+        val removed = if (isStrict) removeHeaderIfPossible(call, name, logger) else false
+        if (!removed && call.response.headers[name] == value) return@forEach
         call.response.headers.append(name, value)
     }
 }
@@ -100,7 +132,13 @@ private fun writeVary(call: ApplicationCall, canonicalVary: Map<String, String>)
     call.response.headers.append(name, joined)
 }
 
-private fun maybeAppendHsts(call: ApplicationCall, hsts: HstsConfig) {
+private fun maybeAppendHsts(
+    call: ApplicationCall,
+    hsts: HstsConfig,
+    aggressiveReplaceStrictHeaders: Boolean,
+    strictHeaders: Set<String>,
+    logger: Logger,
+) {
     if (!hsts.enabled) return
     val forwardedProto = call.request.headers["X-Forwarded-Proto"]?.lowercase()
     val forwardedHdr = call.request.headers[HttpHeaders.Forwarded]
@@ -114,8 +152,11 @@ private fun maybeAppendHsts(call: ApplicationCall, hsts: HstsConfig) {
         if (hsts.preload) add("preload")
     }.joinToString("; ")
 
-    if (call.response.headers["Strict-Transport-Security"] == directives) return
-    call.response.headers.append("Strict-Transport-Security", directives)
+    val name = "Strict-Transport-Security"
+    val isStrict = aggressiveReplaceStrictHeaders && name in strictHeaders
+    val removed = if (isStrict) removeHeaderIfPossible(call, name, logger) else false
+    if (!removed && call.response.headers[name] == directives) return
+    call.response.headers.append(name, directives)
 }
 
 private fun forwardedProtoIsHttps(forwardedHeader: String?): Boolean {
@@ -126,4 +167,23 @@ private fun forwardedProtoIsHttps(forwardedHeader: String?): Boolean {
         .map { it.trim() }
         .flatMap { elem -> elem.split(';').asSequence().map { it.trim() } }
         .any { part -> part.startsWith("proto=", ignoreCase = true) && part.substringAfter('=').trim().trim('"').equals("https", ignoreCase = true) }
+}
+
+private fun removeHeaderIfPossible(call: ApplicationCall, name: String, logger: Logger): Boolean {
+    val headers = call.response.headers
+    val removeMethod = headers.javaClass.methods.firstOrNull { method ->
+        method.name == "remove" &&
+            method.parameterTypes.size == 1 &&
+            method.parameterTypes[0] == String::class.java
+    } ?: run {
+        logger.debug("Header removal method not available for {}; falling back to append.", name)
+        return false
+    }
+    return try {
+        removeMethod.invoke(headers, name)
+        true
+    } catch (ex: Exception) {
+        logger.debug("Failed to remove header {} via reflective call; falling back to append.", name, ex)
+        false
+    }
 }
