@@ -182,6 +182,50 @@ class MetricsSecurityTest : StringSpec({
         }
     }
 
+    "preserves unknown Vary tokens" {
+        val (database, redisson) = healthDeps()
+        val cfg = baseTestConfig(
+            metrics = MetricsConfig(
+                enabled = true,
+                prometheusEnabled = true,
+                basicAuth = BasicAuth("metrics", "secret"),
+                ipAllowlist = emptySet(),
+                trustedProxyAllowlist = emptySet()
+            ),
+            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
+        )
+        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) {
+                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
+                }
+                install(Koin) { modules(module { single { database }; single { redisson } }) }
+                install(createApplicationPlugin(name = "presetVary") {
+                    onCall { call ->
+                        if (call.request.path() == "/metrics") {
+                            call.attributes.put(PRESET_VARY_TOKENS, setOf("x-custom-foo", "X-Custom-Foo"))
+                        }
+                    }
+                })
+                installBaseRoutes(cfg, registry)
+            }
+
+            val resp = client.get("/metrics")
+            resp.status shouldBe HttpStatusCode.Unauthorized
+            val varyTokens = resp.headers[HttpHeaders.Vary]
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?: emptyList()
+
+            varyTokens.count { it.equals("x-custom-foo", ignoreCase = true) } shouldBe 1
+            val normalized = varyTokens.map { it.lowercase() }.toSet()
+            normalized shouldBe (metricsVaryTokens.map { it.lowercase() }.toSet() + "x-custom-foo")
+        }
+    }
+
     "does not duplicate security headers" {
         val (database, redisson) = healthDeps()
         val cfg = baseTestConfig(
