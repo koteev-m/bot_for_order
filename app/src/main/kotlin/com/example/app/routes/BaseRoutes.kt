@@ -26,6 +26,7 @@ import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.Locale
 import kotlin.system.measureTimeMillis
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.serialization.Serializable
@@ -46,7 +47,7 @@ private val METRICS_VARY_TOKENS = listOf(
     "True-Client-IP"
 )
 
-private val VARY_CANONICAL = METRICS_VARY_TOKENS.associateBy { it.lowercase() }
+private val VARY_CANONICAL = METRICS_VARY_TOKENS.associateBy { it.lowercase(Locale.ROOT) }
 
 private const val MAX_BASIC_AUTH_ENCODED = 8192
 private const val MAX_BASIC_AUTH_DECODED = 4096

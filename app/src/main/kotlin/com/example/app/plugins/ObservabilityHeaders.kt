@@ -62,14 +62,19 @@ val ObservabilityHeaders = createApplicationPlugin(
         val commonEnabled = call.attributes.getOrNull(OBS_COMMON_ENABLED) == true ||
             call.attributes.getOrNull(OBS_ENABLED) == true
         if (commonEnabled) {
-            val perRoute = call.attributes.getOrNull(OBS_EXTRA_HEADERS).orEmpty()
-            val mergedHeaders = LinkedHashMap(extraCommonHeaders)
-            perRoute.forEach { (name, value) -> mergedHeaders[name] = value }
-            writeCommonHeaders(call, mergedHeaders, aggressiveReplaceStrictHeaders, strictHeaders, removalSupport)
+            val perRoute = call.attributes.getOrNull(OBS_EXTRA_HEADERS)
+            val headersToWrite = if (perRoute.isNullOrEmpty()) {
+                extraCommonHeaders
+            } else {
+                LinkedHashMap(extraCommonHeaders).also { merged ->
+                    perRoute.forEach { (name, value) -> merged[name] = value }
+                }
+            }
+            writeCommonHeaders(call, headersToWrite, aggressiveReplaceStrictHeaders, strictHeaders, removalSupport, logger)
         }
         writeVary(call, canonicalVary, removalSupport)
         if (commonEnabled) {
-            maybeAppendHsts(call, hstsConfig, aggressiveReplaceStrictHeaders, strictHeaders, removalSupport)
+            maybeAppendHsts(call, hstsConfig, aggressiveReplaceStrictHeaders, strictHeaders, removalSupport, logger)
         }
     }
 }
@@ -80,12 +85,18 @@ private fun writeCommonHeaders(
     aggressiveReplaceStrictHeaders: Boolean,
     strictHeaders: Set<String>,
     removalSupport: HeaderRemovalSupport,
+    logger: Logger,
 ) {
     headers.forEach { (name, value) ->
-        val isStrict = aggressiveReplaceStrictHeaders && name.lowercase(Locale.ROOT) in strictHeaders
-        val removed = if (isStrict) removalSupport.remove(call.response.headers, name) else false
-        if (!removed && call.response.headers[name] == value) return@forEach
-        call.response.headers.append(name, value)
+        appendHeader(
+            call.response.headers,
+            name,
+            value,
+            aggressiveReplaceStrictHeaders,
+            strictHeaders,
+            removalSupport,
+            logger,
+        )
     }
 }
 
@@ -150,6 +161,7 @@ private fun maybeAppendHsts(
     aggressiveReplaceStrictHeaders: Boolean,
     strictHeaders: Set<String>,
     removalSupport: HeaderRemovalSupport,
+    logger: Logger,
 ) {
     if (!hsts.enabled) return
     val forwardedProto = call.request.headers["X-Forwarded-Proto"]?.lowercase(Locale.ROOT)
@@ -165,10 +177,15 @@ private fun maybeAppendHsts(
     }.joinToString("; ")
 
     val name = "Strict-Transport-Security"
-    val isStrict = aggressiveReplaceStrictHeaders && name.lowercase(Locale.ROOT) in strictHeaders
-    val removed = if (isStrict) removalSupport.remove(call.response.headers, name) else false
-    if (!removed && call.response.headers[name] == directives) return
-    call.response.headers.append(name, directives)
+    appendHeader(
+        call.response.headers,
+        name,
+        directives,
+        aggressiveReplaceStrictHeaders,
+        strictHeaders,
+        removalSupport,
+        logger,
+    )
 }
 
 private fun forwardedProtoIsHttps(forwardedHeader: String?): Boolean {
@@ -181,7 +198,45 @@ private fun forwardedProtoIsHttps(forwardedHeader: String?): Boolean {
         .any { part -> part.startsWith("proto=", ignoreCase = true) && part.substringAfter('=').trim().trim('"').equals("https", ignoreCase = true) }
 }
 
-private class HeaderRemovalSupport(private val logger: Logger) {
+internal fun appendHeader(
+    headers: ResponseHeaders,
+    name: String,
+    value: String,
+    aggressiveReplaceStrictHeaders: Boolean,
+    strictHeaders: Set<String>,
+    removalSupport: HeaderRemovalSupport,
+    logger: Logger,
+) {
+    val isStrict = aggressiveReplaceStrictHeaders && name.lowercase(Locale.ROOT) in strictHeaders
+    if (isStrict) {
+        val existingValues = headers.values(name)
+        when {
+            existingValues.isEmpty() -> {
+                headers.append(name, value)
+                return
+            }
+            existingValues.size == 1 && existingValues.first() == value -> return
+            else -> {
+                removalSupport.remove(headers, name)
+                if (headers.values(name).isNotEmpty()) {
+                    logger.debug(
+                        "Unable to replace strict header {} on {}. Leaving existing values.",
+                        name,
+                        headers.javaClass.name,
+                    )
+                    return
+                }
+                headers.append(name, value)
+                return
+            }
+        }
+    }
+
+    if (headers[name] == value) return
+    headers.append(name, value)
+}
+
+internal class HeaderRemovalSupport(private val logger: Logger) {
     @Volatile
     private var initialized = false
     @Volatile
