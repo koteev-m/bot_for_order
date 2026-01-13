@@ -57,15 +57,6 @@ val ObservabilityHeaders = createApplicationPlugin(
     val logger = application.environment.log
     val removalSupport = HeaderRemovalSupport(logger)
 
-    onCall { call ->
-        if (call.attributes.getOrNull(OBS_VARY_TOKENS) == null) {
-            call.attributes.put(OBS_VARY_TOKENS, mutableSetOf())
-        }
-        if (call.attributes.getOrNull(OBS_EXTRA_HEADERS) == null) {
-            call.attributes.put(OBS_EXTRA_HEADERS, mutableMapOf())
-        }
-    }
-
     onCallRespond { call, _ ->
         val commonEnabled = call.attributes.getOrNull(OBS_COMMON_ENABLED) == true ||
             call.attributes.getOrNull(OBS_ENABLED) == true
@@ -102,6 +93,13 @@ private fun writeVary(
     canonicalVary: Map<String, String>,
     removalSupport: HeaderRemovalSupport,
 ) {
+    val commonEnabled = call.attributes.getOrNull(OBS_COMMON_ENABLED) == true ||
+        call.attributes.getOrNull(OBS_ENABLED) == true
+    val presetTokens = call.attributes.getOrNull(PRESET_VARY_TOKENS)
+    val obsTokens = call.attributes.getOrNull(OBS_VARY_TOKENS)
+    val hasExplicitTokens = !presetTokens.isNullOrEmpty() || !obsTokens.isNullOrEmpty()
+    if (!commonEnabled && !hasExplicitTokens) return
+
     val name = HttpHeaders.Vary
     val seen = LinkedHashMap<String, String>()
 
@@ -130,8 +128,8 @@ private fun writeVary(
         line.split(',').forEach(::addToken)
     }
 
-    call.attributes.getOrNull(PRESET_VARY_TOKENS)?.forEach(::addToken)
-    call.attributes.getOrNull(OBS_VARY_TOKENS)?.forEach(::addToken)
+    presetTokens?.forEach(::addToken)
+    obsTokens?.forEach(::addToken)
 
     if (seen.isEmpty()) return
 
@@ -195,12 +193,16 @@ private class HeaderRemovalSupport(private val logger: Logger) {
         if (method != null) {
             return try {
                 method.invoke(headers, name)
-                true
+                if (headers.values(name).isEmpty()) {
+                    true
+                } else {
+                    tryClearHeaderValues(headers, name)
+                }
             } catch (ex: Exception) {
                 if (loggedFailure.compareAndSet(false, true)) {
                     logger.debug("Failed to remove header via reflective call; falling back to append.", ex)
                 }
-                false
+                tryClearHeaderValues(headers, name)
             }
         }
         return tryClearHeaderValues(headers, name)
@@ -226,11 +228,11 @@ private class HeaderRemovalSupport(private val logger: Logger) {
 
     private fun tryClearHeaderValues(headers: ResponseHeaders, name: String): Boolean {
         val values = headers.values(name)
-        if (values.isEmpty()) return false
+        if (values.isEmpty()) return true
         return try {
             if (values is MutableList<*>) {
                 values.clear()
-                true
+                headers.values(name).isEmpty()
             } else {
                 false
             }
