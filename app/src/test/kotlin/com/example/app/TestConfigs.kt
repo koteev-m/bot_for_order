@@ -8,6 +8,7 @@ import com.example.app.config.LoggingConfig
 import com.example.app.config.MetricsConfig
 import com.example.app.config.PaymentsConfig
 import com.example.app.config.RedisConfig
+import com.example.app.config.SecurityConfig
 import com.example.app.config.ServerConfig
 import com.example.app.config.TelegramConfig
 
@@ -20,6 +21,7 @@ internal fun baseTestConfig(
         trustedProxyAllowlist = emptySet()
     ),
     health: HealthConfig = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50),
+    security: SecurityConfig = SecurityConfig(),
 ): AppConfig = AppConfig(
     telegram = TelegramConfig(
         adminToken = "token",
@@ -68,5 +70,6 @@ internal fun baseTestConfig(
         json = true
     ),
     metrics = metrics,
-    health = health
+    health = health,
+    security = security,
 )

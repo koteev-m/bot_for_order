@@ -33,7 +33,7 @@ import org.redisson.config.Config
 
 class DbHealthTest : StringSpec({
     "returns DOWN when db transaction fails" {
-        mockkStatic("org.jetbrains.exposed.sql.transactions.experimental.TransactionsKt")
+        mockkStatic("org.jetbrains.exposed.sql.transactions.experimental.SuspendedKt")
         val database = mockk<Database>()
         coEvery {
             newSuspendedTransaction<Any>(context = any(), db = any<Database>(), statement = any())
@@ -102,7 +102,7 @@ class DbHealthTest : StringSpec({
                 redisStatus shouldBe "UP"
             }
         } finally {
-            unmockkStatic("org.jetbrains.exposed.sql.transactions.experimental.TransactionsKt")
+            unmockkStatic("org.jetbrains.exposed.sql.transactions.experimental.SuspendedKt")
         }
     }
 })

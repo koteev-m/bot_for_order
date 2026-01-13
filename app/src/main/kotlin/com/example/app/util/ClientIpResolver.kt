@@ -24,10 +24,11 @@ object ClientIpResolver {
         var chain = if (xff.isNotEmpty()) xff else fwd
 
         if (chain.isEmpty()) {
-            val realIp = cleanIpToken(call.request.headers["X-Real-IP"])
-            val cfIp = cleanIpToken(call.request.headers["CF-Connecting-IP"])
+            // Приоритет как задокументировано: True-Client-IP → CF-Connecting-IP → X-Real-IP
             val tciIp = cleanIpToken(call.request.headers["True-Client-IP"])
-            chain = listOfNotNull(realIp, cfIp, tciIp)
+            val cfIp = cleanIpToken(call.request.headers["CF-Connecting-IP"])
+            val realIp = cleanIpToken(call.request.headers["X-Real-IP"])
+            chain = listOfNotNull(tciIp, cfIp, realIp)
         }
         // Идём справа-налево: пропускаем trusted прокси, первый не-trusted — это клиент
         val client = chain.asReversed().firstOrNull { ip -> !CidrMatcher.isAllowed(ip, trustedProxies) }
@@ -64,30 +65,38 @@ object ClientIpResolver {
      */
     private fun cleanIpToken(token: String?): String? {
         val trimmed = token?.trim().orEmpty()
+        if (trimmed.isEmpty()) return null
+        if (trimmed.equals("unknown", ignoreCase = true) || trimmed.startsWith("_")) return null
+
+        // Снимаем скобки [..] и zone-id (%eth0)
         val withoutBrackets = if (trimmed.startsWith("[")) {
             trimmed.substringAfter('[').substringBefore(']')
         } else {
             trimmed
         }
-        // Отрезаем zone-id (fe80::1%eth0) если встретится
         val noZone = withoutBrackets.substringBefore('%')
-        // IPv4 с :port -> отбрасываем порт
-        val normalized = if (noZone.indexOf('.') >= 0) {
-            noZone.substringBeforeLast(':')
-        } else {
-            noZone
+
+        var value = noZone
+
+        // 1) Сперва нормализуем IPv4-mapped IPv6: ::ffff:203.0.113.5 -> 203.0.113.5
+        val lower = value.lowercase()
+        if (lower.startsWith("::ffff:")) {
+            val candidate = value.substring(7) // после "::ffff:"
+            if (candidate.contains('.')) {
+                value = candidate
+            }
         }
 
-        var value = normalized
-        if (value.lowercase().startsWith("::ffff:") && value.removePrefix("::ffff:").contains('.')) {
-            value = value.removePrefix("::ffff:")
+        // 2) Только для чистой IPv4-формы отрезаем :port (если он есть)
+        // Эвристика: двоеточие стоит ПОСЛЕ последней точки — значит это порт IPv4.
+        if (value.contains('.')) {
+            val lastDot = value.lastIndexOf('.')
+            val lastColon = value.lastIndexOf(':')
+            if (lastColon > lastDot) {
+                value = value.substring(0, lastColon)
+            }
         }
 
-        return when {
-            trimmed.isEmpty() -> null
-            trimmed.equals("unknown", ignoreCase = true) || trimmed.startsWith("_") -> null
-            value.isBlank() -> null
-            else -> value
-        }
+        return value.takeIf { it.isNotBlank() }
     }
 }

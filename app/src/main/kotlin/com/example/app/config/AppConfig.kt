@@ -9,7 +9,8 @@ data class AppConfig(
     val fx: FxConfig,
     val logging: LoggingConfig,
     val metrics: MetricsConfig,
-    val health: HealthConfig
+    val health: HealthConfig,
+    val security: SecurityConfig,
 )
 
 data class TelegramConfig(
@@ -67,6 +68,22 @@ data class LoggingConfig(
     val json: Boolean
 )
 
+data class HstsConfig(
+    val enabled: Boolean = false,
+    val maxAgeSeconds: Long = 15_552_000,
+    val includeSubdomains: Boolean = true,
+    val preload: Boolean = false,
+)
+
+data class SecurityConfig(
+    val hsts: HstsConfig = HstsConfig(),
+    val basicAuthCompat: BasicAuthCompatConfig = BasicAuthCompatConfig(),
+)
+
+data class BasicAuthCompatConfig(
+    val latin1Fallback: Boolean = false,
+)
+
 data class BasicAuth(
     val user: String,
     val password: String,
@@ -76,6 +93,7 @@ data class MetricsConfig(
     val enabled: Boolean,
     val prometheusEnabled: Boolean,
     val basicAuth: BasicAuth?,
+    val basicRealm: String = "metrics",
     val ipAllowlist: Set<String>,
     val trustedProxyAllowlist: Set<String>,
 )
