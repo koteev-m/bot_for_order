@@ -13,7 +13,8 @@ object ConfigLoader {
         fx = loadFxConfig(),
         logging = loadLoggingConfig(),
         metrics = loadMetricsConfig(),
-        health = loadHealthConfig()
+        health = loadHealthConfig(),
+        security = loadSecurityConfig(),
     )
 
     private fun loadTelegramConfig(): TelegramConfig {
@@ -117,10 +118,12 @@ object ConfigLoader {
         val basicAuth = parseBasicAuthEnv("METRICS_BASIC_AUTH")
         val ipAllowlist = parseIpAllowlistEnv("METRICS_IP_ALLOWLIST")
         val trustedProxyAllowlist = parseIpAllowlistEnv("METRICS_TRUSTED_PROXY_ALLOWLIST")
+        val basicRealm = System.getenv("METRICS_BASIC_REALM")?.takeIf { it.isNotBlank() } ?: "metrics"
         return MetricsConfig(
             enabled = enabled,
             prometheusEnabled = prometheus,
             basicAuth = basicAuth,
+            basicRealm = basicRealm,
             ipAllowlist = ipAllowlist,
             trustedProxyAllowlist = trustedProxyAllowlist
         )
@@ -130,4 +133,20 @@ object ConfigLoader {
         dbTimeoutMs = parsePositiveLongEnv("HEALTH_DB_TIMEOUT_MS", defaultValue = 500),
         redisTimeoutMs = parsePositiveLongEnv("HEALTH_REDIS_TIMEOUT_MS", defaultValue = 500)
     )
+
+    private fun loadSecurityConfig(): SecurityConfig {
+        val hsts = HstsConfig(
+            enabled = parseBooleanEnv("SECURITY_HSTS_ENABLED", defaultValue = false),
+            maxAgeSeconds = parseNonNegativeLongEnv("SECURITY_HSTS_MAX_AGE", defaultValue = 15_552_000),
+            includeSubdomains = parseBooleanEnv("SECURITY_HSTS_INCLUDE_SUBDOMAINS", defaultValue = true),
+            preload = parseBooleanEnv("SECURITY_HSTS_PRELOAD", defaultValue = false),
+        )
+        val basicAuthCompat = BasicAuthCompatConfig(
+            latin1Fallback = parseBooleanEnv("SECURITY_BASIC_AUTH_LATIN1_FALLBACK", defaultValue = false),
+        )
+        return SecurityConfig(
+            hsts = hsts,
+            basicAuthCompat = basicAuthCompat,
+        )
+    }
 }

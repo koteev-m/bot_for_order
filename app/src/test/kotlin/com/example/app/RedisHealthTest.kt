@@ -34,7 +34,7 @@ import org.redisson.config.Config
 
 class RedisHealthTest : StringSpec({
     "returns DOWN when redis ping fails" {
-        mockkStatic("org.jetbrains.exposed.sql.transactions.experimental.TransactionsKt")
+        mockkStatic("org.jetbrains.exposed.sql.transactions.experimental.SuspendedKt")
         val database = mockk<Database>()
         coEvery { newSuspendedTransaction<Any>(context = any(), db = any<Database>(), statement = any()) } coAnswers {
             val tx = mockk<Transaction>(relaxed = true)
@@ -95,7 +95,7 @@ class RedisHealthTest : StringSpec({
                 redisStatus shouldBe "DOWN"
             }
         } finally {
-            unmockkStatic("org.jetbrains.exposed.sql.transactions.experimental.TransactionsKt")
+            unmockkStatic("org.jetbrains.exposed.sql.transactions.experimental.SuspendedKt")
         }
     }
 })
