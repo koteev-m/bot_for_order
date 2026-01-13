@@ -5,7 +5,6 @@ import com.example.app.config.AppConfig
 import com.example.app.config.BasicAuthCompatConfig
 import com.example.app.observability.BuildInfoProvider
 import com.example.app.plugins.OBS_COMMON_ENABLED
-import com.example.app.plugins.OBS_EXTRA_HEADERS
 import com.example.app.plugins.OBS_VARY_TOKENS
 import com.example.app.plugins.ObservabilityHeaders
 import com.example.app.plugins.ObservabilityHeadersConfig
@@ -142,13 +141,11 @@ fun Application.installBaseRoutes(
         if (cfg.metrics.prometheusEnabled && registry is PrometheusMeterRegistry) {
             get("/metrics") {
                 val requestLogger = environment.log
+                call.attributes.put(OBS_COMMON_ENABLED, true)
                 // Кэш и вариативность должны присутствовать на любом исходе маршрута
                 val varyTokens = call.attributes.getOrNull(OBS_VARY_TOKENS)
                     ?: mutableSetOf<String>().also { call.attributes.put(OBS_VARY_TOKENS, it) }
                 varyTokens.addAll(METRICS_VARY_TOKENS)
-                val extraHeaders = call.attributes.getOrNull(OBS_EXTRA_HEADERS)
-                    ?: mutableMapOf<String, String>().also { call.attributes.put(OBS_EXTRA_HEADERS, it) }
-                extraHeaders["X-Content-Type-Options"] = "nosniff"
                 val clientIp = ClientIpResolver.resolve(call, cfg.metrics.trustedProxyAllowlist)
 
                 if (cfg.metrics.ipAllowlist.isNotEmpty() && !CidrMatcher.isAllowed(clientIp, cfg.metrics.ipAllowlist)) {

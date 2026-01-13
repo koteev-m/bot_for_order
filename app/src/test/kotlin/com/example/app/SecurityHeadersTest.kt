@@ -9,7 +9,9 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation as ServerContentNegotiation
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.routing
+import io.ktor.server.routing.get
 import io.ktor.server.testing.testApplication
 import io.micrometer.prometheusmetrics.PrometheusConfig
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
@@ -76,6 +78,39 @@ class SecurityHeadersTest : StringSpec({
                 resp.headers["Referrer-Policy"] shouldBe "no-referrer"
                 resp.headers["Pragma"] shouldBe "no-cache"
                 resp.headers["Content-Security-Policy"] shouldBe "default-src 'none'; frame-ancestors 'none'"
+            }
+        } finally {
+            unmockkStatic("org.jetbrains.exposed.sql.transactions.experimental.SuspendedKt")
+        }
+    }
+
+    "non-observability endpoint has no common headers" {
+        val (database, redisson) = healthDeps()
+        val cfg = baseTestConfig()
+        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+
+        mockkStatic("org.jetbrains.exposed.sql.transactions.experimental.SuspendedKt")
+        coEvery {
+            newSuspendedTransaction<Any>(context = any(), db = any(), statement = any())
+        } returns true
+        try {
+            testApplication {
+                application {
+                    install(ServerContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                    install(Koin) { modules(module { single { database }; single { redisson } }) }
+                    routing {
+                        installBaseRoutes(cfg, registry)
+                        get("/dummy") { call.respondText("ok") }
+                    }
+                }
+                val resp = client.get("/dummy")
+                resp.status shouldBe HttpStatusCode.OK
+                resp.headers[HttpHeaders.CacheControl] shouldBe null
+                resp.headers["X-Content-Type-Options"] shouldBe null
+                resp.headers["X-Frame-Options"] shouldBe null
+                resp.headers["Referrer-Policy"] shouldBe null
+                resp.headers["Pragma"] shouldBe null
+                resp.headers["Content-Security-Policy"] shouldBe null
             }
         } finally {
             unmockkStatic("org.jetbrains.exposed.sql.transactions.experimental.SuspendedKt")
