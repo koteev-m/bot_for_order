@@ -139,6 +139,50 @@ class MetricsSecurityTest : StringSpec({
         }
     }
 
+    "replaces existing Vary with merged single value" {
+        val (database, redisson) = healthDeps()
+        val cfg = baseTestConfig(
+            metrics = MetricsConfig(
+                enabled = true,
+                prometheusEnabled = true,
+                basicAuth = BasicAuth("metrics", "secret"),
+                ipAllowlist = emptySet(),
+                trustedProxyAllowlist = emptySet()
+            ),
+            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
+        )
+        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) {
+                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
+                }
+                install(Koin) { modules(module { single { database }; single { redisson } }) }
+                install(createApplicationPlugin(name = "preExistingVary") {
+                    onCall { call ->
+                        if (call.request.path() == "/metrics") {
+                            call.response.headers.append(HttpHeaders.Vary, "Accept-Encoding")
+                        }
+                    }
+                })
+                installBaseRoutes(cfg, registry)
+            }
+
+            val resp = client.get("/metrics")
+            resp.status shouldBe HttpStatusCode.Unauthorized
+            resp.headers.getAll(HttpHeaders.Vary)?.size shouldBe 1
+            val varyTokens = resp.headers[HttpHeaders.Vary]
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                ?: emptySet()
+
+            varyTokens shouldBe (setOf("Accept-Encoding") + metricsVaryTokens.toSet())
+        }
+    }
+
     "merges Vary case-insensitively" {
         val (database, redisson) = healthDeps()
         val cfg = baseTestConfig(
