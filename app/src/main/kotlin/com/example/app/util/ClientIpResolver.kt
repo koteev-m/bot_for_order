@@ -2,6 +2,7 @@ package com.example.app.util
 
 import io.ktor.http.HttpHeaders
 import io.ktor.server.application.ApplicationCall
+import java.util.Locale
 
 object ClientIpResolver {
     /**
@@ -23,15 +24,20 @@ object ClientIpResolver {
         val fwd = if (xff.isEmpty()) parseForwarded(call.request.headers[HttpHeaders.Forwarded]) else emptyList()
         var chain = if (xff.isNotEmpty()) xff else fwd
 
-        if (chain.isEmpty()) {
+        val fallbackChain = if (chain.isEmpty()) {
             // Приоритет как задокументировано: True-Client-IP → CF-Connecting-IP → X-Real-IP
             val tciIp = cleanIpToken(call.request.headers["True-Client-IP"])
             val cfIp = cleanIpToken(call.request.headers["CF-Connecting-IP"])
             val realIp = cleanIpToken(call.request.headers["X-Real-IP"])
-            chain = listOfNotNull(tciIp, cfIp, realIp)
+            listOfNotNull(tciIp, cfIp, realIp)
+        } else {
+            null
         }
-        // Идём справа-налево: пропускаем trusted прокси, первый не-trusted — это клиент
-        val client = chain.asReversed().firstOrNull { ip -> !CidrMatcher.isAllowed(ip, trustedProxies) }
+        // Для XFF/Forwarded идём справа-налево: пропускаем trusted прокси, первый не-trusted — это клиент
+        val client = when {
+            fallbackChain != null -> fallbackChain.firstOrNull { ip -> !CidrMatcher.isAllowed(ip, trustedProxies) }
+            else -> chain.asReversed().firstOrNull { ip -> !CidrMatcher.isAllowed(ip, trustedProxies) }
+        }
         return client ?: remote
     }
 
@@ -79,7 +85,7 @@ object ClientIpResolver {
         var value = noZone
 
         // 1) Сперва нормализуем IPv4-mapped IPv6: ::ffff:203.0.113.5 -> 203.0.113.5
-        val lower = value.lowercase()
+        val lower = value.lowercase(Locale.ROOT)
         if (lower.startsWith("::ffff:")) {
             val candidate = value.substring(7) // после "::ffff:"
             if (candidate.contains('.')) {
