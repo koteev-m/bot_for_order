@@ -18,8 +18,6 @@ val OBS_ENABLED = AttributeKey<Boolean>("obs-enabled")
 val OBS_EXTRA_HEADERS = AttributeKey<MutableMap<String, String>>("obs-extra-headers")
 val PRESET_VARY_TOKENS = AttributeKey<Set<String>>("preset-vary-tokens")
 
-private val loggedInvalidVaryToken = AtomicBoolean(false)
-
 class ObservabilityHeadersConfig {
     var hsts: HstsConfig = HstsConfig()
     var canonicalVary: Map<String, String> = emptyMap()
@@ -60,6 +58,7 @@ val ObservabilityHeaders = createApplicationPlugin(
     val strictHeaders = pluginConfig.strictHeaders.map { it.lowercase(Locale.ROOT) }.toSet()
     val logger = application.environment.log
     val removalSupport = HeaderRemovalSupport(logger)
+    val invalidVaryTokenLogGuard = AtomicBoolean(false)
     val headerWriter = HeaderWriter(
         aggressiveReplaceStrictHeaders = aggressiveReplaceStrictHeaders,
         strictHeaders = strictHeaders,
@@ -81,7 +80,7 @@ val ObservabilityHeaders = createApplicationPlugin(
             }
             writeCommonHeaders(call, headersToWrite, headerWriter)
         }
-        writeVary(call, canonicalVary, removalSupport, logger)
+        writeVary(call, canonicalVary, removalSupport, logger, invalidVaryTokenLogGuard)
         if (commonEnabled) {
             maybeAppendHsts(call, hstsConfig, headerWriter)
         }
@@ -137,6 +136,7 @@ private fun writeVary(
     canonicalVary: Map<String, String>,
     removalSupport: HeaderRemovalSupport,
     logger: Logger,
+    invalidVaryTokenLogGuard: AtomicBoolean,
 ) {
     val commonEnabled = call.attributes.getOrNull(OBS_COMMON_ENABLED) == true ||
         call.attributes.getOrNull(OBS_ENABLED) == true
@@ -154,8 +154,8 @@ private fun writeVary(
         val trimmed = token.trim()
         if (trimmed.isEmpty()) return
         if (!isValidVaryToken(trimmed)) {
-            if (logger.isDebugEnabled && loggedInvalidVaryToken.compareAndSet(false, true)) {
-                logger.debug("Ignored invalid Vary token: '{}'.", trimmed)
+            if (logger.isDebugEnabled && invalidVaryTokenLogGuard.compareAndSet(false, true)) {
+                logger.debug("Ignored invalid Vary token: '{}'.", sanitizeVaryTokenForLog(trimmed))
             }
             return
         }
@@ -163,7 +163,8 @@ private fun writeVary(
         val canonicalCandidate = canonicalVary[lower]?.trim().orEmpty()
         val canonical = when {
             canonicalCandidate.isEmpty() -> trimmed
-            isValidVaryToken(canonicalCandidate) -> canonicalCandidate
+            canonicalCandidate == "*" && trimmed != "*" -> trimmed
+            isValidVaryToken(canonicalCandidate) && canonicalCandidate.lowercase(Locale.ROOT) == lower -> canonicalCandidate
             else -> trimmed
         }
         if (canonical == "*") {
@@ -215,6 +216,40 @@ private fun isValidVaryToken(token: String): Boolean {
             (char in '0'..'9') ||
             char in "!#$%&'*+-.^_`|~"
     }
+}
+
+private fun sanitizeVaryTokenForLog(
+    token: String,
+    maxLength: Int = 160,
+): String {
+    if (token.isEmpty()) return token
+    val builder = StringBuilder()
+    var truncated = false
+    fun appendLimited(value: String) {
+        if (builder.length + value.length > maxLength) {
+            truncated = true
+            return
+        }
+        builder.append(value)
+    }
+    for (char in token) {
+        if (builder.length >= maxLength) {
+            truncated = true
+            break
+        }
+        when {
+            char == '\n' -> appendLimited("\\n")
+            char == '\r' -> appendLimited("\\r")
+            char == '\t' -> appendLimited("\\t")
+            char.code <= 0x1F || char.code == 0x7F -> appendLimited("?")
+            else -> appendLimited(char.toString())
+        }
+        if (truncated) break
+    }
+    if (truncated && builder.length < maxLength) {
+        builder.append("…")
+    }
+    return builder.toString()
 }
 
 private fun maybeAppendHsts(

@@ -145,6 +145,33 @@ class ObservabilityHeadersTest : StringSpec({
         }
     }
 
+    "keeps token when canonical mapping is misconfigured" {
+        testApplication {
+            application {
+                install(ObservabilityHeaders) {
+                    canonicalVary = mapOf("authorization" to "User-Agent")
+                }
+                routing {
+                    get("/obs") {
+                        call.attributes.put(OBS_ENABLED, true)
+                        call.attributes.put(OBS_VARY_TOKENS, mutableSetOf("Authorization"))
+                        call.respondText("ok")
+                    }
+                }
+            }
+
+            val response = client.get("/obs")
+            val varyValues = response.headers[HttpHeaders.Vary]
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                .orEmpty()
+
+            varyValues shouldBe setOf("Authorization")
+        }
+    }
+
     "replaces vary with wildcard when upstream sets vary star" {
         testApplication {
             application {
@@ -175,6 +202,34 @@ class ObservabilityHeadersTest : StringSpec({
                         call.attributes.put(
                             OBS_VARY_TOKENS,
                             mutableSetOf("Bad Token", "Accept-Encoding"),
+                        )
+                        call.respondText("ok")
+                    }
+                }
+            }
+
+            val response = client.get("/obs")
+            val varyValues = response.headers[HttpHeaders.Vary]
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                .orEmpty()
+
+            varyValues shouldBe setOf("Accept-Encoding")
+        }
+    }
+
+    "ignores invalid vary tokens with control chars from observability" {
+        testApplication {
+            application {
+                install(ObservabilityHeaders)
+                routing {
+                    get("/obs") {
+                        call.attributes.put(OBS_ENABLED, true)
+                        call.attributes.put(
+                            OBS_VARY_TOKENS,
+                            mutableSetOf("User-Agent\nBad", "Accept-Encoding"),
                         )
                         call.respondText("ok")
                     }
