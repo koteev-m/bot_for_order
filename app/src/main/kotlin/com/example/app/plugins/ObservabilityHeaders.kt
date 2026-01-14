@@ -18,6 +18,8 @@ val OBS_ENABLED = AttributeKey<Boolean>("obs-enabled")
 val OBS_EXTRA_HEADERS = AttributeKey<MutableMap<String, String>>("obs-extra-headers")
 val PRESET_VARY_TOKENS = AttributeKey<Set<String>>("preset-vary-tokens")
 
+private val loggedInvalidVaryToken = AtomicBoolean(false)
+
 class ObservabilityHeadersConfig {
     var hsts: HstsConfig = HstsConfig()
     var canonicalVary: Map<String, String> = emptyMap()
@@ -79,7 +81,7 @@ val ObservabilityHeaders = createApplicationPlugin(
             }
             writeCommonHeaders(call, headersToWrite, headerWriter)
         }
-        writeVary(call, canonicalVary, removalSupport)
+        writeVary(call, canonicalVary, removalSupport, logger)
         if (commonEnabled) {
             maybeAppendHsts(call, hstsConfig, headerWriter)
         }
@@ -134,6 +136,7 @@ private fun writeVary(
     call: ApplicationCall,
     canonicalVary: Map<String, String>,
     removalSupport: HeaderRemovalSupport,
+    logger: Logger,
 ) {
     val commonEnabled = call.attributes.getOrNull(OBS_COMMON_ENABLED) == true ||
         call.attributes.getOrNull(OBS_ENABLED) == true
@@ -150,6 +153,12 @@ private fun writeVary(
         if (hasWildcard) return
         val trimmed = token.trim()
         if (trimmed.isEmpty()) return
+        if (!isValidVaryToken(trimmed)) {
+            if (logger.isDebugEnabled && loggedInvalidVaryToken.compareAndSet(false, true)) {
+                logger.debug("Ignored invalid Vary token: '{}'.", trimmed)
+            }
+            return
+        }
         val lower = trimmed.lowercase(Locale.ROOT)
         val canonicalCandidate = canonicalVary[lower]?.trim().orEmpty()
         val canonical = when {
@@ -199,8 +208,12 @@ private fun writeVary(
 
 private fun isValidVaryToken(token: String): Boolean {
     if (token.isEmpty()) return false
+    if (token == "*") return true
     return token.all { char ->
-        char.isLetterOrDigit() || char in "!#$%&'*+-.^_`|~"
+        (char in 'A'..'Z') ||
+            (char in 'a'..'z') ||
+            (char in '0'..'9') ||
+            char in "!#$%&'*+-.^_`|~"
     }
 }
 
