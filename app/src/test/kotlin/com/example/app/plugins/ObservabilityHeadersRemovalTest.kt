@@ -12,20 +12,48 @@ class ObservabilityHeadersRemovalTest : StringSpec({
     "does not append strict header when removal fails" {
         val logger = mockk<Logger>(relaxed = true)
         val removalSupport = HeaderRemovalSupport(logger)
+        val headerWriter = HeaderWriter(
+            aggressiveReplaceStrictHeaders = true,
+            strictHeaders = setOf(HttpHeaders.CacheControl.lowercase(Locale.ROOT)),
+            removalSupport = removalSupport,
+            logger = logger,
+        )
         val headers = TestResponseHeaders(
             initial = mapOf(HttpHeaders.CacheControl to listOf("public, max-age=60")),
             mutableValues = false,
             removeClears = false,
         )
 
-        appendHeader(
+        headerWriter.append(
             headers,
             HttpHeaders.CacheControl,
             "no-store",
-            aggressiveReplaceStrictHeaders = true,
+        )
+
+        val values = headers.values(HttpHeaders.CacheControl)
+        values.size shouldBe 1
+        values.first() shouldBe "public, max-age=60"
+    }
+
+    "does not append strict header when non-aggressive conflicts exist" {
+        val logger = mockk<Logger>(relaxed = true)
+        val removalSupport = HeaderRemovalSupport(logger)
+        val headerWriter = HeaderWriter(
+            aggressiveReplaceStrictHeaders = false,
             strictHeaders = setOf(HttpHeaders.CacheControl.lowercase(Locale.ROOT)),
             removalSupport = removalSupport,
             logger = logger,
+        )
+        val headers = TestResponseHeaders(
+            initial = mapOf(HttpHeaders.CacheControl to listOf("public, max-age=60")),
+            mutableValues = false,
+            removeClears = false,
+        )
+
+        headerWriter.append(
+            headers,
+            HttpHeaders.CacheControl,
+            "no-store",
         )
 
         val values = headers.values(HttpHeaders.CacheControl)
@@ -43,25 +71,25 @@ private class TestResponseHeaders(
 
     init {
         initial.forEach { (name, values) ->
-            store[name] = values.toMutableList()
+            store[name.lowercase(Locale.ROOT)] = values.toMutableList()
         }
     }
 
     fun remove(name: String) {
         if (removeClears) {
-            store.remove(name)
+            store.remove(name.lowercase(Locale.ROOT))
         }
     }
 
     override fun engineAppendHeader(name: String, value: String) {
-        store.getOrPut(name) { mutableListOf() }.add(value)
+        store.getOrPut(name.lowercase(Locale.ROOT)) { mutableListOf() }.add(value)
     }
 
     override fun getEngineHeaderNames(): List<String> =
         store.keys.toList()
 
     override fun getEngineHeaderValues(name: String): List<String> {
-        val values = store[name].orEmpty()
+        val values = store[name.lowercase(Locale.ROOT)].orEmpty()
         return if (mutableValues) values else values.toList()
     }
 }
