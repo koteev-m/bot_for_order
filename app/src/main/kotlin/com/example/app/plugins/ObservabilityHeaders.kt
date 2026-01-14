@@ -94,15 +94,20 @@ private fun normalizeCanonicalVary(
     val normalized = LinkedHashMap<String, String>(canonicalVary.size)
     canonicalVary.forEach { (key, value) ->
         val normalizedKey = key.trim().lowercase(Locale.ROOT)
+        if (normalizedKey.isEmpty()) {
+            if (logger.isDebugEnabled) {
+                logger.debug("Ignored empty canonical Vary key.")
+            }
+            return@forEach
+        }
         val existing = normalized[normalizedKey]
         if (existing != null) {
             logger.debug(
-                "Canonical Vary key collision after normalizing for '{}'(from '{}'); keeping first value '{}', ignoring '{}' from '{}'.",
+                "Canonical Vary key collision after normalizing for '{}'(from '{}'); keeping first value '{}', ignoring '{}'.",
                 normalizedKey,
                 key,
                 existing,
                 value,
-                key,
             )
         } else {
             normalized[normalizedKey] = value
@@ -139,8 +144,10 @@ private fun writeVary(
 
     val name = HttpHeaders.Vary
     val seen = LinkedHashMap<String, String>()
+    var hasWildcard = false
 
     fun addToken(token: String) {
+        if (hasWildcard) return
         val trimmed = token.trim()
         if (trimmed.isEmpty()) return
         val lower = trimmed.lowercase(Locale.ROOT)
@@ -149,6 +156,11 @@ private fun writeVary(
             canonicalCandidate.isEmpty() -> trimmed
             isValidVaryToken(canonicalCandidate) -> canonicalCandidate
             else -> trimmed
+        }
+        if (canonical == "*") {
+            hasWildcard = true
+            seen.clear()
+            return
         }
         seen.putIfAbsent(lower, canonical)
     }
@@ -173,9 +185,9 @@ private fun writeVary(
     presetTokens?.forEach(::addToken)
     obsTokens?.forEach(::addToken)
 
-    if (seen.isEmpty()) return
+    if (!hasWildcard && seen.isEmpty()) return
 
-    val joined = seen.values.joinToString(", ")
+    val joined = if (hasWildcard) "*" else seen.values.joinToString(", ")
     val existingValues = call.response.headers.values(name)
     if (existingValues.size == 1 && existingValues.first() == joined) return
     if (existingValues.isNotEmpty()) {
@@ -185,8 +197,12 @@ private fun writeVary(
     call.response.headers.append(name, joined)
 }
 
-private fun isValidVaryToken(token: String): Boolean =
-    token.none { it == ',' || it.isWhitespace() || it.isISOControl() }
+private fun isValidVaryToken(token: String): Boolean {
+    if (token.isEmpty()) return false
+    return token.all { char ->
+        char.isLetterOrDigit() || char in "!#$%&'*+-.^_`|~"
+    }
+}
 
 private fun maybeAppendHsts(
     call: ApplicationCall,
