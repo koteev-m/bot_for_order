@@ -117,4 +117,51 @@ class ObservabilityHeadersTest : StringSpec({
             varyValues shouldBe setOf("Accept-Encoding")
         }
     }
+
+    "replaces vary with wildcard when upstream sets vary star" {
+        testApplication {
+            application {
+                install(ObservabilityHeaders)
+                routing {
+                    get("/obs") {
+                        call.attributes.put(OBS_ENABLED, true)
+                        call.attributes.put(OBS_VARY_TOKENS, mutableSetOf("Authorization"))
+                        call.response.headers.append(HttpHeaders.Vary, "*")
+                        call.respondText("ok")
+                    }
+                }
+            }
+
+            val response = client.get("/obs")
+            response.headers[HttpHeaders.Vary] shouldBe "*"
+            response.headers.getAll(HttpHeaders.Vary)?.size shouldBe 1
+        }
+    }
+
+    "ignores empty canonical vary key" {
+        testApplication {
+            application {
+                install(ObservabilityHeaders) {
+                    canonicalVary = mapOf(" " to "User-Agent", "accept-encoding" to "Accept-Encoding")
+                }
+                routing {
+                    get("/obs") {
+                        call.attributes.put(OBS_ENABLED, true)
+                        call.attributes.put(OBS_VARY_TOKENS, mutableSetOf("accept-encoding"))
+                        call.respondText("ok")
+                    }
+                }
+            }
+
+            val response = client.get("/obs")
+            val varyValues = response.headers[HttpHeaders.Vary]
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                .orEmpty()
+
+            varyValues shouldBe setOf("Accept-Encoding")
+        }
+    }
 })
