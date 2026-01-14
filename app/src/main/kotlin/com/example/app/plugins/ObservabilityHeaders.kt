@@ -52,7 +52,7 @@ val ObservabilityHeaders = createApplicationPlugin(
     createConfiguration = ::ObservabilityHeadersConfig,
 ) {
     val hstsConfig = pluginConfig.hsts
-    val canonicalVary = normalizeCanonicalVary(pluginConfig.canonicalVary, application.environment.log)
+    val canonicalVarySafe = normalizeCanonicalVary(pluginConfig.canonicalVary, application.environment.log)
     val extraCommonHeaders = pluginConfig.extraCommonHeaders
     val aggressiveReplaceStrictHeaders = pluginConfig.aggressiveReplaceStrictHeaders
     val strictHeaders = pluginConfig.strictHeaders.map { it.lowercase(Locale.ROOT) }.toSet()
@@ -80,7 +80,7 @@ val ObservabilityHeaders = createApplicationPlugin(
             }
             writeCommonHeaders(call, headersToWrite, headerWriter)
         }
-        writeVary(call, canonicalVary, removalSupport, logger, invalidVaryTokenLogGuard)
+        writeVary(call, canonicalVarySafe, removalSupport, logger, invalidVaryTokenLogGuard)
         if (commonEnabled) {
             maybeAppendHsts(call, hstsConfig, headerWriter)
         }
@@ -101,6 +101,29 @@ private fun normalizeCanonicalVary(
             }
             return@forEach
         }
+        if (!isValidVaryToken(normalizedKey)) {
+            if (logger.isDebugEnabled) {
+                logger.debug(
+                    "Ignored canonical Vary key '{}' due to invalid token.",
+                    sanitizeVaryTokenForLog(normalizedKey),
+                )
+            }
+            return@forEach
+        }
+        val trimmedValue = value.trim()
+        val isValueValid = isValidVaryToken(trimmedValue)
+        val isWildcardMismatch = trimmedValue == "*" && normalizedKey != "*"
+        val isCaseMismatch = trimmedValue.lowercase(Locale.ROOT) != normalizedKey
+        if (!isValueValid || isWildcardMismatch || isCaseMismatch) {
+            if (logger.isDebugEnabled) {
+                logger.debug(
+                    "Ignored canonical Vary mapping '{}' -> '{}' due to invalid value.",
+                    sanitizeVaryTokenForLog(normalizedKey),
+                    sanitizeVaryTokenForLog(trimmedValue),
+                )
+            }
+            return@forEach
+        }
         val existing = normalized[normalizedKey]
         if (existing != null) {
             logger.debug(
@@ -111,7 +134,7 @@ private fun normalizeCanonicalVary(
                 value,
             )
         } else {
-            normalized[normalizedKey] = value
+            normalized[normalizedKey] = trimmedValue
         }
     }
     return normalized
@@ -160,13 +183,7 @@ private fun writeVary(
             return
         }
         val lower = trimmed.lowercase(Locale.ROOT)
-        val canonicalCandidate = canonicalVary[lower]?.trim().orEmpty()
-        val canonical = when {
-            canonicalCandidate.isEmpty() -> trimmed
-            canonicalCandidate == "*" && trimmed != "*" -> trimmed
-            isValidVaryToken(canonicalCandidate) && canonicalCandidate.lowercase(Locale.ROOT) == lower -> canonicalCandidate
-            else -> trimmed
-        }
+        val canonical = canonicalVary[lower] ?: trimmed
         if (canonical == "*") {
             hasWildcard = true
             seen.clear()

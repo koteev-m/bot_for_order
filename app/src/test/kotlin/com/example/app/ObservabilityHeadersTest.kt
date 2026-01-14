@@ -172,6 +172,33 @@ class ObservabilityHeadersTest : StringSpec({
         }
     }
 
+    "ignores wildcard canonical mapping for non-wildcard key" {
+        testApplication {
+            application {
+                install(ObservabilityHeaders) {
+                    canonicalVary = mapOf("authorization" to "*")
+                }
+                routing {
+                    get("/obs") {
+                        call.attributes.put(OBS_ENABLED, true)
+                        call.attributes.put(OBS_VARY_TOKENS, mutableSetOf("Authorization"))
+                        call.respondText("ok")
+                    }
+                }
+            }
+
+            val response = client.get("/obs")
+            val varyValues = response.headers[HttpHeaders.Vary]
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                .orEmpty()
+
+            varyValues shouldBe setOf("Authorization")
+        }
+    }
+
     "replaces vary with wildcard when upstream sets vary star" {
         testApplication {
             application {
