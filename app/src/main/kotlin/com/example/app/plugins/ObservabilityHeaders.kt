@@ -8,6 +8,7 @@ import io.ktor.server.response.ResponseHeaders
 import io.ktor.util.AttributeKey
 import java.lang.reflect.Method
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import org.slf4j.Logger
 
@@ -51,7 +52,7 @@ val ObservabilityHeaders = createApplicationPlugin(
     createConfiguration = ::ObservabilityHeadersConfig,
 ) {
     val hstsConfig = pluginConfig.hsts
-    val canonicalVary = pluginConfig.canonicalVary
+    val canonicalVary = normalizeCanonicalVary(pluginConfig.canonicalVary, application.environment.log)
     val extraCommonHeaders = pluginConfig.extraCommonHeaders
     val aggressiveReplaceStrictHeaders = pluginConfig.aggressiveReplaceStrictHeaders
     val strictHeaders = pluginConfig.strictHeaders.map { it.lowercase(Locale.ROOT) }.toSet()
@@ -83,6 +84,30 @@ val ObservabilityHeaders = createApplicationPlugin(
             maybeAppendHsts(call, hstsConfig, headerWriter)
         }
     }
+}
+
+private fun normalizeCanonicalVary(
+    canonicalVary: Map<String, String>,
+    logger: Logger,
+): Map<String, String> {
+    if (canonicalVary.isEmpty()) return canonicalVary
+    val normalized = LinkedHashMap<String, String>(canonicalVary.size)
+    canonicalVary.forEach { (key, value) ->
+        val lower = key.lowercase(Locale.ROOT)
+        val existing = normalized[lower]
+        if (existing != null) {
+            logger.debug(
+                "Canonical Vary key collision after lowercasing for '{}'; keeping first value '{}', ignoring '{}' from '{}'.",
+                lower,
+                existing,
+                value,
+                key,
+            )
+        } else {
+            normalized[lower] = value
+        }
+    }
+    return normalized
 }
 
 private fun writeCommonHeaders(
@@ -205,7 +230,11 @@ internal class HeaderWriter(
                     existingValues.isEmpty() -> headers.append(name, value)
                     existingValues.size == 1 && existingValues.first() == value -> return
                     else -> {
-                        logger.debug("strict header конфликтует, non-aggressive режим оставляет существующее")
+                        logger.debug(
+                            "Strict header conflict for {} in non-aggressive mode; keeping existing values: {}",
+                            name,
+                            summarizeValues(existingValues),
+                        )
                         return
                     }
                 }
@@ -236,19 +265,32 @@ internal class HeaderWriter(
         if (headers.values(name).any { it == value }) return
         headers.append(name, value)
     }
+
+    private fun summarizeValues(
+        values: List<String>,
+        maxValues: Int = 3,
+        maxValueLength: Int = 200,
+    ): String {
+        if (values.isEmpty()) return "[]"
+        val truncated = values.take(maxValues).map { value ->
+            if (value.length > maxValueLength) {
+                value.take(maxValueLength) + "…"
+            } else {
+                value
+            }
+        }
+        val suffix = if (values.size > maxValues) " (+${values.size - maxValues} more)" else ""
+        return truncated.joinToString(prefix = "[", postfix = "]$suffix")
+    }
 }
 
 internal class HeaderRemovalSupport(private val logger: Logger) {
-    @Volatile
-    private var initialized = false
-    @Volatile
-    private var removeMethod: Method? = null
+    private val removeMethods = ConcurrentHashMap<Class<*>, Method?>()
     private val loggedUnavailable = AtomicBoolean(false)
     private val loggedFailure = AtomicBoolean(false)
 
     fun remove(headers: ResponseHeaders, name: String): Boolean {
-        ensureInitialized(headers)
-        val method = removeMethod
+        val method = removeMethods.computeIfAbsent(headers.javaClass, ::findRemoveMethod)
         if (method != null) {
             return try {
                 method.invoke(headers, name)
@@ -267,17 +309,16 @@ internal class HeaderRemovalSupport(private val logger: Logger) {
         return tryClearHeaderValues(headers, name)
     }
 
-    private fun ensureInitialized(headers: ResponseHeaders) {
-        if (initialized) return
-        synchronized(this) {
-            if (initialized) return
-            removeMethod = headers.javaClass.methods.firstOrNull(::isRemoveMethod)
-                ?: headers.javaClass.declaredMethods.firstOrNull(::isRemoveMethod)?.also { it.isAccessible = true }
-            if (removeMethod == null && loggedUnavailable.compareAndSet(false, true)) {
-                logger.debug("Header removal method not available; falling back to append.")
-            }
-            initialized = true
+    private fun findRemoveMethod(headersClass: Class<*>): Method? {
+        val method = headersClass.methods.firstOrNull(::isRemoveMethod)
+            ?: headersClass.declaredMethods.firstOrNull(::isRemoveMethod)?.also { it.isAccessible = true }
+        if (method == null && loggedUnavailable.compareAndSet(false, true)) {
+            logger.debug(
+                "Header removal method not available for {}; falling back to append.",
+                headersClass.name,
+            )
         }
+        return method
     }
 
     private fun isRemoveMethod(method: Method): Boolean =
