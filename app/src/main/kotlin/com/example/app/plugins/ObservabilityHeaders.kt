@@ -143,7 +143,8 @@ private fun writeVary(
         val trimmed = token.trim()
         if (trimmed.isEmpty()) return
         val lower = trimmed.lowercase(Locale.ROOT)
-        val canonical = canonicalVary[lower] ?: trimmed
+        val canonicalCandidate = canonicalVary[lower]?.trim().orEmpty()
+        val canonical = if (canonicalCandidate.isNotEmpty()) canonicalCandidate else trimmed
         seen.putIfAbsent(lower, canonical)
     }
 
@@ -230,11 +231,13 @@ internal class HeaderWriter(
                     existingValues.isEmpty() -> headers.append(name, value)
                     existingValues.size == 1 && existingValues.first() == value -> return
                     else -> {
-                        logger.debug(
-                            "Strict header conflict for {} in non-aggressive mode; keeping existing values: {}",
-                            name,
-                            summarizeValues(existingValues),
-                        )
+                        if (logger.isDebugEnabled) {
+                            logger.debug(
+                                "Strict header conflict for {} in non-aggressive mode; keeping existing values: {}",
+                                name,
+                                summarizeValues(existingValues),
+                            )
+                        }
                         return
                     }
                 }
@@ -285,15 +288,15 @@ internal class HeaderWriter(
 }
 
 internal class HeaderRemovalSupport(private val logger: Logger) {
-    private val removeMethods = ConcurrentHashMap<Class<*>, Method?>()
+    private val removeMethods = ConcurrentHashMap<Class<*>, RemoveMethodLookup>()
     private val loggedUnavailable = AtomicBoolean(false)
     private val loggedFailure = AtomicBoolean(false)
 
     fun remove(headers: ResponseHeaders, name: String): Boolean {
-        val method = removeMethods.computeIfAbsent(headers.javaClass, ::findRemoveMethod)
-        if (method != null) {
+        val lookup = removeMethods.computeIfAbsent(headers.javaClass, ::findRemoveMethod)
+        if (lookup is RemoveMethodLookup.Found) {
             return try {
-                method.invoke(headers, name)
+                lookup.method.invoke(headers, name)
                 if (headers.values(name).isEmpty()) {
                     true
                 } else {
@@ -309,7 +312,7 @@ internal class HeaderRemovalSupport(private val logger: Logger) {
         return tryClearHeaderValues(headers, name)
     }
 
-    private fun findRemoveMethod(headersClass: Class<*>): Method? {
+    private fun findRemoveMethod(headersClass: Class<*>): RemoveMethodLookup {
         val method = headersClass.methods.firstOrNull(::isRemoveMethod)
             ?: headersClass.declaredMethods.firstOrNull(::isRemoveMethod)?.also { it.isAccessible = true }
         if (method == null && loggedUnavailable.compareAndSet(false, true)) {
@@ -318,7 +321,7 @@ internal class HeaderRemovalSupport(private val logger: Logger) {
                 headersClass.name,
             )
         }
-        return method
+        return if (method == null) RemoveMethodLookup.Missing else RemoveMethodLookup.Found(method)
     }
 
     private fun isRemoveMethod(method: Method): Boolean =
@@ -339,5 +342,10 @@ internal class HeaderRemovalSupport(private val logger: Logger) {
         } catch (_: Exception) {
             false
         }
+    }
+
+    private sealed interface RemoveMethodLookup {
+        data class Found(val method: Method) : RemoveMethodLookup
+        data object Missing : RemoveMethodLookup
     }
 }
