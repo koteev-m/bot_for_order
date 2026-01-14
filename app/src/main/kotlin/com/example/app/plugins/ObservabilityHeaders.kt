@@ -93,18 +93,19 @@ private fun normalizeCanonicalVary(
     if (canonicalVary.isEmpty()) return canonicalVary
     val normalized = LinkedHashMap<String, String>(canonicalVary.size)
     canonicalVary.forEach { (key, value) ->
-        val lower = key.lowercase(Locale.ROOT)
-        val existing = normalized[lower]
+        val normalizedKey = key.trim().lowercase(Locale.ROOT)
+        val existing = normalized[normalizedKey]
         if (existing != null) {
             logger.debug(
-                "Canonical Vary key collision after lowercasing for '{}'; keeping first value '{}', ignoring '{}' from '{}'.",
-                lower,
+                "Canonical Vary key collision after normalizing for '{}'(from '{}'); keeping first value '{}', ignoring '{}' from '{}'.",
+                normalizedKey,
+                key,
                 existing,
                 value,
                 key,
             )
         } else {
-            normalized[lower] = value
+            normalized[normalizedKey] = value
         }
     }
     return normalized
@@ -144,7 +145,11 @@ private fun writeVary(
         if (trimmed.isEmpty()) return
         val lower = trimmed.lowercase(Locale.ROOT)
         val canonicalCandidate = canonicalVary[lower]?.trim().orEmpty()
-        val canonical = if (canonicalCandidate.isNotEmpty()) canonicalCandidate else trimmed
+        val canonical = when {
+            canonicalCandidate.isEmpty() -> trimmed
+            isValidVaryToken(canonicalCandidate) -> canonicalCandidate
+            else -> trimmed
+        }
         seen.putIfAbsent(lower, canonical)
     }
 
@@ -179,6 +184,9 @@ private fun writeVary(
     }
     call.response.headers.append(name, joined)
 }
+
+private fun isValidVaryToken(token: String): Boolean =
+    token.none { it == ',' || it.isWhitespace() || it.isISOControl() }
 
 private fun maybeAppendHsts(
     call: ApplicationCall,
@@ -346,6 +354,6 @@ internal class HeaderRemovalSupport(private val logger: Logger) {
 
     private sealed interface RemoveMethodLookup {
         data class Found(val method: Method) : RemoveMethodLookup
-        data object Missing : RemoveMethodLookup
+        object Missing : RemoveMethodLookup
     }
 }

@@ -63,4 +63,58 @@ class ObservabilityHeadersTest : StringSpec({
             varyValues shouldBe setOf("Accept-Encoding")
         }
     }
+
+    "trims canonical vary keys on configuration" {
+        testApplication {
+            application {
+                install(ObservabilityHeaders) {
+                    canonicalVary = mapOf(" Accept-Encoding " to "Accept-Encoding")
+                }
+                routing {
+                    get("/obs") {
+                        call.attributes.put(OBS_ENABLED, true)
+                        call.attributes.put(OBS_VARY_TOKENS, mutableSetOf("accept-encoding"))
+                        call.respondText("ok")
+                    }
+                }
+            }
+
+            val response = client.get("/obs")
+            val varyValues = response.headers[HttpHeaders.Vary]
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                .orEmpty()
+
+            varyValues shouldBe setOf("Accept-Encoding")
+        }
+    }
+
+    "falls back to token when canonical value is invalid" {
+        testApplication {
+            application {
+                install(ObservabilityHeaders) {
+                    canonicalVary = mapOf("accept-encoding" to "Accept-Encoding, invalid")
+                }
+                routing {
+                    get("/obs") {
+                        call.attributes.put(OBS_ENABLED, true)
+                        call.attributes.put(OBS_VARY_TOKENS, mutableSetOf("Accept-Encoding"))
+                        call.respondText("ok")
+                    }
+                }
+            }
+
+            val response = client.get("/obs")
+            val varyValues = response.headers[HttpHeaders.Vary]
+                ?.split(',')
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.toSet()
+                .orEmpty()
+
+            varyValues shouldBe setOf("Accept-Encoding")
+        }
+    }
 })
