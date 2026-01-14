@@ -117,7 +117,7 @@ private fun normalizeCanonicalVary(
         if (!isValueValid || isWildcardMismatch || isCaseMismatch) {
             if (logger.isDebugEnabled) {
                 logger.debug(
-                    "Ignored canonical Vary mapping '{}' -> '{}' due to invalid value.",
+                    "Ignored canonical Vary mapping '{}' -> '{}' because mapping must be case-only for the same token and '*' allowed only for key '*'.",
                     sanitizeVaryTokenForLog(normalizedKey),
                     sanitizeVaryTokenForLog(trimmedValue),
                 )
@@ -127,11 +127,11 @@ private fun normalizeCanonicalVary(
         val existing = normalized[normalizedKey]
         if (existing != null) {
             logger.debug(
-                "Canonical Vary key collision after normalizing for '{}'(from '{}'); keeping first value '{}', ignoring '{}'.",
+                "Canonical Vary key collision after normalizing for '{}' (from '{}'); keeping first value '{}', ignoring '{}'.",
                 normalizedKey,
-                key,
-                existing,
-                value,
+                sanitizeVaryTokenForLog(key),
+                sanitizeVaryTokenForLog(existing),
+                sanitizeVaryTokenForLog(value.trim()),
             )
         } else {
             normalized[normalizedKey] = trimmedValue
@@ -156,7 +156,7 @@ private fun writeCommonHeaders(
 
 private fun writeVary(
     call: ApplicationCall,
-    canonicalVary: Map<String, String>,
+    canonicalVarySafe: Map<String, String>,
     removalSupport: HeaderRemovalSupport,
     logger: Logger,
     invalidVaryTokenLogGuard: AtomicBoolean,
@@ -183,7 +183,7 @@ private fun writeVary(
             return
         }
         val lower = trimmed.lowercase(Locale.ROOT)
-        val canonical = canonicalVary[lower] ?: trimmed
+        val canonical = canonicalVarySafe[lower] ?: trimmed
         if (canonical == "*") {
             hasWildcard = true
             seen.clear()
