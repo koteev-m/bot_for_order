@@ -6,12 +6,11 @@ import java.util.Locale
 
 object ClientIpResolver {
     /**
-     * Returns the effective client IP.
-     * Logic:
-     *  - If [trustedProxies] is empty -> return remoteHost (ignore XFF).
-     *  - If remoteHost ∉ trustedProxies -> return remoteHost (ignore XFF).
-     *  - Else walk X-Forwarded-For right-to-left; skip entries that ∈ trustedProxies; first non-proxy is client IP.
-     *  - On empty/malformed XFF fallback to remoteHost.
+     * Возвращает эффективный IP клиента.
+     * Логика:
+     *  - Если [trustedProxies] пуст или remoteHost не в trusted-прокси -> вернуть remoteHost.
+     *  - Иначе: если есть X-Forwarded-For или Forwarded, идём справа-налево и пропускаем trusted-прокси.
+     *  - Если цепочка пуста, fallback: True-Client-IP → CF-Connecting-IP → X-Real-IP (по порядку).
      */
     fun resolve(call: ApplicationCall, trustedProxies: Set<String>): String {
         // Используем штатный Ktor API: request.local.remoteHost — реальный адрес пира
@@ -21,22 +20,20 @@ object ClientIpResolver {
         }
 
         val xff = parseXff(call.request.headers[HttpHeaders.XForwardedFor])
-        val fwd = if (xff.isEmpty()) parseForwarded(call.request.headers[HttpHeaders.Forwarded]) else emptyList()
-        var chain = if (xff.isNotEmpty()) xff else fwd
+        val forwarded = if (xff.isEmpty()) parseForwarded(call.request.headers[HttpHeaders.Forwarded]) else emptyList()
+        val chain = if (xff.isNotEmpty()) xff else forwarded
 
-        val fallbackChain = if (chain.isEmpty()) {
-            // Приоритет как задокументировано: True-Client-IP → CF-Connecting-IP → X-Real-IP
-            val tciIp = cleanIpToken(call.request.headers["True-Client-IP"])
-            val cfIp = cleanIpToken(call.request.headers["CF-Connecting-IP"])
-            val realIp = cleanIpToken(call.request.headers["X-Real-IP"])
-            listOfNotNull(tciIp, cfIp, realIp)
+        val client = if (chain.isNotEmpty()) {
+            // Для XFF/Forwarded идём справа-налево: пропускаем trusted-прокси, первый не-trusted — это клиент
+            chain.asReversed().firstOrNull { ip -> !CidrMatcher.isAllowed(ip, trustedProxies) }
         } else {
-            null
-        }
-        // Для XFF/Forwarded идём справа-налево: пропускаем trusted прокси, первый не-trusted — это клиент
-        val client = when {
-            fallbackChain != null -> fallbackChain.firstOrNull { ip -> !CidrMatcher.isAllowed(ip, trustedProxies) }
-            else -> chain.asReversed().firstOrNull { ip -> !CidrMatcher.isAllowed(ip, trustedProxies) }
+            // Приоритет как задокументировано: True-Client-IP → CF-Connecting-IP → X-Real-IP
+            val fallbackChain = listOfNotNull(
+                cleanIpToken(call.request.headers["True-Client-IP"]),
+                cleanIpToken(call.request.headers["CF-Connecting-IP"]),
+                cleanIpToken(call.request.headers["X-Real-IP"])
+            )
+            fallbackChain.firstOrNull { ip -> !CidrMatcher.isAllowed(ip, trustedProxies) }
         }
         return client ?: remote
     }

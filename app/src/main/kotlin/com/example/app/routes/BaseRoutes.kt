@@ -196,28 +196,30 @@ private suspend fun databaseHealthCheck(database: Database, timeoutMs: Long): He
 }
 
 private suspend fun redisHealthCheck(redisson: RedissonClient, timeoutMs: Long): HealthCheckResult {
-    val start = System.currentTimeMillis()
-    val ok = withTimeoutOrNull(timeoutMs.milliseconds) {
-        val config = redisson.config
-        val detectedTopology = when {
-            config.isSingleConfig -> RedisNodes.SINGLE
-            config.isClusterConfig -> RedisNodes.CLUSTER
-            config.isSentinelConfig -> RedisNodes.SENTINEL_MASTER_SLAVE
-            else -> null
-        }
-        val pingResult = detectedTopology
-            ?.let { topology -> runCatching { redisson.getRedisNodes(topology).pingAll() }.getOrNull() }
-            ?: listOf(
-                RedisNodes.SINGLE,
-                RedisNodes.MASTER_SLAVE,
-                RedisNodes.CLUSTER,
-                RedisNodes.SENTINEL_MASTER_SLAVE
-            ).firstNotNullOfOrNull { topology ->
-                runCatching { redisson.getRedisNodes(topology).pingAll() }.getOrNull()
+    var ok = false
+    val duration = measureTimeMillis {
+        ok = withTimeoutOrNull(timeoutMs.milliseconds) {
+            val config = redisson.config
+            val detectedTopology = when {
+                config.isSingleConfig -> RedisNodes.SINGLE
+                config.isClusterConfig -> RedisNodes.CLUSTER
+                config.isSentinelConfig -> RedisNodes.SENTINEL_MASTER_SLAVE
+                else -> null
             }
-        pingResult ?: false
-    } ?: false
-    return HealthCheckResult("redis", if (ok) "UP" else "DOWN", System.currentTimeMillis() - start)
+            val pingResult = detectedTopology
+                ?.let { topology -> runCatching { redisson.getRedisNodes(topology).pingAll() }.getOrNull() }
+                ?: listOf(
+                    RedisNodes.SINGLE,
+                    RedisNodes.MASTER_SLAVE,
+                    RedisNodes.CLUSTER,
+                    RedisNodes.SENTINEL_MASTER_SLAVE
+                ).firstNotNullOfOrNull { topology ->
+                    runCatching { redisson.getRedisNodes(topology).pingAll() }.getOrNull()
+                }
+            pingResult ?: false
+        } ?: false
+    }
+    return HealthCheckResult("redis", if (ok) "UP" else "DOWN", duration)
 }
 
 @Serializable
