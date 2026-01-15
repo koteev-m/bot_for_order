@@ -5,11 +5,18 @@ import io.ktor.server.application.ApplicationCall
 import java.util.Locale
 
 object ClientIpResolver {
+    private val fallbackHeaders = listOf(
+        "True-Client-IP",
+        "CF-Connecting-IP",
+        "X-Real-IP"
+    )
+
     /**
      * Возвращает эффективный IP клиента.
      * Логика:
      *  - Если [trustedProxies] пуст или remoteHost не в trusted-прокси -> вернуть remoteHost.
-     *  - Иначе: если есть X-Forwarded-For или Forwarded, идём справа-налево и пропускаем trusted-прокси.
+     *  - Иначе: если есть X-Forwarded-For (приоритет) или Forwarded (только если XFF пустой),
+     *    идём справа-налево и пропускаем trusted-прокси.
      *  - Если цепочка пуста, fallback: True-Client-IP → CF-Connecting-IP → X-Real-IP (по порядку).
      */
     fun resolve(call: ApplicationCall, trustedProxies: Set<String>): String {
@@ -28,11 +35,9 @@ object ClientIpResolver {
             chain.asReversed().firstOrNull { ip -> !CidrMatcher.isAllowed(ip, trustedProxies) }
         } else {
             // Приоритет как задокументировано: True-Client-IP → CF-Connecting-IP → X-Real-IP
-            val fallbackChain = listOfNotNull(
-                cleanIpToken(call.request.headers["True-Client-IP"]),
-                cleanIpToken(call.request.headers["CF-Connecting-IP"]),
-                cleanIpToken(call.request.headers["X-Real-IP"])
-            )
+            val fallbackChain = fallbackHeaders.mapNotNull { header ->
+                cleanIpToken(call.request.headers[header])
+            }
             fallbackChain.firstOrNull { ip -> !CidrMatcher.isAllowed(ip, trustedProxies) }
         }
         return client ?: remote
@@ -100,6 +105,12 @@ object ClientIpResolver {
             }
         }
 
-        return value.takeIf { it.isNotBlank() }
+        if (value.isBlank() || !looksLikeIpToken(value)) return null
+        return value
     }
+
+    private fun looksLikeIpToken(value: String): Boolean =
+        value.all { ch ->
+            ch.isDigit() || ch in "abcdefABCDEF:."
+        }
 }
