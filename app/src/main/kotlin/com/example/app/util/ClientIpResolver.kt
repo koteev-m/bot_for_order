@@ -5,10 +5,14 @@ import io.ktor.server.application.ApplicationCall
 import java.util.Locale
 
 object ClientIpResolver {
+    private const val TRUE_CLIENT_IP = "True-Client-IP"
+    private const val CF_CONNECTING_IP = "CF-Connecting-IP"
+    private const val X_REAL_IP = "X-Real-IP"
+
     private val fallbackHeaders = listOf(
-        "True-Client-IP",
-        "CF-Connecting-IP",
-        "X-Real-IP"
+        TRUE_CLIENT_IP,
+        CF_CONNECTING_IP,
+        X_REAL_IP
     )
 
     /**
