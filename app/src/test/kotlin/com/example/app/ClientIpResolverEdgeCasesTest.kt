@@ -74,20 +74,20 @@ class ClientIpResolverEdgeCasesTest : StringSpec({
         } shouldBe HttpStatusCode.OK
     }
 
-    "ignores invalid True-Client-IP token in fallback chain" {
+    "ignores invalid $TRUE_CLIENT_IP token in fallback chain" {
         metricsResponseStatus {
             header(TRUE_CLIENT_IP, "not-an-ip")
             header(CF_CONNECTING_IP, "203.0.113.7")
         } shouldBe HttpStatusCode.OK
     }
 
-    "accepts mixed-case IPv4-mapped IPv6 from True-Client-IP" {
+    "accepts mixed-case IPv4-mapped IPv6 from $TRUE_CLIENT_IP" {
         metricsResponseStatus {
             header(TRUE_CLIENT_IP, "::FfFf:203.0.113.5")
         } shouldBe HttpStatusCode.OK
     }
 
-    "prefers True-Client-IP over X-Real-IP in fallback order" {
+    "prefers $TRUE_CLIENT_IP over $X_REAL_IP in fallback order" {
         metricsResponseStatus(
             ipAllowlist = setOf("203.0.113.10/32")
         ) {
@@ -96,7 +96,7 @@ class ClientIpResolverEdgeCasesTest : StringSpec({
         } shouldBe HttpStatusCode.OK
     }
 
-    "skips trusted True-Client-IP and falls back to CF-Connecting-IP" {
+    "skips trusted $TRUE_CLIENT_IP and falls back to $CF_CONNECTING_IP" {
         metricsResponseStatus(
             trustedProxyAllowlist = setOf("127.0.0.1", "10.0.0.1")
         ) {
