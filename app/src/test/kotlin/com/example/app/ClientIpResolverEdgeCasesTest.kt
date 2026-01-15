@@ -146,4 +146,68 @@ class ClientIpResolverEdgeCasesTest : StringSpec({
             response.status shouldBe HttpStatusCode.OK
         }
     }
+
+    "prefers True-Client-IP over X-Real-IP in fallback order" {
+        val (database, redisson) = healthDeps()
+        val cfg = baseTestConfig(
+            metrics = MetricsConfig(
+                enabled = true,
+                prometheusEnabled = true,
+                basicAuth = BasicAuth("metrics", "secret"),
+                ipAllowlist = setOf("203.0.113.10/32"),
+                trustedProxyAllowlist = setOf("127.0.0.1")
+            ),
+            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
+        )
+        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) {
+                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
+                }
+                install(Koin) { modules(module { single { database }; single { redisson } }) }
+                routing { installBaseRoutes(cfg, registry) }
+            }
+
+            val response = client.get("/metrics") {
+                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
+                header("True-Client-IP", "203.0.113.10")
+                header("X-Real-IP", "203.0.113.11")
+            }
+            response.status shouldBe HttpStatusCode.OK
+        }
+    }
+
+    "skips trusted True-Client-IP and falls back to CF-Connecting-IP" {
+        val (database, redisson) = healthDeps()
+        val cfg = baseTestConfig(
+            metrics = MetricsConfig(
+                enabled = true,
+                prometheusEnabled = true,
+                basicAuth = BasicAuth("metrics", "secret"),
+                ipAllowlist = setOf("203.0.113.0/24"),
+                trustedProxyAllowlist = setOf("127.0.0.1", "10.0.0.1")
+            ),
+            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
+        )
+        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) {
+                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
+                }
+                install(Koin) { modules(module { single { database }; single { redisson } }) }
+                routing { installBaseRoutes(cfg, registry) }
+            }
+
+            val response = client.get("/metrics") {
+                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
+                header("True-Client-IP", "10.0.0.1")
+                header("CF-Connecting-IP", "203.0.113.7")
+            }
+            response.status shouldBe HttpStatusCode.OK
+        }
+    }
 })
