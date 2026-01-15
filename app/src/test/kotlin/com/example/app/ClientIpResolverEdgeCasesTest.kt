@@ -6,6 +6,7 @@ import com.example.app.config.MetricsConfig
 import com.example.app.routes.installBaseRoutes
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.http.HttpHeaders
@@ -75,14 +76,14 @@ class ClientIpResolverEdgeCasesTest : StringSpec({
 
     "ignores invalid True-Client-IP token in fallback chain" {
         metricsResponseStatus {
-            header("True-Client-IP", "not-an-ip")
-            header("CF-Connecting-IP", "203.0.113.7")
+            header(TRUE_CLIENT_IP, "not-an-ip")
+            header(CF_CONNECTING_IP, "203.0.113.7")
         } shouldBe HttpStatusCode.OK
     }
 
     "accepts mixed-case IPv4-mapped IPv6 from True-Client-IP" {
         metricsResponseStatus {
-            header("True-Client-IP", "::FfFf:203.0.113.5")
+            header(TRUE_CLIENT_IP, "::FfFf:203.0.113.5")
         } shouldBe HttpStatusCode.OK
     }
 
@@ -90,8 +91,8 @@ class ClientIpResolverEdgeCasesTest : StringSpec({
         metricsResponseStatus(
             ipAllowlist = setOf("203.0.113.10/32")
         ) {
-            header("True-Client-IP", "203.0.113.10")
-            header("X-Real-IP", "203.0.113.11")
+            header(TRUE_CLIENT_IP, "203.0.113.10")
+            header(X_REAL_IP, "203.0.113.11")
         } shouldBe HttpStatusCode.OK
     }
 
@@ -99,16 +100,20 @@ class ClientIpResolverEdgeCasesTest : StringSpec({
         metricsResponseStatus(
             trustedProxyAllowlist = setOf("127.0.0.1", "10.0.0.1")
         ) {
-            header("True-Client-IP", "10.0.0.1")
-            header("CF-Connecting-IP", "203.0.113.7")
+            header(TRUE_CLIENT_IP, "10.0.0.1")
+            header(CF_CONNECTING_IP, "203.0.113.7")
         } shouldBe HttpStatusCode.OK
     }
 })
 
+private const val TRUE_CLIENT_IP = "True-Client-IP"
+private const val CF_CONNECTING_IP = "CF-Connecting-IP"
+private const val X_REAL_IP = "X-Real-IP"
+
 private fun metricsResponseStatus(
     ipAllowlist: Set<String> = setOf("203.0.113.0/24"),
     trustedProxyAllowlist: Set<String> = setOf("127.0.0.1"),
-    request: io.ktor.client.request.HttpRequestBuilder.() -> Unit = {}
+    request: HttpRequestBuilder.() -> Unit = {}
 ): HttpStatusCode {
     val (database, redisson) = healthDeps()
     val cfg = baseTestConfig(
