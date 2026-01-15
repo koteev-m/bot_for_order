@@ -23,378 +23,125 @@ import org.koin.ktor.plugin.Koin
 
 class ClientIpResolverEdgeCasesTest : StringSpec({
     "accepts IPv6 from XFF when proxy is trusted (strip ::1 hop)" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("2001:db8::/32"),
-                // В тестовом движке remoteHost=127.0.0.1 — тоже пометим как доверенный
-                trustedProxyAllowlist = setOf("127.0.0.1", "::1")
-            ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
-        testApplication {
-            application {
-                install(ServerContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
-                }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-
-            val response = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header(HttpHeaders.XForwardedFor, "2001:db8::1234, ::1")
-            }
-            response.status shouldBe HttpStatusCode.OK
-        }
+        metricsResponseStatus(
+            headers = listOf(HttpHeaders.XForwardedFor to "2001:db8::1234, ::1"),
+            ipAllowlist = setOf("2001:db8::/32"),
+            trustedProxyAllowlist = setOf("127.0.0.1", "::1")
+        ) shouldBe HttpStatusCode.OK
     }
 
     "uses Forwarded header when XFF is absent" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("203.0.113.0/24"),
-                trustedProxyAllowlist = setOf("127.0.0.1")
-            ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
-        testApplication {
-            application {
-                install(ServerContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
-                }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-
-            val response = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header("Forwarded", "for=203.0.113.5;proto=https, for=127.0.0.1")
-            }
-            response.status shouldBe HttpStatusCode.OK
-        }
+        metricsResponseStatus(
+            headers = listOf("Forwarded" to "for=203.0.113.5;proto=https, for=127.0.0.1")
+        ) shouldBe HttpStatusCode.OK
     }
 
     "cleans IPv4 with port and ignores 'unknown' token" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("203.0.113.0/24"),
-                trustedProxyAllowlist = setOf("127.0.0.1")
-            ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
-        testApplication {
-            application {
-                install(ServerContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
-                }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-
-            val response = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header(HttpHeaders.XForwardedFor, "203.0.113.5:4321, unknown, 127.0.0.1")
-            }
-            response.status shouldBe HttpStatusCode.OK
-        }
+        metricsResponseStatus(
+            headers = listOf(HttpHeaders.XForwardedFor to "203.0.113.5:4321, unknown, 127.0.0.1")
+        ) shouldBe HttpStatusCode.OK
     }
 
     "ignores invalid token in XFF without exceptions" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("203.0.113.0/24"),
-                trustedProxyAllowlist = setOf("127.0.0.1")
-            ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
-        testApplication {
-            application {
-                install(ServerContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
-                }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-
-            val response = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header(HttpHeaders.XForwardedFor, "203.0.113.5, not-an-ip, 127.0.0.1")
-            }
-            response.status shouldBe HttpStatusCode.OK
-        }
+        metricsResponseStatus(
+            headers = listOf(HttpHeaders.XForwardedFor to "203.0.113.5, not-an-ip, 127.0.0.1")
+        ) shouldBe HttpStatusCode.OK
     }
 
     "ignores hex-only garbage token in XFF" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("203.0.113.0/24"),
-                trustedProxyAllowlist = setOf("127.0.0.1")
-            ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
-        testApplication {
-            application {
-                install(ServerContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
-                }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-
-            val response = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header(HttpHeaders.XForwardedFor, "203.0.113.5, deadbeef, 127.0.0.1")
-            }
-            response.status shouldBe HttpStatusCode.OK
-        }
+        metricsResponseStatus(
+            headers = listOf(HttpHeaders.XForwardedFor to "203.0.113.5, deadbeef, 127.0.0.1")
+        ) shouldBe HttpStatusCode.OK
     }
 
     "ignores dotted hex garbage token in XFF" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("203.0.113.0/24"),
-                trustedProxyAllowlist = setOf("127.0.0.1")
-            ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
-        testApplication {
-            application {
-                install(ServerContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
-                }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-
-            val response = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header(HttpHeaders.XForwardedFor, "203.0.113.5, dead.beef, 127.0.0.1")
-            }
-            response.status shouldBe HttpStatusCode.OK
-        }
+        metricsResponseStatus(
+            headers = listOf(HttpHeaders.XForwardedFor to "203.0.113.5, dead.beef, 127.0.0.1")
+        ) shouldBe HttpStatusCode.OK
     }
 
     "ignores dotted garbage token in XFF" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("203.0.113.0/24"),
-                trustedProxyAllowlist = setOf("127.0.0.1")
-            ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
-        testApplication {
-            application {
-                install(ServerContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
-                }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-
-            val response = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header(HttpHeaders.XForwardedFor, "203.0.113.5, ..., 127.0.0.1")
-            }
-            response.status shouldBe HttpStatusCode.OK
-        }
+        metricsResponseStatus(
+            headers = listOf(HttpHeaders.XForwardedFor to "203.0.113.5, ..., 127.0.0.1")
+        ) shouldBe HttpStatusCode.OK
     }
 
     "ignores colon-only garbage token in XFF" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("203.0.113.0/24"),
-                trustedProxyAllowlist = setOf("127.0.0.1")
-            ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
-        testApplication {
-            application {
-                install(ServerContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
-                }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-
-            val response = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header(HttpHeaders.XForwardedFor, "203.0.113.5, ::::, 127.0.0.1")
-            }
-            response.status shouldBe HttpStatusCode.OK
-        }
+        metricsResponseStatus(
+            headers = listOf(HttpHeaders.XForwardedFor to "203.0.113.5, ::::, 127.0.0.1")
+        ) shouldBe HttpStatusCode.OK
     }
 
     "ignores invalid True-Client-IP token in fallback chain" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("203.0.113.0/24"),
-                trustedProxyAllowlist = setOf("127.0.0.1")
-            ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
-        testApplication {
-            application {
-                install(ServerContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
-                }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-
-            val response = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header("True-Client-IP", "not-an-ip")
-                header("CF-Connecting-IP", "203.0.113.7")
-            }
-            response.status shouldBe HttpStatusCode.OK
-        }
+        metricsResponseStatus(
+            headers = listOf(
+                "True-Client-IP" to "not-an-ip",
+                "CF-Connecting-IP" to "203.0.113.7"
+            )
+        ) shouldBe HttpStatusCode.OK
     }
 
     "accepts mixed-case IPv4-mapped IPv6 from True-Client-IP" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("203.0.113.0/24"),
-                trustedProxyAllowlist = setOf("127.0.0.1")
-            ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
-        testApplication {
-            application {
-                install(ServerContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
-                }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-
-            val response = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header("True-Client-IP", "::FfFf:203.0.113.5")
-            }
-            response.status shouldBe HttpStatusCode.OK
-        }
+        metricsResponseStatus(
+            headers = listOf("True-Client-IP" to "::FfFf:203.0.113.5")
+        ) shouldBe HttpStatusCode.OK
     }
 
     "prefers True-Client-IP over X-Real-IP in fallback order" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("203.0.113.10/32"),
-                trustedProxyAllowlist = setOf("127.0.0.1")
+        metricsResponseStatus(
+            headers = listOf(
+                "True-Client-IP" to "203.0.113.10",
+                "X-Real-IP" to "203.0.113.11"
             ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
-        testApplication {
-            application {
-                install(ServerContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
-                }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-
-            val response = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header("True-Client-IP", "203.0.113.10")
-                header("X-Real-IP", "203.0.113.11")
-            }
-            response.status shouldBe HttpStatusCode.OK
-        }
+            ipAllowlist = setOf("203.0.113.10/32")
+        ) shouldBe HttpStatusCode.OK
     }
 
     "skips trusted True-Client-IP and falls back to CF-Connecting-IP" {
-        val (database, redisson) = healthDeps()
-        val cfg = baseTestConfig(
-            metrics = MetricsConfig(
-                enabled = true,
-                prometheusEnabled = true,
-                basicAuth = BasicAuth("metrics", "secret"),
-                ipAllowlist = setOf("203.0.113.0/24"),
-                trustedProxyAllowlist = setOf("127.0.0.1", "10.0.0.1")
+        metricsResponseStatus(
+            headers = listOf(
+                "True-Client-IP" to "10.0.0.1",
+                "CF-Connecting-IP" to "203.0.113.7"
             ),
-            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
-        )
-        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
-        testApplication {
-            application {
-                install(ServerContentNegotiation) {
-                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
-                }
-                install(Koin) { modules(module { single { database }; single { redisson } }) }
-                routing { installBaseRoutes(cfg, registry) }
-            }
-
-            val response = client.get("/metrics") {
-                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header("True-Client-IP", "10.0.0.1")
-                header("CF-Connecting-IP", "203.0.113.7")
-            }
-            response.status shouldBe HttpStatusCode.OK
-        }
+            trustedProxyAllowlist = setOf("127.0.0.1", "10.0.0.1")
+        ) shouldBe HttpStatusCode.OK
     }
 })
+
+private fun metricsResponseStatus(
+    headers: List<Pair<String, String>>,
+    ipAllowlist: Set<String> = setOf("203.0.113.0/24"),
+    trustedProxyAllowlist: Set<String> = setOf("127.0.0.1")
+): HttpStatusCode {
+    val (database, redisson) = healthDeps()
+    val cfg = baseTestConfig(
+        metrics = MetricsConfig(
+            enabled = true,
+            prometheusEnabled = true,
+            basicAuth = BasicAuth("metrics", "secret"),
+            ipAllowlist = ipAllowlist,
+            trustedProxyAllowlist = trustedProxyAllowlist
+        ),
+        health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
+    )
+    val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+
+    var status: HttpStatusCode? = null
+    testApplication {
+        application {
+            install(ServerContentNegotiation) {
+                json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
+            }
+            install(Koin) { modules(module { single { database }; single { redisson } }) }
+            routing { installBaseRoutes(cfg, registry) }
+        }
+
+        val response = client.get("/metrics") {
+            header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
+            headers.forEach { (name, value) -> header(name, value) }
+        }
+        status = response.status
+    }
+
+    return requireNotNull(status) { "Expected response status to be set in test application" }
+}
