@@ -47,6 +47,7 @@ class HealthMetricsToggleTest : StringSpec({
             health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
         )
         val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+        registry.counter("test_metrics_counter").increment()
 
         testApplication {
             application {

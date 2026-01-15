@@ -206,7 +206,7 @@ private suspend fun redisHealthCheck(redisson: RedissonClient, timeoutMs: Long):
             else -> null
         }
         val pingResult = detectedTopology
-            ?.let { redisson.getRedisNodes(it).pingAll() }
+            ?.let { topology -> runCatching { redisson.getRedisNodes(topology).pingAll() }.getOrNull() }
             ?: listOf(
                 RedisNodes.SINGLE,
                 RedisNodes.MASTER_SLAVE,
