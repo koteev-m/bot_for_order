@@ -110,9 +110,13 @@ object ClientIpResolver {
     }
 
     private fun looksLikeIpToken(value: String): Boolean {
-        if (value.none { ch -> ch == '.' || ch == ':' }) return false
-        return value.all { ch ->
-            ch.isDigit() || ch in "abcdefABCDEF:."
+        return if (value.contains(':')) {
+            value.any { ch -> ch.isDigit() || ch in "abcdefABCDEF" } &&
+                value.all { ch -> ch.isDigit() || ch in "abcdefABCDEF:." }
+        } else {
+            value.contains('.') &&
+                value.any { ch -> ch.isDigit() } &&
+                value.all { ch -> ch.isDigit() || ch == '.' }
         }
     }
 }
