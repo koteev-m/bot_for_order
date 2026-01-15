@@ -22,6 +22,10 @@ import kotlinx.serialization.json.Json
 import org.koin.dsl.module
 import org.koin.ktor.plugin.Koin
 
+private const val TRUE_CLIENT_IP = "True-Client-IP"
+private const val CF_CONNECTING_IP = "CF-Connecting-IP"
+private const val X_REAL_IP = "X-Real-IP"
+
 class ClientIpResolverEdgeCasesTest : StringSpec({
     "accepts IPv6 from XFF when proxy is trusted (strip ::1 hop)" {
         metricsResponseStatus(
@@ -105,10 +109,6 @@ class ClientIpResolverEdgeCasesTest : StringSpec({
         } shouldBe HttpStatusCode.OK
     }
 })
-
-private const val TRUE_CLIENT_IP = "True-Client-IP"
-private const val CF_CONNECTING_IP = "CF-Connecting-IP"
-private const val X_REAL_IP = "X-Real-IP"
 
 private fun metricsResponseStatus(
     ipAllowlist: Set<String> = setOf("203.0.113.0/24"),
