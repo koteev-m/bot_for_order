@@ -208,7 +208,7 @@ private suspend fun redisHealthCheck(redisson: RedissonClient, timeoutMs: Long):
             }
             val pingResult = detectedTopology
                 ?.let { topology -> runCatching { redisson.getRedisNodes(topology).pingAll() }.getOrNull() }
-                ?: redisHealthFallbackTopologies.firstNotNullOfOrNull { topology ->
+                ?: REDIS_HEALTH_FALLBACK_TOPOLOGIES.firstNotNullOfOrNull { topology ->
                     runCatching { redisson.getRedisNodes(topology).pingAll() }.getOrNull()
                 }
             pingResult ?: false
@@ -217,7 +217,7 @@ private suspend fun redisHealthCheck(redisson: RedissonClient, timeoutMs: Long):
     return HealthCheckResult("redis", if (ok) "UP" else "DOWN", duration)
 }
 
-private val redisHealthFallbackTopologies = listOf(
+private val REDIS_HEALTH_FALLBACK_TOPOLOGIES = listOf(
     RedisNodes.SINGLE,
     RedisNodes.MASTER_SLAVE,
     RedisNodes.CLUSTER,

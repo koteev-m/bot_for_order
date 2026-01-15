@@ -141,7 +141,38 @@ class ClientIpResolverEdgeCasesTest : StringSpec({
 
             val response = client.get("/metrics") {
                 header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
-                header(HttpHeaders.XForwardedFor, "not-an-ip, 203.0.113.5, 127.0.0.1")
+                header(HttpHeaders.XForwardedFor, "203.0.113.5, not-an-ip, 127.0.0.1")
+            }
+            response.status shouldBe HttpStatusCode.OK
+        }
+    }
+
+    "ignores hex-only garbage token in XFF" {
+        val (database, redisson) = healthDeps()
+        val cfg = baseTestConfig(
+            metrics = MetricsConfig(
+                enabled = true,
+                prometheusEnabled = true,
+                basicAuth = BasicAuth("metrics", "secret"),
+                ipAllowlist = setOf("203.0.113.0/24"),
+                trustedProxyAllowlist = setOf("127.0.0.1")
+            ),
+            health = HealthConfig(dbTimeoutMs = 50, redisTimeoutMs = 50)
+        )
+        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) {
+                    json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = false })
+                }
+                install(Koin) { modules(module { single { database }; single { redisson } }) }
+                routing { installBaseRoutes(cfg, registry) }
+            }
+
+            val response = client.get("/metrics") {
+                header(HttpHeaders.Authorization, "Basic ${encodeBasicAuth("metrics:secret")}")
+                header(HttpHeaders.XForwardedFor, "203.0.113.5, deadbeef, 127.0.0.1")
             }
             response.status shouldBe HttpStatusCode.OK
         }
