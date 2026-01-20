@@ -1,9 +1,12 @@
 package com.example.db
 
 import com.example.domain.BargainRules
+import com.example.domain.ChannelBinding
 import com.example.domain.Item
 import com.example.domain.ItemMedia
 import com.example.domain.ItemStatus
+import com.example.domain.LinkContext
+import com.example.domain.Merchant
 import com.example.domain.Offer
 import com.example.domain.OfferStatus
 import com.example.domain.Order
@@ -11,8 +14,31 @@ import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
 import com.example.domain.Post
 import com.example.domain.PricesDisplay
+import com.example.domain.Storefront
 import com.example.domain.Variant
 import java.time.Instant
+
+interface MerchantsRepository {
+    suspend fun getById(id: String): Merchant?
+}
+
+interface StorefrontsRepository {
+    suspend fun create(storefront: Storefront)
+    suspend fun getById(id: String): Storefront?
+    suspend fun listByMerchant(merchantId: String): List<Storefront>
+}
+
+interface ChannelBindingsRepository {
+    suspend fun bind(storefrontId: String, channelId: Long, createdAt: Instant): Long
+    suspend fun getByChannel(channelId: Long): ChannelBinding?
+    suspend fun listByStorefront(storefrontId: String): List<ChannelBinding>
+}
+
+interface LinkContextsRepository {
+    suspend fun create(context: LinkContext): Long
+    suspend fun getByTokenHash(tokenHash: String): LinkContext?
+    suspend fun revokeByTokenHash(tokenHash: String, revokedAt: Instant): Boolean
+}
 
 interface ItemsRepository {
     suspend fun create(item: Item)

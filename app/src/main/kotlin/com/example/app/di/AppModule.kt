@@ -2,9 +2,12 @@ package com.example.app.di
 
 import com.example.app.config.AppConfig
 import com.example.app.services.InventoryService
+import com.example.app.services.LinkContextService
+import com.example.app.services.LinkTokenHasher
 import com.example.app.services.PriceDropNotifierImpl
 import com.example.app.services.RestockAlertService
 import com.example.app.services.RestockNotifierImpl
+import com.example.app.services.StorefrontService
 import com.example.bots.TelegramClients
 import com.example.domain.watchlist.PriceDropNotifier
 import com.example.domain.watchlist.RestockNotifier
@@ -23,6 +26,10 @@ fun appModule(config: AppConfig, meterRegistry: MeterRegistry?) = module {
     single { TelegramClients(config.telegram.adminToken, config.telegram.shopToken, meterRegistry) }
 
     single<RedissonClient> { RedisClientFactory.create(config.redis.url) }
+
+    single { LinkTokenHasher(config.linkContext.tokenSecret) }
+    single { LinkContextService(get(), get()) }
+    single { StorefrontService(get(), get(), get()) }
 
     single<PriceDropNotifier> { PriceDropNotifierImpl(config, get(), get()) }
     single<RestockNotifier> { RestockNotifierImpl(config, get(), get(), get()) }

@@ -219,7 +219,7 @@ class OffersService(
         val currency = config.payments.invoiceCurrency.uppercase()
         val orderId = generateOrderId(userId)
         val orderPrice = OrderPrice(currency = currency, amountMinor = amountMinor)
-        val order = offer.toPendingOrder(orderId, userId, qty, orderPrice, now)
+        val order = offer.toPendingOrder(orderId, userId, qty, orderPrice, item.merchantId, now)
         repositories.orders.create(order)
         val orderReserveTtl = config.server.orderReserveTtlSec.toLong()
         try {
@@ -462,9 +462,11 @@ private fun Offer.toPendingOrder(
     userId: Long,
     qty: Int,
     price: OrderPrice,
+    merchantId: String,
     now: Instant
 ): Order = Order(
     id = orderId,
+    merchantId = merchantId,
     userId = userId,
     itemId = itemId,
     variantId = variantId,

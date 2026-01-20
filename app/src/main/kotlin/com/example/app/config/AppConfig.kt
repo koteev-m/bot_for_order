@@ -2,6 +2,8 @@ package com.example.app.config
 
 data class AppConfig(
     val telegram: TelegramConfig,
+    val merchants: MerchantsConfig,
+    val linkContext: LinkContextConfig,
     val db: DbConfig,
     val redis: RedisConfig,
     val payments: PaymentsConfig,
@@ -18,6 +20,14 @@ data class TelegramConfig(
     val shopToken: String,
     val adminIds: Set<Long>,
     val channelId: Long
+)
+
+data class MerchantsConfig(
+    val defaultMerchantId: String
+)
+
+data class LinkContextConfig(
+    val tokenSecret: String
 )
 
 data class DbConfig(

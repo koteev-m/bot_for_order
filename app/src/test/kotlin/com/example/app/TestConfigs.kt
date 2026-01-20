@@ -4,7 +4,9 @@ import com.example.app.config.AppConfig
 import com.example.app.config.DbConfig
 import com.example.app.config.FxConfig
 import com.example.app.config.HealthConfig
+import com.example.app.config.LinkContextConfig
 import com.example.app.config.LoggingConfig
+import com.example.app.config.MerchantsConfig
 import com.example.app.config.MetricsConfig
 import com.example.app.config.PaymentsConfig
 import com.example.app.config.RedisConfig
@@ -29,6 +31,8 @@ internal fun baseTestConfig(
         adminIds = emptySet(),
         channelId = 0L
     ),
+    merchants = MerchantsConfig(defaultMerchantId = "default"),
+    linkContext = LinkContextConfig(tokenSecret = "test-secret"),
     db = DbConfig(
         url = "jdbc:postgresql://localhost:5432/db",
         user = "user",
