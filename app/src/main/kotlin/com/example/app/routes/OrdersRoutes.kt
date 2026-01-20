@@ -82,6 +82,7 @@ private suspend fun handleCreateOrder(
 
     val order = Order(
         id = orderId,
+        merchantId = item.merchantId,
         userId = userId,
         itemId = req.itemId,
         variantId = req.variantId,

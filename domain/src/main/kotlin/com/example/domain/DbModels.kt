@@ -9,6 +9,56 @@ import kotlinx.serialization.Serializable
 enum class ItemStatus { draft, active, sold }
 
 @Serializable
+data class Merchant(
+    val id: String,
+    val name: String
+)
+
+@Serializable
+data class Storefront(
+    val id: String,
+    val merchantId: String,
+    val name: String
+)
+
+@Serializable
+data class ChannelBinding(
+    val id: Long,
+    val storefrontId: String,
+    val channelId: Long,
+    @Serializable(with = InstantIsoSerializer::class)
+    val createdAt: Instant
+)
+
+@Suppress("EnumNaming")
+@Serializable
+enum class LinkAction { ADD, BUY }
+
+@Suppress("EnumNaming")
+@Serializable
+enum class LinkButton { ADD, BUY }
+
+@Serializable
+data class LinkContext(
+    val id: Long,
+    val tokenHash: String,
+    val merchantId: String,
+    val storefrontId: String,
+    val channelId: Long,
+    val postMessageId: Int?,
+    val listingId: String,
+    val action: LinkAction,
+    val button: LinkButton,
+    @Serializable(with = InstantIsoSerializer::class)
+    val createdAt: Instant,
+    @Serializable(with = InstantIsoSerializer::class)
+    val revokedAt: Instant?,
+    @Serializable(with = InstantIsoSerializer::class)
+    val expiresAt: Instant?,
+    val metadataJson: String
+)
+
+@Serializable
 data class BargainRules(
     val minAcceptPct: Int,
     val minVisiblePct: Int,
@@ -21,6 +71,7 @@ data class BargainRules(
 @Serializable
 data class Item(
     val id: String,
+    val merchantId: String,
     val title: String,
     val description: String,
     val status: ItemStatus,
@@ -63,6 +114,7 @@ data class PricesDisplay(
 @Serializable
 data class Post(
     val id: Long,
+    val merchantId: String,
     val itemId: String,
     val channelMsgIds: List<Int>,
 )
@@ -92,6 +144,7 @@ enum class OrderStatus { pending, paid, fulfillment, shipped, delivered, cancele
 @Serializable
 data class Order(
     val id: String,
+    val merchantId: String,
     val userId: Long,
     val itemId: String,
     val variantId: String?,

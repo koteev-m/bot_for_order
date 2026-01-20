@@ -100,6 +100,7 @@ class PostService(
         postsRepository.insert(
             Post(
                 id = 0,
+                merchantId = item.merchantId,
                 itemId = itemId,
                 channelMsgIds = messageIds
             )

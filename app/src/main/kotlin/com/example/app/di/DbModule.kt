@@ -3,10 +3,16 @@ package com.example.app.di
 import com.example.app.config.AppConfig
 import com.example.db.DatabaseFactory
 import com.example.db.DatabaseTx
+import com.example.db.ChannelBindingsRepository
+import com.example.db.ChannelBindingsRepositoryExposed
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemMediaRepositoryExposed
 import com.example.db.ItemsRepository
 import com.example.db.ItemsRepositoryExposed
+import com.example.db.LinkContextsRepository
+import com.example.db.LinkContextsRepositoryExposed
+import com.example.db.MerchantsRepository
+import com.example.db.MerchantsRepositoryExposed
 import com.example.db.OffersRepository
 import com.example.db.OffersRepositoryExposed
 import com.example.db.OrderStatusHistoryRepository
@@ -17,6 +23,8 @@ import com.example.db.PostsRepository
 import com.example.db.PostsRepositoryExposed
 import com.example.db.PricesDisplayRepository
 import com.example.db.PricesDisplayRepositoryExposed
+import com.example.db.StorefrontsRepository
+import com.example.db.StorefrontsRepositoryExposed
 import com.example.db.VariantsRepository
 import com.example.db.VariantsRepositoryExposed
 import com.example.db.WatchlistRepositoryExposed
@@ -49,6 +57,10 @@ fun dbModule(cfg: AppConfig) = module {
     single<VariantsRepository> { VariantsRepositoryExposed(get()) }
     single<PricesDisplayRepository> { PricesDisplayRepositoryExposed(get()) }
     single<PostsRepository> { PostsRepositoryExposed(get()) }
+    single<MerchantsRepository> { MerchantsRepositoryExposed(get()) }
+    single<StorefrontsRepository> { StorefrontsRepositoryExposed(get()) }
+    single<ChannelBindingsRepository> { ChannelBindingsRepositoryExposed(get()) }
+    single<LinkContextsRepository> { LinkContextsRepositoryExposed(get()) }
     single<OffersRepository> { OffersRepositoryExposed(get()) }
     single<OrdersRepository> { OrdersRepositoryExposed(get()) }
     single<OrderStatusHistoryRepository> { OrderStatusHistoryRepositoryExposed(get()) }

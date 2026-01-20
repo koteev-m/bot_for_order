@@ -6,6 +6,8 @@ object ConfigLoader {
 
     fun fromEnv(): AppConfig = AppConfig(
         telegram = loadTelegramConfig(),
+        merchants = loadMerchantsConfig(),
+        linkContext = loadLinkContextConfig(),
         db = loadDbConfig(),
         redis = loadRedisConfig(),
         payments = loadPaymentsConfig(),
@@ -29,6 +31,17 @@ object ConfigLoader {
             channelId = channelId
         )
     }
+
+    private fun loadMerchantsConfig(): MerchantsConfig {
+        val defaultMerchantId = System.getenv("DEFAULT_MERCHANT_ID")
+            ?.takeIf { it.isNotBlank() }
+            ?: "default"
+        return MerchantsConfig(defaultMerchantId = defaultMerchantId)
+    }
+
+    private fun loadLinkContextConfig(): LinkContextConfig = LinkContextConfig(
+        tokenSecret = requireNonBlank("LINK_TOKEN_SECRET")
+    )
 
     private fun loadDbConfig(): DbConfig = DbConfig(
         url = requireNonBlank("DATABASE_URL"),

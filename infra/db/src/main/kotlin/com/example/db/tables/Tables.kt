@@ -4,8 +4,60 @@ import org.jetbrains.exposed.sql.ReferenceOption
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.javatime.timestamp
 
+object MerchantsTable : Table("merchants") {
+    val id = varchar("id", 64)
+    val name = text("name")
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
+object StorefrontsTable : Table("storefronts") {
+    val id = varchar("id", 64)
+    val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.CASCADE)
+    val name = text("name")
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
+object ChannelBindingsTable : Table("channel_bindings") {
+    val id = long("id").autoIncrement()
+    val storefrontId = reference("storefront_id", StorefrontsTable.id, onDelete = ReferenceOption.CASCADE)
+    val channelId = long("channel_id")
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index(true, channelId)
+        index(true, storefrontId, channelId)
+    }
+}
+
+object LinkContextsTable : Table("link_contexts") {
+    val id = long("id").autoIncrement()
+    val tokenHash = text("token_hash")
+    val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.CASCADE)
+    val storefrontId = reference("storefront_id", StorefrontsTable.id, onDelete = ReferenceOption.CASCADE)
+    val channelId = long("channel_id")
+    val postMessageId = integer("post_message_id").nullable()
+    val listingId = reference("listing_id", ItemsTable.id, onDelete = ReferenceOption.RESTRICT)
+    val action = varchar("action", 8)
+    val button = varchar("button", 8)
+    val createdAt = timestamp("created_at")
+    val revokedAt = timestamp("revoked_at").nullable()
+    val expiresAt = timestamp("expires_at").nullable()
+    val metadataJson = text("metadata_json")
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index(true, tokenHash)
+        index(false, listingId)
+        index(false, expiresAt)
+    }
+}
+
 object ItemsTable : Table("items") {
     val id = varchar("id", 64)
+    val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.RESTRICT)
     val title = text("title")
     val description = text("description")
     val status = varchar("status", 16)
@@ -51,6 +103,7 @@ object PricesDisplayTable : Table("prices_display") {
 
 object PostsTable : Table("posts") {
     val id = long("id").autoIncrement()
+    val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.RESTRICT)
     val itemId = reference("item_id", ItemsTable.id, onDelete = ReferenceOption.CASCADE)
     val channelMsgIdsJson = text("channel_msg_ids_json")
     val postedAt = timestamp("posted_at")
@@ -79,6 +132,7 @@ object OffersTable : Table("offers") {
 
 object OrdersTable : Table("orders") {
     val id = varchar("id", 64)
+    val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.RESTRICT)
     val userId = long("user_id")
     val itemId = reference("item_id", ItemsTable.id, onDelete = ReferenceOption.RESTRICT)
     val variantId = optReference("variant_id", VariantsTable.id, onDelete = ReferenceOption.SET_NULL)

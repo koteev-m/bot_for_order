@@ -1,18 +1,27 @@
 package com.example.db
 
+import com.example.db.tables.ChannelBindingsTable
 import com.example.db.tables.ItemMediaTable
 import com.example.db.tables.ItemsTable
+import com.example.db.tables.LinkContextsTable
+import com.example.db.tables.MerchantsTable
 import com.example.db.tables.OffersTable
 import com.example.db.tables.OrderStatusHistoryTable
 import com.example.db.tables.OrdersTable
 import com.example.db.tables.PostsTable
 import com.example.db.tables.PricesDisplayTable
+import com.example.db.tables.StorefrontsTable
 import com.example.db.tables.VariantsTable
 import com.example.db.tables.WatchlistTable
 import com.example.domain.BargainRules
+import com.example.domain.ChannelBinding
 import com.example.domain.Item
 import com.example.domain.ItemMedia
 import com.example.domain.ItemStatus
+import com.example.domain.LinkAction
+import com.example.domain.LinkButton
+import com.example.domain.LinkContext
+import com.example.domain.Merchant
 import com.example.domain.Offer
 import com.example.domain.OfferStatus
 import com.example.domain.Order
@@ -20,6 +29,7 @@ import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
 import com.example.domain.Post
 import com.example.domain.PricesDisplay
+import com.example.domain.Storefront
 import com.example.domain.Variant
 import com.example.domain.WatchTrigger
 import com.example.domain.watchlist.PriceDropSubscription
@@ -56,11 +66,148 @@ import org.jetbrains.exposed.sql.statements.InsertStatement
 
 private val json = Json
 
+class MerchantsRepositoryExposed(private val tx: DatabaseTx) : MerchantsRepository {
+    override suspend fun getById(id: String): Merchant? = tx.tx {
+        MerchantsTable
+            .selectAll()
+            .where { MerchantsTable.id eq id }
+            .singleOrNull()
+            ?.toMerchant()
+    }
+
+    private fun ResultRow.toMerchant(): Merchant =
+        Merchant(
+            id = this[MerchantsTable.id],
+            name = this[MerchantsTable.name]
+        )
+}
+
+class StorefrontsRepositoryExposed(private val tx: DatabaseTx) : StorefrontsRepository {
+    override suspend fun create(storefront: Storefront) {
+        tx.tx {
+            StorefrontsTable.insert {
+                it[id] = storefront.id
+                it[merchantId] = storefront.merchantId
+                it[name] = storefront.name
+                it[createdAt] = CurrentTimestamp()
+            }
+        }
+    }
+
+    override suspend fun getById(id: String): Storefront? = tx.tx {
+        StorefrontsTable
+            .selectAll()
+            .where { StorefrontsTable.id eq id }
+            .singleOrNull()
+            ?.toStorefront()
+    }
+
+    override suspend fun listByMerchant(merchantId: String): List<Storefront> = tx.tx {
+        StorefrontsTable
+            .selectAll()
+            .where { StorefrontsTable.merchantId eq merchantId }
+            .map { it.toStorefront() }
+    }
+
+    private fun ResultRow.toStorefront(): Storefront =
+        Storefront(
+            id = this[StorefrontsTable.id],
+            merchantId = this[StorefrontsTable.merchantId],
+            name = this[StorefrontsTable.name]
+        )
+}
+
+class ChannelBindingsRepositoryExposed(private val tx: DatabaseTx) : ChannelBindingsRepository {
+    override suspend fun bind(storefrontId: String, channelId: Long, createdAt: Instant): Long = tx.tx {
+        ChannelBindingsTable.insert {
+            it[ChannelBindingsTable.storefrontId] = storefrontId
+            it[ChannelBindingsTable.channelId] = channelId
+            it[ChannelBindingsTable.createdAt] = createdAt
+        }.requireGeneratedId(ChannelBindingsTable.id)
+    }
+
+    override suspend fun getByChannel(channelId: Long): ChannelBinding? = tx.tx {
+        ChannelBindingsTable
+            .selectAll()
+            .where { ChannelBindingsTable.channelId eq channelId }
+            .singleOrNull()
+            ?.toChannelBinding()
+    }
+
+    override suspend fun listByStorefront(storefrontId: String): List<ChannelBinding> = tx.tx {
+        ChannelBindingsTable
+            .selectAll()
+            .where { ChannelBindingsTable.storefrontId eq storefrontId }
+            .map { it.toChannelBinding() }
+    }
+
+    private fun ResultRow.toChannelBinding(): ChannelBinding =
+        ChannelBinding(
+            id = this[ChannelBindingsTable.id],
+            storefrontId = this[ChannelBindingsTable.storefrontId],
+            channelId = this[ChannelBindingsTable.channelId],
+            createdAt = this[ChannelBindingsTable.createdAt]
+        )
+}
+
+class LinkContextsRepositoryExposed(private val tx: DatabaseTx) : LinkContextsRepository {
+    override suspend fun create(context: LinkContext): Long = tx.tx {
+        LinkContextsTable.insert {
+            it[tokenHash] = context.tokenHash
+            it[merchantId] = context.merchantId
+            it[storefrontId] = context.storefrontId
+            it[channelId] = context.channelId
+            it[postMessageId] = context.postMessageId
+            it[listingId] = context.listingId
+            it[action] = context.action.name
+            it[button] = context.button.name
+            it[createdAt] = context.createdAt
+            it[revokedAt] = context.revokedAt
+            it[expiresAt] = context.expiresAt
+            it[metadataJson] = context.metadataJson
+        }.requireGeneratedId(LinkContextsTable.id)
+    }
+
+    override suspend fun getByTokenHash(tokenHash: String): LinkContext? = tx.tx {
+        LinkContextsTable
+            .selectAll()
+            .where { LinkContextsTable.tokenHash eq tokenHash }
+            .singleOrNull()
+            ?.toLinkContext()
+    }
+
+    override suspend fun revokeByTokenHash(tokenHash: String, revokedAt: Instant): Boolean = tx.tx {
+        LinkContextsTable.update({
+            (LinkContextsTable.tokenHash eq tokenHash) and LinkContextsTable.revokedAt.isNull()
+        }) {
+            it[LinkContextsTable.revokedAt] = revokedAt
+        } > 0
+    }
+
+    private fun ResultRow.toLinkContext(): LinkContext =
+        LinkContext(
+            id = this[LinkContextsTable.id],
+            tokenHash = this[LinkContextsTable.tokenHash],
+            merchantId = this[LinkContextsTable.merchantId],
+            storefrontId = this[LinkContextsTable.storefrontId],
+            channelId = this[LinkContextsTable.channelId],
+            postMessageId = this[LinkContextsTable.postMessageId],
+            listingId = this[LinkContextsTable.listingId],
+            action = LinkAction.valueOf(this[LinkContextsTable.action]),
+            button = LinkButton.valueOf(this[LinkContextsTable.button]),
+            createdAt = this[LinkContextsTable.createdAt],
+            revokedAt = this[LinkContextsTable.revokedAt],
+            expiresAt = this[LinkContextsTable.expiresAt],
+            metadataJson = this[LinkContextsTable.metadataJson]
+        )
+}
+
 class ItemsRepositoryExposed(private val tx: DatabaseTx) : ItemsRepository {
     override suspend fun create(item: Item) {
         tx.tx {
             ItemsTable.insert {
                 it[id] = item.id
+                it[merchantId] = item.merchantId
                 it[title] = item.title
                 it[description] = item.description
                 it[status] = item.status.name
@@ -101,6 +248,7 @@ class ItemsRepositoryExposed(private val tx: DatabaseTx) : ItemsRepository {
     private fun ResultRow.toItem(): Item =
         Item(
             id = this[ItemsTable.id],
+            merchantId = this[ItemsTable.merchantId],
             title = this[ItemsTable.title],
             description = this[ItemsTable.description],
             status = ItemStatus.valueOf(this[ItemsTable.status]),
@@ -287,6 +435,7 @@ class PostsRepositoryExposed(private val tx: DatabaseTx) : PostsRepository {
     override suspend fun insert(post: Post): Long = tx.tx {
         val payload = json.encodeToString(post.channelMsgIds)
         PostsTable.insert {
+            it[merchantId] = post.merchantId
             it[itemId] = post.itemId
             it[channelMsgIdsJson] = payload
             it[postedAt] = CurrentTimestamp()
@@ -301,6 +450,7 @@ class PostsRepositoryExposed(private val tx: DatabaseTx) : PostsRepository {
             .map {
                 Post(
                     id = it[PostsTable.id],
+                    merchantId = it[PostsTable.merchantId],
                     itemId = it[PostsTable.itemId],
                     channelMsgIds = json.decodeFromString<List<Int>>(it[PostsTable.channelMsgIdsJson])
                 )
@@ -422,6 +572,7 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
         tx.tx {
             OrdersTable.insert {
                 it[id] = order.id
+                it[merchantId] = order.merchantId
                 it[userId] = order.userId
                 it[itemId] = order.itemId
                 it[variantId] = order.variantId
@@ -449,6 +600,7 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
             ?.let {
                 Order(
                     id = it[OrdersTable.id],
+                    merchantId = it[OrdersTable.merchantId],
                     userId = it[OrdersTable.userId],
                     itemId = it[OrdersTable.itemId],
                     variantId = it[OrdersTable.variantId],
@@ -475,6 +627,7 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
             .map {
                 Order(
                     id = it[OrdersTable.id],
+                    merchantId = it[OrdersTable.merchantId],
                     userId = it[OrdersTable.userId],
                     itemId = it[OrdersTable.itemId],
                     variantId = it[OrdersTable.variantId],
@@ -535,6 +688,7 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
             .map {
                 Order(
                     id = it[OrdersTable.id],
+                    merchantId = it[OrdersTable.merchantId],
                     userId = it[OrdersTable.userId],
                     itemId = it[OrdersTable.itemId],
                     variantId = it[OrdersTable.variantId],
