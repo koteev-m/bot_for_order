@@ -115,10 +115,20 @@ class PostService(
 
         val editResponse = clients.adminBot.execute(editRequest)
         if (!editResponse.isOk) {
+            runCatching { linkContextService.revoke(addToken) }
+            runCatching { linkContextService.revoke(buyToken) }
+            val errorCode = editResponse.errorCode()
+            val errorDesc = editResponse.description()
             log.warn(
-                "EditMessageCaption failed: {} {}",
-                editResponse.errorCode(),
-                editResponse.description()
+                "EditMessageReplyMarkup failed: {} {} channelId={} messageId={}",
+                errorCode,
+                errorDesc,
+                channelId,
+                firstMessageId
+            )
+            throw IllegalStateException(
+                "failed to attach CTA keyboard: code=$errorCode desc=$errorDesc " +
+                    "channelId=$channelId messageId=$firstMessageId"
             )
         }
 
