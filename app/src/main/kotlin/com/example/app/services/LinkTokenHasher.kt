@@ -20,13 +20,40 @@ class LinkTokenHasher(
     }
 
     fun hash(token: String): String {
-        val mac = Mac.getInstance("HmacSHA256")
-        val key = SecretKeySpec(secret.toByteArray(StandardCharsets.UTF_8), "HmacSHA256")
+        return encodeHex(hmac(token))
+    }
+
+    fun hashLegacy(token: String): String {
+        return encodeHexLegacy(hmac(token))
+    }
+
+    private fun hmac(token: String): ByteArray {
+        val mac = Mac.getInstance(HMAC_ALGORITHM)
+        val key = SecretKeySpec(secret.toByteArray(StandardCharsets.UTF_8), HMAC_ALGORITHM)
         mac.init(key)
-        val digest = mac.doFinal(token.toByteArray(StandardCharsets.UTF_8))
-        return digest.toHex()
+        return mac.doFinal(token.toByteArray(StandardCharsets.UTF_8))
+    }
+
+    private companion object {
+        private const val HMAC_ALGORITHM = "HmacSHA256"
     }
 }
 
-private fun ByteArray.toHex(): String =
-    joinToString("") { byte -> "%02x".format(byte) }
+private val HEX_CHARS = charArrayOf(
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+    'a', 'b', 'c', 'd', 'e', 'f'
+)
+
+private fun encodeHex(bytes: ByteArray): String {
+    val result = CharArray(bytes.size * 2)
+    bytes.forEachIndexed { index, byte ->
+        val int = byte.toInt() and 0xff
+        val offset = index * 2
+        result[offset] = HEX_CHARS[int ushr 4]
+        result[offset + 1] = HEX_CHARS[int and 0x0f]
+    }
+    return String(result)
+}
+
+private fun encodeHexLegacy(bytes: ByteArray): String =
+    bytes.joinToString("") { byte -> "%02x".format(byte) }

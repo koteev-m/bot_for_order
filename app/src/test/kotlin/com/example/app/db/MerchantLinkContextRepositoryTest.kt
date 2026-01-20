@@ -67,13 +67,28 @@ class MerchantLinkContextRepositoryTest : StringSpec({
         merchantId shouldBe "default"
 
         val itemId = "item_${UUID.randomUUID()}"
+        val now = Instant.now()
         dataSource.connection.use { conn ->
             conn.prepareStatement(
-                "INSERT INTO items (id, title, description, active) VALUES (?, ?, ?, true)"
+                """
+                    INSERT INTO items (
+                        id,
+                        title,
+                        description,
+                        status,
+                        allow_bargain,
+                        created_at,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent()
             ).use { stmt ->
                 stmt.setString(1, itemId)
                 stmt.setString(2, "Title")
                 stmt.setString(3, "Description")
+                stmt.setString(4, ItemStatus.active.name)
+                stmt.setBoolean(5, false)
+                stmt.setObject(6, now)
+                stmt.setObject(7, now)
                 stmt.executeUpdate()
             }
             conn.prepareStatement("SELECT merchant_id FROM items WHERE id = ?").use { stmt ->

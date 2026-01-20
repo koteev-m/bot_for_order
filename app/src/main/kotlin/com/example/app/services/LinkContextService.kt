@@ -52,6 +52,10 @@ class LinkContextService(
 
     suspend fun revoke(token: String, revokedAt: Instant = Instant.now()): Boolean {
         val tokenHash = tokenHasher.hash(token)
-        return repository.revokeByTokenHash(tokenHash, revokedAt)
+        if (repository.revokeByTokenHash(tokenHash, revokedAt)) {
+            return true
+        }
+        val legacyHash = tokenHasher.hashLegacy(token)
+        return repository.revokeByTokenHash(legacyHash, revokedAt)
     }
 }
