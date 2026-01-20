@@ -12,6 +12,7 @@ import com.example.domain.LinkAction
 import com.example.domain.LinkButton
 import com.example.domain.LinkContext
 import com.example.domain.Storefront
+import com.example.app.testutil.isDockerAvailable
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
@@ -22,8 +23,10 @@ import org.flywaydb.core.Flyway
 import org.testcontainers.containers.PostgreSQLContainer
 
 class MerchantLinkContextRepositoryTest : StringSpec({
+    val dockerAvailable = isDockerAvailable()
     val postgres = PostgreSQLContainer<Nothing>("postgres:16-alpine")
-    lateinit var dataSource: HikariDataSource
+    var started = false
+    var dataSource: HikariDataSource? = null
     lateinit var dbTx: DatabaseTx
     lateinit var itemsRepository: ItemsRepositoryExposed
     lateinit var storefrontsRepository: StorefrontsRepositoryExposed
@@ -31,18 +34,24 @@ class MerchantLinkContextRepositoryTest : StringSpec({
     lateinit var linkContextsRepository: LinkContextsRepositoryExposed
 
     beforeSpec {
+        if (!dockerAvailable) {
+            // Docker недоступен, поэтому testcontainers-тесты отключены.
+            return@beforeSpec
+        }
         postgres.start()
-        dataSource = DatabaseFactory.createHikari(
+        started = true
+        val initializedDataSource = DatabaseFactory.createHikari(
             url = postgres.jdbcUrl,
             user = postgres.username,
             password = postgres.password
         )
+        dataSource = initializedDataSource
         Flyway.configure()
-            .dataSource(dataSource)
+            .dataSource(initializedDataSource)
             .locations("classpath:db/migration")
             .load()
             .migrate()
-        DatabaseFactory.connect(dataSource)
+        DatabaseFactory.connect(initializedDataSource)
         dbTx = DatabaseTx()
         itemsRepository = ItemsRepositoryExposed(dbTx)
         storefrontsRepository = StorefrontsRepositoryExposed(dbTx)
@@ -51,12 +60,15 @@ class MerchantLinkContextRepositoryTest : StringSpec({
     }
 
     afterSpec {
-        dataSource.close()
-        postgres.stop()
+        dataSource?.close()
+        if (started) {
+            postgres.stop()
+        }
     }
 
-    "migrations create default merchant and backfill items" {
-        val merchantId = dataSource.connection.use { conn ->
+    "migrations create default merchant and backfill items".config(enabled = dockerAvailable) {
+        val initializedDataSource = checkNotNull(dataSource) { "DataSource не инициализирован." }
+        val merchantId = initializedDataSource.connection.use { conn ->
             conn.prepareStatement("SELECT id FROM merchants WHERE id = 'default'").use { stmt ->
                 stmt.executeQuery().use { rs ->
                     rs.next()
@@ -68,7 +80,7 @@ class MerchantLinkContextRepositoryTest : StringSpec({
 
         val itemId = "item_${UUID.randomUUID()}"
         val now = Instant.now()
-        dataSource.connection.use { conn ->
+        initializedDataSource.connection.use { conn ->
             conn.prepareStatement(
                 """
                     INSERT INTO items (
@@ -101,7 +113,8 @@ class MerchantLinkContextRepositoryTest : StringSpec({
         }
     }
 
-    "creates channel binding and link context, then revokes by token hash" {
+    "creates channel binding and link context, then revokes by token hash".config(enabled = dockerAvailable) {
+        checkNotNull(dataSource) { "DataSource не инициализирован." }
         val merchantId = "default"
         val storefront = Storefront(
             id = UUID.randomUUID().toString(),
