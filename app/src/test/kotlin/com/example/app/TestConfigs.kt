@@ -29,7 +29,8 @@ internal fun baseTestConfig(
         adminToken = "token",
         shopToken = "token",
         adminIds = emptySet(),
-        channelId = 0L
+        channelId = 0L,
+        buyerMiniAppShortName = "buyer"
     ),
     merchants = MerchantsConfig(defaultMerchantId = "default"),
     linkContext = LinkContextConfig(tokenSecret = "test-secret"),
