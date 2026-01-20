@@ -16,4 +16,12 @@ object DirectLink {
         }
         return "$base?startapp=$enc"
     }
+
+    fun forMiniApp(botUsername: String, appName: String?, token: String, mode: MiniAppMode): String {
+        val base = buildString {
+            append("https://t.me/").append(botUsername)
+            appName?.takeIf { it.isNotBlank() }?.let { append("/").append(it) }
+        }
+        return "$base?startapp=$token&mode=${mode.value}"
+    }
 }

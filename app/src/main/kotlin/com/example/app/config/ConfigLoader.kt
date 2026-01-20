@@ -24,11 +24,15 @@ object ConfigLoader {
         val shopToken = requireNonBlank("SHOP_BOT_TOKEN")
         val adminIds = parseAdminIds(requireNonBlank("ADMIN_IDS"))
         val channelId = parseLongEnv("CHANNEL_ID")
+        val buyerMiniAppShortName = System.getenv("BUYER_MINIAPP_SHORT_NAME")
+            ?.takeIf { it.isNotBlank() }
+            ?: "buyer"
         return TelegramConfig(
             adminToken = adminToken,
             shopToken = shopToken,
             adminIds = adminIds,
-            channelId = channelId
+            channelId = channelId,
+            buyerMiniAppShortName = buyerMiniAppShortName
         )
     }
 

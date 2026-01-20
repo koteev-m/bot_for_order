@@ -19,7 +19,8 @@ data class TelegramConfig(
     val adminToken: String,
     val shopToken: String,
     val adminIds: Set<Long>,
-    val channelId: Long
+    val channelId: Long,
+    val buyerMiniAppShortName: String
 )
 
 data class MerchantsConfig(
