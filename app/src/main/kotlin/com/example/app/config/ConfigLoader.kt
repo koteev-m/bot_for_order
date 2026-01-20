@@ -33,10 +33,12 @@ object ConfigLoader {
     }
 
     private fun loadMerchantsConfig(): MerchantsConfig {
-        val defaultMerchantId = System.getenv("DEFAULT_MERCHANT_ID")
+        val configured = System.getenv("DEFAULT_MERCHANT_ID")
             ?.takeIf { it.isNotBlank() }
-            ?: "default"
-        return MerchantsConfig(defaultMerchantId = defaultMerchantId)
+        if (configured != null && configured != DEFAULT_MERCHANT_ID) {
+            error("multi-merchant not enabled yet; use default")
+        }
+        return MerchantsConfig(defaultMerchantId = DEFAULT_MERCHANT_ID)
     }
 
     private fun loadLinkContextConfig(): LinkContextConfig = LinkContextConfig(
@@ -162,4 +164,6 @@ object ConfigLoader {
             basicAuthCompat = basicAuthCompat,
         )
     }
+
+    private const val DEFAULT_MERCHANT_ID = "default"
 }
