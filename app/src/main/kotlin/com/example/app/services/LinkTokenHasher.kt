@@ -10,6 +10,8 @@ class LinkTokenHasher(
     private val secret: String
 ) {
     private val secureRandom = SecureRandom()
+    private val secretBytes = secret.toByteArray(StandardCharsets.UTF_8)
+    private val secretKeySpec = SecretKeySpec(secretBytes, HMAC_ALGORITHM)
 
     fun generateToken(): String {
         val bytes = ByteArray(32)
@@ -27,10 +29,19 @@ class LinkTokenHasher(
         return encodeHexLegacy(hmac(token))
     }
 
+    fun hashesForLookup(token: String): List<String> {
+        val canonical = hash(token)
+        val legacy = hashLegacy(token)
+        return if (canonical == legacy) {
+            listOf(canonical)
+        } else {
+            listOf(canonical, legacy)
+        }
+    }
+
     private fun hmac(token: String): ByteArray {
         val mac = Mac.getInstance(HMAC_ALGORITHM)
-        val key = SecretKeySpec(secret.toByteArray(StandardCharsets.UTF_8), HMAC_ALGORITHM)
-        mac.init(key)
+        mac.init(secretKeySpec)
         return mac.doFinal(token.toByteArray(StandardCharsets.UTF_8))
     }
 
