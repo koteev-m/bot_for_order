@@ -50,12 +50,22 @@ class LinkContextService(
         return LinkContextCreateResult(token = token, context = context.copy(id = id))
     }
 
-    suspend fun revoke(token: String, revokedAt: Instant = Instant.now()): Boolean {
-        val tokenHash = tokenHasher.hash(token)
-        if (repository.revokeByTokenHash(tokenHash, revokedAt)) {
-            return true
+    suspend fun getByToken(token: String): LinkContext? {
+        for (hash in tokenHasher.hashesForLookup(token)) {
+            val context = repository.getByTokenHash(hash)
+            if (context != null) {
+                return context
+            }
         }
-        val legacyHash = tokenHasher.hashLegacy(token)
-        return repository.revokeByTokenHash(legacyHash, revokedAt)
+        return null
+    }
+
+    suspend fun revoke(token: String, revokedAt: Instant = Instant.now()): Boolean {
+        for (hash in tokenHasher.hashesForLookup(token)) {
+            if (repository.revokeByTokenHash(hash, revokedAt)) {
+                return true
+            }
+        }
+        return false
     }
 }
