@@ -21,12 +21,13 @@ import com.pengrad.telegrambot.model.request.InputMedia
 import com.pengrad.telegrambot.model.request.InputMediaPhoto
 import com.pengrad.telegrambot.model.request.InputMediaVideo
 import com.pengrad.telegrambot.model.request.ParseMode
-import com.pengrad.telegrambot.request.EditMessageCaption
+import com.pengrad.telegrambot.request.EditMessageReplyMarkup
 import com.pengrad.telegrambot.request.GetMe
 import com.pengrad.telegrambot.request.SendMediaGroup
 import com.pengrad.telegrambot.request.SendPhoto
 import com.pengrad.telegrambot.request.SendVideo
 import org.slf4j.LoggerFactory
+import java.sql.SQLException
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 
@@ -101,7 +102,7 @@ class PostService(
         ).token
         val appName = config.telegram.buyerMiniAppShortName.takeIf { it.isNotBlank() }
         val addLink = DirectLink.forMiniApp(shopUsername, appName, addToken, MiniAppMode.COMPACT)
-        val buyLink = DirectLink.forMiniApp(shopUsername, appName, buyToken, MiniAppMode.FULLSCREEN)
+        val buyLink = DirectLink.forMiniApp(shopUsername, appName, buyToken, MiniAppMode.DEFAULT)
         val keyboard = InlineKeyboardMarkup(
             arrayOf(
                 InlineKeyboardButton("Добавить в корзину").url(addLink),
@@ -109,10 +110,7 @@ class PostService(
             )
         )
 
-        val newCaption = formatCaption(item.title, item.description)
-        val editRequest = EditMessageCaption(channelId, firstMessageId)
-            .caption(newCaption)
-            .parseMode(ParseMode.HTML)
+        val editRequest = EditMessageReplyMarkup(channelId, firstMessageId)
             .replyMarkup(keyboard)
 
         val editResponse = clients.adminBot.execute(editRequest)
@@ -201,15 +199,27 @@ class PostService(
         val storefrontId = DEFAULT_STOREFRONT_ID
         val storefront = storefrontsRepository.getById(storefrontId)
         if (storefront == null) {
-            storefrontsRepository.create(
-                Storefront(
-                    id = storefrontId,
-                    merchantId = merchantId,
-                    name = DEFAULT_STOREFRONT_NAME
+            try {
+                storefrontsRepository.create(
+                    Storefront(
+                        id = storefrontId,
+                        merchantId = merchantId,
+                        name = DEFAULT_STOREFRONT_NAME
+                    )
                 )
-            )
+            } catch (e: Exception) {
+                if (!isUniqueViolation(e)) {
+                    throw e
+                }
+            }
         }
-        channelBindingsRepository.bind(storefrontId, channelId, Instant.now())
+        try {
+            channelBindingsRepository.bind(storefrontId, channelId, Instant.now())
+        } catch (e: Exception) {
+            if (!isUniqueViolation(e)) {
+                throw e
+            }
+        }
         val created = channelBindingsRepository.getByChannel(channelId)
             ?: error("Channel binding not found after bootstrap for channel $channelId")
         return created.storefrontId
@@ -224,6 +234,11 @@ class PostService(
         .replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
+
+    private fun isUniqueViolation(error: Throwable): Boolean =
+        generateSequence(error) { it.cause }
+            .filterIsInstance<SQLException>()
+            .any { it.sqlState == "23505" }
 
     private companion object {
         private const val DEFAULT_STOREFRONT_ID = "default-storefront"

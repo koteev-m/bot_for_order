@@ -22,6 +22,7 @@ object DirectLink {
             append("https://t.me/").append(botUsername)
             appName?.takeIf { it.isNotBlank() }?.let { append("/").append(it) }
         }
-        return "$base?startapp=$token&mode=${mode.value}"
+        val modeSuffix = if (mode == MiniAppMode.COMPACT) "&mode=compact" else ""
+        return "$base?startapp=$token$modeSuffix"
     }
 }
