@@ -1,7 +1,6 @@
 package com.example.app.security
 
 import com.example.app.api.ApiError
-import com.example.app.config.AppConfig
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
@@ -9,7 +8,6 @@ import io.ktor.server.application.call
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.intercept
 import io.ktor.util.AttributeKey
-import java.time.Duration
 
 object InitDataAuth {
     val VERIFIED_USER_ATTR: AttributeKey<Long> = AttributeKey("verifiedUserId")
@@ -18,22 +16,16 @@ object InitDataAuth {
 /**
  * Route-scoped Ktor plugin, validates X-Telegram-Init-Data and exposes verifiedUserId attribute.
  */
-fun Route.installInitDataAuth(appConfig: AppConfig) {
-    val botToken = appConfig.telegram.shopToken
-    val maxAgeSec = Duration.ofHours(24).seconds
-    val optionalWhenMissing = (System.getenv("ALLOW_INSECURE_INITDATA") ?: "false").equals("true", ignoreCase = true)
-
+fun Route.installInitDataAuth(verifier: TelegramInitDataVerifier) {
     this.intercept(ApplicationCallPipeline.Plugins) {
         val initData = call.request.headers["X-Telegram-Init-Data"]
+            ?: call.request.headers["X-Init-Data"]
         if (initData.isNullOrBlank()) {
-            if (optionalWhenMissing) {
-                return@intercept
-            }
             unauthorized("initData_required")
         }
 
         val verified = try {
-            TelegramInitDataVerifier.verify(initData, botToken, maxAgeSec)
+            verifier.verify(initData)
         } catch (e: IllegalArgumentException) {
             unauthorized("invalid_initData", e)
         } catch (e: IllegalStateException) {
@@ -44,13 +36,10 @@ fun Route.installInitDataAuth(appConfig: AppConfig) {
     }
 }
 
-/** Helper: prefer verified userId, fallback to legacy X-User-Id only if present (dev). */
 fun ApplicationCall.requireUserId(): Long {
     if (this.attributes.contains(InitDataAuth.VERIFIED_USER_ATTR)) {
         return this.attributes[InitDataAuth.VERIFIED_USER_ATTR]
     }
-    val legacy = this.request.headers["X-User-Id"]?.toLongOrNull()
-    if (legacy != null) return legacy
     throw ApiError("unauthorized", HttpStatusCode.Unauthorized)
 }
 

@@ -2,8 +2,10 @@ package com.example.app.config
 
 data class AppConfig(
     val telegram: TelegramConfig,
+    val telegramInitData: TelegramInitDataConfig,
     val merchants: MerchantsConfig,
     val linkContext: LinkContextConfig,
+    val linkResolveRateLimit: LinkResolveRateLimitConfig,
     val db: DbConfig,
     val redis: RedisConfig,
     val payments: PaymentsConfig,
@@ -23,12 +25,21 @@ data class TelegramConfig(
     val buyerMiniAppShortName: String
 )
 
+data class TelegramInitDataConfig(
+    val maxAgeSeconds: Long
+)
+
 data class MerchantsConfig(
     val defaultMerchantId: String
 )
 
 data class LinkContextConfig(
     val tokenSecret: String
+)
+
+data class LinkResolveRateLimitConfig(
+    val max: Int,
+    val windowSeconds: Int
 )
 
 data class DbConfig(

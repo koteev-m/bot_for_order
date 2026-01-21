@@ -6,8 +6,10 @@ object ConfigLoader {
 
     fun fromEnv(): AppConfig = AppConfig(
         telegram = loadTelegramConfig(),
+        telegramInitData = loadTelegramInitDataConfig(),
         merchants = loadMerchantsConfig(),
         linkContext = loadLinkContextConfig(),
+        linkResolveRateLimit = loadLinkResolveRateLimitConfig(),
         db = loadDbConfig(),
         redis = loadRedisConfig(),
         payments = loadPaymentsConfig(),
@@ -36,6 +38,10 @@ object ConfigLoader {
         )
     }
 
+    private fun loadTelegramInitDataConfig(): TelegramInitDataConfig = TelegramInitDataConfig(
+        maxAgeSeconds = parsePositiveIntEnv("TELEGRAM_INIT_DATA_MAX_AGE_SEC", defaultValue = 86_400).toLong()
+    )
+
     private fun loadMerchantsConfig(): MerchantsConfig {
         val configured = System.getenv("DEFAULT_MERCHANT_ID")
             ?.takeIf { it.isNotBlank() }
@@ -47,6 +53,11 @@ object ConfigLoader {
 
     private fun loadLinkContextConfig(): LinkContextConfig = LinkContextConfig(
         tokenSecret = requireNonBlank("LINK_TOKEN_SECRET")
+    )
+
+    private fun loadLinkResolveRateLimitConfig(): LinkResolveRateLimitConfig = LinkResolveRateLimitConfig(
+        max = parsePositiveIntEnv("LINK_RESOLVE_RL_MAX", defaultValue = 10),
+        windowSeconds = parsePositiveIntEnv("LINK_RESOLVE_RL_WINDOW_SEC", defaultValue = 10)
     )
 
     private fun loadDbConfig(): DbConfig = DbConfig(

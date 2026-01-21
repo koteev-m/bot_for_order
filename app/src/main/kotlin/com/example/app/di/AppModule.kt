@@ -3,11 +3,14 @@ package com.example.app.di
 import com.example.app.config.AppConfig
 import com.example.app.services.InventoryService
 import com.example.app.services.LinkContextService
+import com.example.app.services.LinkResolveRateLimiter
+import com.example.app.services.LinkResolveService
 import com.example.app.services.LinkTokenHasher
 import com.example.app.services.PriceDropNotifierImpl
 import com.example.app.services.RestockAlertService
 import com.example.app.services.RestockNotifierImpl
 import com.example.app.services.StorefrontService
+import com.example.app.security.TelegramInitDataVerifier
 import com.example.bots.TelegramClients
 import com.example.domain.watchlist.PriceDropNotifier
 import com.example.domain.watchlist.RestockNotifier
@@ -28,7 +31,10 @@ fun appModule(config: AppConfig, meterRegistry: MeterRegistry?) = module {
     single<RedissonClient> { RedisClientFactory.create(config.redis.url) }
 
     single { LinkTokenHasher(config.linkContext.tokenSecret) }
+    single { TelegramInitDataVerifier(config.telegram.shopToken, config.telegramInitData.maxAgeSeconds) }
     single { LinkContextService(get(), get()) }
+    single { LinkResolveService(get(), get(), get()) }
+    single { LinkResolveRateLimiter(get(), get(), config.linkResolveRateLimit) }
     single { StorefrontService(get(), get(), get()) }
 
     single<PriceDropNotifier> { PriceDropNotifierImpl(config, get(), get()) }
