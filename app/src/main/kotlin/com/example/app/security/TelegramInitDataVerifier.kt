@@ -31,17 +31,11 @@ class TelegramInitDataVerifier(
     fun verify(initData: String): VerifiedInitData {
         require(initData.isNotBlank()) { "initData is empty" }
 
-        // Decode percent-encoding but keep '+'
-        val decoded = urlDecodePreservingPlus(initData)
-
-        val pairs = decoded.split("&").mapNotNull { part ->
-            val idx = part.indexOf('=')
-            if (idx <= 0) null else part.substring(0, idx) to part.substring(idx + 1)
-        }.toMap()
+        val pairs = parseInitData(initData)
 
         val hash = pairs["hash"] ?: error("hash is missing")
-        // Build data_check_string: all fields except hash and signature
-        val dataFields = pairs.filterKeys { it != "hash" && it != "signature" }
+        // Build data_check_string: all fields except hash
+        val dataFields = pairs.filterKeys { it != "hash" }
         val dataCheckString = dataFields.toSortedMap()
             .entries.joinToString("\n") { (k, v) -> "$k=$v" }
 
@@ -93,9 +87,24 @@ class TelegramInitDataVerifier(
         )
     }
 
-    private fun urlDecodePreservingPlus(s: String): String {
+    private fun parseInitData(initData: String): Map<String, String> {
+        val result = LinkedHashMap<String, String>()
+        val parts = initData.split("&")
+        for (part in parts) {
+            val idx = part.indexOf('=')
+            if (idx <= 0) error("invalid initData part")
+            val key = decodeComponent(part.substring(0, idx))
+            if (key.isEmpty()) error("invalid initData part")
+            if (result.containsKey(key)) error("duplicate key in initData")
+            val value = decodeComponent(part.substring(idx + 1))
+            result[key] = value
+        }
+        return result
+    }
+
+    private fun decodeComponent(value: String): String {
         // URLDecoder.decode would turn '+' into ' ' — prevent this.
-        val fixed = s.replace("+", "%2B")
+        val fixed = value.replace("+", "%2B")
         return URLDecoder.decode(fixed, StandardCharsets.UTF_8)
     }
 
