@@ -30,8 +30,9 @@ class LinkTokenHasher(
     }
 
     fun hashesForLookup(token: String): List<String> {
-        val canonical = hash(token)
-        val legacy = hashLegacy(token)
+        val digest = hmac(token)
+        val canonical = encodeHex(digest)
+        val legacy = encodeHexLegacy(digest)
         return if (canonical == legacy) {
             listOf(canonical)
         } else {
