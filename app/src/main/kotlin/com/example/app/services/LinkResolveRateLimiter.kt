@@ -16,7 +16,7 @@ class LinkResolveRateLimiter(
         val tokenHash = tokenHasher.hash(token)
         val key = "rl:link_resolve:$userId:$tokenHash"
         return try {
-            val result = redisson.getScript().eval<Long>(
+            val allowed = redisson.getScript().eval<Long>(
                 RScript.Mode.READ_WRITE,
                 RATE_LIMIT_SCRIPT,
                 RScript.ReturnType.INTEGER,
@@ -24,7 +24,7 @@ class LinkResolveRateLimiter(
                 config.windowSeconds,
                 config.max
             )
-            result <= config.max.toLong()
+            allowed == 1L
         } catch (e: Exception) {
             log.warn("Link resolve rate limit failed for key {}", key, e)
             true
@@ -34,10 +34,15 @@ class LinkResolveRateLimiter(
     private companion object {
         private val RATE_LIMIT_SCRIPT = """
             local current = redis.call('INCR', KEYS[1])
-            if current == 1 then
+            local ttl = redis.call('TTL', KEYS[1])
+            if current == 1 or ttl < 0 then
                 redis.call('EXPIRE', KEYS[1], ARGV[1])
             end
-            return current
+            local max = tonumber(ARGV[2])
+            if current <= max then
+                return 1
+            end
+            return 0
         """.trimIndent()
     }
 }
