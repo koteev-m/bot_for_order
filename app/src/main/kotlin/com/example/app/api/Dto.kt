@@ -1,5 +1,8 @@
 package com.example.app.api
 
+import com.example.domain.LinkAction
+import com.example.domain.LinkButton
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -122,4 +125,54 @@ data class WatchlistSubscribeRequest(
 @Serializable
 data class SimpleResponse(
     val ok: Boolean = true
+)
+
+@Serializable
+data class LinkResolveRequest(
+    val token: String
+)
+
+@Serializable
+data class ListingDto(
+    val id: String,
+    val title: String,
+    val description: String,
+    val status: String
+)
+
+@Serializable
+data class LinkResolveRequiredOptions(
+    @SerialName("variant_required")
+    val variantRequired: Boolean,
+    @SerialName("auto_variant_id")
+    val autoVariantId: String? = null
+)
+
+@Serializable
+data class LinkResolveVariant(
+    val id: String,
+    val size: String? = null,
+    val sku: String? = null,
+    val stock: Int,
+    val active: Boolean,
+    val available: Boolean
+)
+
+@Serializable
+data class LinkResolveSource(
+    val storefront: String,
+    val channel: Long,
+    val post: Int? = null,
+    val button: LinkButton
+)
+
+@Serializable
+data class LinkResolveResponse(
+    val action: LinkAction,
+    val listing: ListingDto,
+    @SerialName("required_options")
+    val requiredOptions: LinkResolveRequiredOptions,
+    @SerialName("available_variants")
+    val availableVariants: List<LinkResolveVariant>,
+    val source: LinkResolveSource
 )

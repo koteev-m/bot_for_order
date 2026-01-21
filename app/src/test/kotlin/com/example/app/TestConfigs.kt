@@ -5,6 +5,7 @@ import com.example.app.config.DbConfig
 import com.example.app.config.FxConfig
 import com.example.app.config.HealthConfig
 import com.example.app.config.LinkContextConfig
+import com.example.app.config.LinkResolveRateLimitConfig
 import com.example.app.config.LoggingConfig
 import com.example.app.config.MerchantsConfig
 import com.example.app.config.MetricsConfig
@@ -13,6 +14,7 @@ import com.example.app.config.RedisConfig
 import com.example.app.config.SecurityConfig
 import com.example.app.config.ServerConfig
 import com.example.app.config.TelegramConfig
+import com.example.app.config.TelegramInitDataConfig
 
 internal fun baseTestConfig(
     metrics: MetricsConfig = MetricsConfig(
@@ -32,8 +34,10 @@ internal fun baseTestConfig(
         channelId = 0L,
         buyerMiniAppShortName = "buyer"
     ),
+    telegramInitData = TelegramInitDataConfig(maxAgeSeconds = 86_400),
     merchants = MerchantsConfig(defaultMerchantId = "default"),
     linkContext = LinkContextConfig(tokenSecret = "test-secret"),
+    linkResolveRateLimit = LinkResolveRateLimitConfig(max = 10, windowSeconds = 10),
     db = DbConfig(
         url = "jdbc:postgresql://localhost:5432/db",
         user = "user",

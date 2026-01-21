@@ -1,8 +1,10 @@
 package com.example.app.routes
 
-import com.example.app.config.AppConfig
 import com.example.app.services.OffersService
 import com.example.app.services.PaymentsService
+import com.example.app.config.AppConfig
+import com.example.app.services.LinkResolveRateLimiter
+import com.example.app.services.LinkResolveService
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemsRepository
 import com.example.db.OrderStatusHistoryRepository
@@ -10,6 +12,7 @@ import com.example.db.OrdersRepository
 import com.example.db.PricesDisplayRepository
 import com.example.db.VariantsRepository
 import com.example.app.security.installInitDataAuth
+import com.example.app.security.TelegramInitDataVerifier
 import com.example.domain.hold.HoldService
 import com.example.domain.hold.LockManager
 import com.example.domain.watchlist.WatchlistRepository
@@ -30,7 +33,10 @@ fun Application.installApiRoutes() {
     val holdService by inject<HoldService>()
     val lockManager by inject<LockManager>()
     val cfg by inject<AppConfig>()
+    val initDataVerifier by inject<TelegramInitDataVerifier>()
     val watchlistRepo by inject<WatchlistRepository>()
+    val linkResolveService by inject<LinkResolveService>()
+    val linkResolveRateLimiter by inject<LinkResolveRateLimiter>()
 
     val orderDeps = OrderRoutesDeps(
         itemsRepository = itemsRepo,
@@ -44,11 +50,12 @@ fun Application.installApiRoutes() {
 
     routing {
         route("/api") {
-            installInitDataAuth(cfg)
+            installInitDataAuth(initDataVerifier)
             registerItemRoutes(itemsRepo, mediaRepo, variantsRepo, pricesRepo, cfg)
             registerOfferRoutes(offersService)
             registerOrdersRoutes(cfg, orderDeps)
             registerWatchlistRoutes(itemsRepo, variantsRepo, watchlistRepo, cfg)
+            registerLinkRoutes(linkResolveService, linkResolveRateLimiter)
         }
     }
 }
