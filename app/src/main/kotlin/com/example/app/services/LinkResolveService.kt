@@ -19,7 +19,8 @@ class LinkResolveService(
     suspend fun resolve(token: String, now: Instant = Instant.now()): LinkResolveResponse {
         val context = linkContextService.getByToken(token) ?: throw LinkResolveException("not_found")
         if (context.revokedAt != null) throw LinkResolveException("not_found")
-        if (context.expiresAt != null && !context.expiresAt.isAfter(now)) {
+        val expiresAt = context.expiresAt
+        if (expiresAt != null && !expiresAt.isAfter(now)) {
             throw LinkResolveException("not_found")
         }
 
