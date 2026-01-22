@@ -176,3 +176,63 @@ data class LinkResolveResponse(
     val availableVariants: List<LinkResolveVariant>,
     val source: LinkResolveSource
 )
+
+@Serializable
+data class CartAddByTokenRequest(
+    val token: String,
+    val qty: Int = 1,
+    val selectedVariantId: String? = null
+)
+
+@Serializable
+data class CartUndoRequest(
+    val undoToken: String
+)
+
+@Serializable
+data class CartLineDto(
+    val lineId: Long,
+    val listingId: String,
+    val variantId: String? = null,
+    val qty: Int,
+    val priceSnapshotMinor: Long,
+    val currency: String,
+    val sourceStorefrontId: String,
+    val sourceChannelId: Long,
+    val sourcePostMessageId: Int? = null,
+    val createdAt: String
+)
+
+@Serializable
+data class CartDto(
+    val id: Long,
+    val merchantId: String,
+    val buyerUserId: Long,
+    val createdAt: String,
+    val updatedAt: String,
+    val items: List<CartLineDto>
+)
+
+@Serializable
+data class CartAddResponse(
+    val status: String = "ok",
+    val undoToken: String,
+    val addedLineId: Long,
+    val cart: CartDto
+)
+
+@Serializable
+data class CartVariantRequiredResponse(
+    val status: String,
+    val listing: ListingDto,
+    @SerialName("available_variants")
+    val availableVariants: List<LinkResolveVariant>,
+    @SerialName("required_options")
+    val requiredOptions: LinkResolveRequiredOptions
+)
+
+@Serializable
+data class CartResponse(
+    val status: String = "ok",
+    val cart: CartDto
+)

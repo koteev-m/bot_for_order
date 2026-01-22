@@ -1,6 +1,7 @@
 package com.example.app
 
 import com.example.app.config.AppConfig
+import com.example.app.config.CartConfig
 import com.example.app.config.DbConfig
 import com.example.app.config.FxConfig
 import com.example.app.config.HealthConfig
@@ -38,6 +39,7 @@ internal fun baseTestConfig(
     merchants = MerchantsConfig(defaultMerchantId = "default"),
     linkContext = LinkContextConfig(tokenSecret = "test-secret"),
     linkResolveRateLimit = LinkResolveRateLimitConfig(max = 10, windowSeconds = 10),
+    cart = CartConfig(undoTtlSec = 300, addDedupWindowSec = 5),
     db = DbConfig(
         url = "jdbc:postgresql://localhost:5432/db",
         user = "user",

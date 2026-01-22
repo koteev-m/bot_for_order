@@ -10,6 +10,7 @@ object ConfigLoader {
         merchants = loadMerchantsConfig(),
         linkContext = loadLinkContextConfig(),
         linkResolveRateLimit = loadLinkResolveRateLimitConfig(),
+        cart = loadCartConfig(),
         db = loadDbConfig(),
         redis = loadRedisConfig(),
         payments = loadPaymentsConfig(),
@@ -58,6 +59,11 @@ object ConfigLoader {
     private fun loadLinkResolveRateLimitConfig(): LinkResolveRateLimitConfig = LinkResolveRateLimitConfig(
         max = parsePositiveIntEnv("LINK_RESOLVE_RL_MAX", defaultValue = 10),
         windowSeconds = parsePositiveIntEnv("LINK_RESOLVE_RL_WINDOW_SEC", defaultValue = 10)
+    )
+
+    private fun loadCartConfig(): CartConfig = CartConfig(
+        undoTtlSec = parsePositiveIntEnv("CART_UNDO_TTL_SEC", defaultValue = 300),
+        addDedupWindowSec = parsePositiveIntEnv("CART_ADD_DEDUP_WINDOW_SEC", defaultValue = 5)
     )
 
     private fun loadDbConfig(): DbConfig = DbConfig(

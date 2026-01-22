@@ -151,6 +151,40 @@ object OrdersTable : Table("orders") {
     override val primaryKey = PrimaryKey(id)
 }
 
+object CartsTable : Table("cart") {
+    val id = long("id").autoIncrement()
+    val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.CASCADE)
+    val buyerUserId = long("buyer_user_id")
+    val createdAt = timestamp("created_at")
+    val updatedAt = timestamp("updated_at")
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index(true, merchantId, buyerUserId)
+    }
+}
+
+object CartItemsTable : Table("cart_item") {
+    val id = long("id").autoIncrement()
+    val cartId = reference("cart_id", CartsTable.id, onDelete = ReferenceOption.CASCADE)
+    val listingId = reference("listing_id", ItemsTable.id, onDelete = ReferenceOption.RESTRICT)
+    val variantId = optReference("variant_id", VariantsTable.id, onDelete = ReferenceOption.SET_NULL)
+    val qty = integer("qty")
+    val priceSnapshotMinor = long("price_snapshot_minor")
+    val currency = text("currency")
+    val sourceStorefrontId = varchar("source_storefront_id", 64)
+    val sourceChannelId = long("source_channel_id")
+    val sourcePostMessageId = integer("source_post_message_id").nullable()
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index(false, cartId)
+        index(false, listingId)
+        index(false, variantId)
+    }
+}
+
 object OrderStatusHistoryTable : Table("order_status_history") {
     val id = long("id").autoIncrement()
     val orderId = reference("order_id", OrdersTable.id, onDelete = ReferenceOption.CASCADE)

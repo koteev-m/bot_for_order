@@ -174,6 +174,33 @@ data class OrderStatusEntry(
 )
 
 @Serializable
+data class Cart(
+    val id: Long,
+    val merchantId: String,
+    val buyerUserId: Long,
+    @Serializable(with = InstantIsoSerializer::class)
+    val createdAt: Instant,
+    @Serializable(with = InstantIsoSerializer::class)
+    val updatedAt: Instant
+)
+
+@Serializable
+data class CartItem(
+    val id: Long,
+    val cartId: Long,
+    val listingId: String,
+    val variantId: String?,
+    val qty: Int,
+    val priceSnapshotMinor: Long,
+    val currency: String,
+    val sourceStorefrontId: String,
+    val sourceChannelId: Long,
+    val sourcePostMessageId: Int?,
+    @Serializable(with = InstantIsoSerializer::class)
+    val createdAt: Instant
+)
+
+@Serializable
 enum class WatchTrigger { PRICE_DROP, RESTOCK }
 
 @Serializable
