@@ -12,7 +12,7 @@ import java.time.Instant
 class LinkContextServiceLegacyLookupTest : StringSpec({
     "getByToken and revoke handle legacy hashes" {
         val hasher = LinkTokenHasher("test-secret")
-        val repository = InMemoryLinkContextsRepository()
+        val repository = LegacyInMemoryLinkContextsRepository()
         val legacyHash = hasher.hashLegacy("test-token")
         val context = LinkContext(
             id = 0,
@@ -39,7 +39,7 @@ class LinkContextServiceLegacyLookupTest : StringSpec({
     }
 })
 
-private class InMemoryLinkContextsRepository : LinkContextsRepository {
+private class LegacyInMemoryLinkContextsRepository : LinkContextsRepository {
     private val storage = mutableMapOf<String, LinkContext>()
     private var nextId = 1L
 

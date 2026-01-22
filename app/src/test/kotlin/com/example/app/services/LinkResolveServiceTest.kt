@@ -272,7 +272,12 @@ private class InMemoryVariantsRepository : VariantsRepository {
         val existing = storage[variantId] ?: return null
         val updated = existing.copy(stock = stock)
         storage[variantId] = updated
-        return StockChange(before = existing.stock, after = stock)
+        return StockChange(
+            variantId = existing.id,
+            itemId = existing.itemId,
+            oldStock = existing.stock,
+            newStock = stock
+        )
     }
 
     override suspend fun getById(id: String): Variant? {
