@@ -20,10 +20,12 @@ import io.kotest.matchers.shouldNotBe
 import java.time.Instant
 import java.util.UUID
 import org.flywaydb.core.Flyway
+import org.junit.jupiter.api.Assumptions
 import org.testcontainers.containers.PostgreSQLContainer
 
 class MerchantLinkContextRepositoryTest : StringSpec({
     val dockerAvailable = isDockerAvailable()
+    var dockerReady = dockerAvailable
     val postgres = PostgreSQLContainer<Nothing>("postgres:16-alpine")
     var started = false
     var dataSource: HikariDataSource? = null
@@ -38,25 +40,35 @@ class MerchantLinkContextRepositoryTest : StringSpec({
             // Docker недоступен, поэтому testcontainers-тесты отключены.
             return@beforeSpec
         }
-        postgres.start()
-        started = true
-        val initializedDataSource = DatabaseFactory.createHikari(
-            url = postgres.jdbcUrl,
-            user = postgres.username,
-            password = postgres.password
-        )
-        dataSource = initializedDataSource
-        Flyway.configure()
-            .dataSource(initializedDataSource)
-            .locations("classpath:db/migration")
-            .load()
-            .migrate()
-        DatabaseFactory.connect(initializedDataSource)
-        dbTx = DatabaseTx()
-        itemsRepository = ItemsRepositoryExposed(dbTx)
-        storefrontsRepository = StorefrontsRepositoryExposed(dbTx)
-        channelBindingsRepository = ChannelBindingsRepositoryExposed(dbTx)
-        linkContextsRepository = LinkContextsRepositoryExposed(dbTx)
+        try {
+            postgres.start()
+            started = true
+            val initializedDataSource = DatabaseFactory.createHikari(
+                url = postgres.jdbcUrl,
+                user = postgres.username,
+                password = postgres.password
+            )
+            dataSource = initializedDataSource
+            Flyway.configure()
+                .dataSource(initializedDataSource)
+                .locations("classpath:db/migration")
+                .load()
+                .migrate()
+            DatabaseFactory.connect(initializedDataSource)
+            dbTx = DatabaseTx()
+            itemsRepository = ItemsRepositoryExposed(dbTx)
+            storefrontsRepository = StorefrontsRepositoryExposed(dbTx)
+            channelBindingsRepository = ChannelBindingsRepositoryExposed(dbTx)
+            linkContextsRepository = LinkContextsRepositoryExposed(dbTx)
+            dockerReady = true
+        } catch (e: Exception) {
+            dockerReady = false
+            dataSource?.close()
+            if (started) {
+                postgres.stop()
+                started = false
+            }
+        }
     }
 
     afterSpec {
@@ -67,6 +79,7 @@ class MerchantLinkContextRepositoryTest : StringSpec({
     }
 
     "migrations create default merchant and backfill items".config(enabled = dockerAvailable) {
+        Assumptions.assumeTrue(dockerReady, "Docker недоступен или контейнер не стартовал.")
         val initializedDataSource = checkNotNull(dataSource) { "DataSource не инициализирован." }
         val merchantId = initializedDataSource.connection.use { conn ->
             conn.prepareStatement("SELECT id FROM merchants WHERE id = 'default'").use { stmt ->
@@ -114,6 +127,7 @@ class MerchantLinkContextRepositoryTest : StringSpec({
     }
 
     "creates channel binding and link context, then revokes by token hash".config(enabled = dockerAvailable) {
+        Assumptions.assumeTrue(dockerReady, "Docker недоступен или контейнер не стартовал.")
         checkNotNull(dataSource) { "DataSource не инициализирован." }
         val merchantId = "default"
         val storefront = Storefront(

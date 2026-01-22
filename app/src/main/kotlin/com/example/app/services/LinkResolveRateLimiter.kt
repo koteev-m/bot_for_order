@@ -14,7 +14,7 @@ class LinkResolveRateLimiter(
     private val nowProvider: () -> Long = System::currentTimeMillis,
     private val log: Logger = LoggerFactory.getLogger(LinkResolveRateLimiter::class.java)
 ) {
-    private val lastWarnAtMs = AtomicLong(0)
+    private val lastWarnAtMs = AtomicLong(-WARN_INTERVAL_MS)
     private val suppressedWarns = AtomicLong(0)
 
     fun allow(userId: Long, token: String): Boolean {
