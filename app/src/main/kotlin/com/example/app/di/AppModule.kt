@@ -1,6 +1,9 @@
 package com.example.app.di
 
 import com.example.app.config.AppConfig
+import com.example.app.services.CartRedisStore
+import com.example.app.services.CartRedisStoreRedisson
+import com.example.app.services.CartService
 import com.example.app.services.InventoryService
 import com.example.app.services.LinkContextService
 import com.example.app.services.LinkResolveRateLimiter
@@ -36,6 +39,8 @@ fun appModule(config: AppConfig, meterRegistry: MeterRegistry?) = module {
     single { LinkResolveService(get(), get(), get()) }
     single { LinkResolveRateLimiter(get(), get(), config.linkResolveRateLimit) }
     single { StorefrontService(get(), get(), get()) }
+    single<CartRedisStore> { CartRedisStoreRedisson(get()) }
+    single { CartService(config, get(), get(), get(), get(), get(), get(), get(), get()) }
 
     single<PriceDropNotifier> { PriceDropNotifierImpl(config, get(), get()) }
     single<RestockNotifier> { RestockNotifierImpl(config, get(), get(), get()) }

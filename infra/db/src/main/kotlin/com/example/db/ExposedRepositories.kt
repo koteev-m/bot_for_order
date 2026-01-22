@@ -1,6 +1,8 @@
 package com.example.db
 
 import com.example.db.tables.ChannelBindingsTable
+import com.example.db.tables.CartsTable
+import com.example.db.tables.CartItemsTable
 import com.example.db.tables.ItemMediaTable
 import com.example.db.tables.ItemsTable
 import com.example.db.tables.LinkContextsTable
@@ -15,6 +17,8 @@ import com.example.db.tables.VariantsTable
 import com.example.db.tables.WatchlistTable
 import com.example.domain.BargainRules
 import com.example.domain.ChannelBinding
+import com.example.domain.Cart
+import com.example.domain.CartItem
 import com.example.domain.Item
 import com.example.domain.ItemMedia
 import com.example.domain.ItemStatus
@@ -63,6 +67,7 @@ import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.intLiteral
 import org.jetbrains.exposed.sql.statements.InsertStatement
+import org.jetbrains.exposed.exceptions.ExposedSQLException
 
 private val json = Json
 
@@ -739,6 +744,159 @@ class OrderStatusHistoryRepositoryExposed(private val tx: DatabaseTx) : OrderSta
             )
         }
     }
+}
+
+class CartsRepositoryExposed(private val tx: DatabaseTx) : CartsRepository {
+    override suspend fun getByMerchantAndBuyer(merchantId: String, buyerUserId: Long): Cart? = tx.tx {
+        CartsTable
+            .selectAll()
+            .where { (CartsTable.merchantId eq merchantId) and (CartsTable.buyerUserId eq buyerUserId) }
+            .singleOrNull()
+            ?.toCart()
+    }
+
+    override suspend fun getOrCreate(merchantId: String, buyerUserId: Long, now: Instant): Cart = tx.tx {
+        CartsTable
+            .selectAll()
+            .where { (CartsTable.merchantId eq merchantId) and (CartsTable.buyerUserId eq buyerUserId) }
+            .singleOrNull()
+            ?.toCart()
+            ?: run {
+                val id = try {
+                    CartsTable.insert {
+                        it[CartsTable.merchantId] = merchantId
+                        it[CartsTable.buyerUserId] = buyerUserId
+                        it[CartsTable.createdAt] = now
+                        it[CartsTable.updatedAt] = now
+                    }.requireGeneratedId(CartsTable.id)
+                } catch (e: ExposedSQLException) {
+                    if (e.sqlState == "23505") {
+                        return@tx CartsTable
+                            .selectAll()
+                            .where { (CartsTable.merchantId eq merchantId) and (CartsTable.buyerUserId eq buyerUserId) }
+                            .single()
+                            .toCart()
+                    }
+                    throw e
+                }
+                Cart(
+                    id = id,
+                    merchantId = merchantId,
+                    buyerUserId = buyerUserId,
+                    createdAt = now,
+                    updatedAt = now
+                )
+            }
+    }
+
+    override suspend fun touch(cartId: Long, now: Instant) {
+        tx.tx {
+            CartsTable.update({ CartsTable.id eq cartId }) {
+                it[CartsTable.updatedAt] = now
+            }
+        }
+    }
+
+    private fun ResultRow.toCart(): Cart =
+        Cart(
+            id = this[CartsTable.id],
+            merchantId = this[CartsTable.merchantId],
+            buyerUserId = this[CartsTable.buyerUserId],
+            createdAt = this[CartsTable.createdAt],
+            updatedAt = this[CartsTable.updatedAt]
+        )
+}
+
+class CartItemsRepositoryExposed(private val tx: DatabaseTx) : CartItemsRepository {
+    override suspend fun listByCart(cartId: Long): List<CartItem> = tx.tx {
+        CartItemsTable
+            .selectAll()
+            .where { CartItemsTable.cartId eq cartId }
+            .orderBy(CartItemsTable.createdAt to SortOrder.ASC)
+            .map { it.toCartItem() }
+    }
+
+    override suspend fun getById(id: Long): CartItem? = tx.tx {
+        CartItemsTable
+            .selectAll()
+            .where { CartItemsTable.id eq id }
+            .singleOrNull()
+            ?.toCartItem()
+    }
+
+    override suspend fun create(item: CartItem): Long = tx.tx {
+        CartItemsTable.insert {
+            it[cartId] = item.cartId
+            it[listingId] = item.listingId
+            it[variantId] = item.variantId
+            it[qty] = item.qty
+            it[priceSnapshotMinor] = item.priceSnapshotMinor
+            it[currency] = item.currency
+            it[sourceStorefrontId] = item.sourceStorefrontId
+            it[sourceChannelId] = item.sourceChannelId
+            it[sourcePostMessageId] = item.sourcePostMessageId
+            it[createdAt] = item.createdAt
+        }.requireGeneratedId(CartItemsTable.id)
+    }
+
+    override suspend fun updateQty(lineId: Long, qty: Int) {
+        tx.tx {
+            CartItemsTable.update({ CartItemsTable.id eq lineId }) {
+                it[CartItemsTable.qty] = qty
+            }
+        }
+    }
+
+    override suspend fun updateVariant(lineId: Long, variantId: String?, priceSnapshotMinor: Long, currency: String) {
+        tx.tx {
+            CartItemsTable.update({ CartItemsTable.id eq lineId }) {
+                it[CartItemsTable.variantId] = variantId
+                it[CartItemsTable.priceSnapshotMinor] = priceSnapshotMinor
+                it[CartItemsTable.currency] = currency
+            }
+        }
+    }
+
+    override suspend fun delete(lineId: Long): Boolean = tx.tx {
+        CartItemsTable.deleteWhere { CartItemsTable.id eq lineId } > 0
+    }
+
+    override suspend fun getLineWithCart(lineId: Long): CartItemWithCart? = tx.tx {
+        CartItemsTable
+            .innerJoin(CartsTable)
+            .select { CartItemsTable.id eq lineId }
+            .singleOrNull()
+            ?.let { row ->
+                CartItemWithCart(
+                    item = row.toCartItem(),
+                    cart = row.toCart()
+                )
+            }
+    }
+
+    private fun ResultRow.toCartItem(): CartItem =
+        CartItem(
+            id = this[CartItemsTable.id],
+            cartId = this[CartItemsTable.cartId],
+            listingId = this[CartItemsTable.listingId],
+            variantId = this[CartItemsTable.variantId],
+            qty = this[CartItemsTable.qty],
+            priceSnapshotMinor = this[CartItemsTable.priceSnapshotMinor],
+            currency = this[CartItemsTable.currency],
+            sourceStorefrontId = this[CartItemsTable.sourceStorefrontId],
+            sourceChannelId = this[CartItemsTable.sourceChannelId],
+            sourcePostMessageId = this[CartItemsTable.sourcePostMessageId],
+            createdAt = this[CartItemsTable.createdAt]
+        )
+
+    private fun ResultRow.toCart(): Cart =
+        Cart(
+            id = this[CartsTable.id],
+            merchantId = this[CartsTable.merchantId],
+            buyerUserId = this[CartsTable.buyerUserId],
+            createdAt = this[CartsTable.createdAt],
+            updatedAt = this[CartsTable.updatedAt]
+        )
 }
 
 class WatchlistRepositoryExposed(private val tx: DatabaseTx) : WatchlistRepository {

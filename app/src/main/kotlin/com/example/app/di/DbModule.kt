@@ -5,6 +5,10 @@ import com.example.db.DatabaseFactory
 import com.example.db.DatabaseTx
 import com.example.db.ChannelBindingsRepository
 import com.example.db.ChannelBindingsRepositoryExposed
+import com.example.db.CartsRepository
+import com.example.db.CartsRepositoryExposed
+import com.example.db.CartItemsRepository
+import com.example.db.CartItemsRepositoryExposed
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemMediaRepositoryExposed
 import com.example.db.ItemsRepository
@@ -65,4 +69,6 @@ fun dbModule(cfg: AppConfig) = module {
     single<OrdersRepository> { OrdersRepositoryExposed(get()) }
     single<OrderStatusHistoryRepository> { OrderStatusHistoryRepositoryExposed(get()) }
     single<WatchlistRepository> { WatchlistRepositoryExposed(get()) }
+    single<CartsRepository> { CartsRepositoryExposed(get()) }
+    single<CartItemsRepository> { CartItemsRepositoryExposed(get()) }
 }

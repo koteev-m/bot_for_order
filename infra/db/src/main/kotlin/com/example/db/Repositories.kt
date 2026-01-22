@@ -2,6 +2,8 @@ package com.example.db
 
 import com.example.domain.BargainRules
 import com.example.domain.ChannelBinding
+import com.example.domain.Cart
+import com.example.domain.CartItem
 import com.example.domain.Item
 import com.example.domain.ItemMedia
 import com.example.domain.ItemStatus
@@ -106,4 +108,25 @@ interface OrdersRepository {
 interface OrderStatusHistoryRepository {
     suspend fun append(entry: OrderStatusEntry): Long
     suspend fun list(orderId: String, limit: Int? = null): List<OrderStatusEntry>
+}
+
+data class CartItemWithCart(
+    val item: CartItem,
+    val cart: Cart
+)
+
+interface CartsRepository {
+    suspend fun getByMerchantAndBuyer(merchantId: String, buyerUserId: Long): Cart?
+    suspend fun getOrCreate(merchantId: String, buyerUserId: Long, now: Instant): Cart
+    suspend fun touch(cartId: Long, now: Instant)
+}
+
+interface CartItemsRepository {
+    suspend fun listByCart(cartId: Long): List<CartItem>
+    suspend fun getById(id: Long): CartItem?
+    suspend fun create(item: CartItem): Long
+    suspend fun updateQty(lineId: Long, qty: Int)
+    suspend fun updateVariant(lineId: Long, variantId: String?, priceSnapshotMinor: Long, currency: String)
+    suspend fun delete(lineId: Long): Boolean
+    suspend fun getLineWithCart(lineId: Long): CartItemWithCart?
 }

@@ -6,6 +6,7 @@ data class AppConfig(
     val merchants: MerchantsConfig,
     val linkContext: LinkContextConfig,
     val linkResolveRateLimit: LinkResolveRateLimitConfig,
+    val cart: CartConfig,
     val db: DbConfig,
     val redis: RedisConfig,
     val payments: PaymentsConfig,
@@ -40,6 +41,11 @@ data class LinkContextConfig(
 data class LinkResolveRateLimitConfig(
     val max: Int,
     val windowSeconds: Int
+)
+
+data class CartConfig(
+    val undoTtlSec: Int,
+    val addDedupWindowSec: Int
 )
 
 data class DbConfig(

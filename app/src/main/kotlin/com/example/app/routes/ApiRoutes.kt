@@ -3,6 +3,7 @@ package com.example.app.routes
 import com.example.app.services.OffersService
 import com.example.app.services.PaymentsService
 import com.example.app.config.AppConfig
+import com.example.app.services.CartService
 import com.example.app.services.LinkResolveRateLimiter
 import com.example.app.services.LinkResolveService
 import com.example.db.ItemMediaRepository
@@ -37,6 +38,7 @@ fun Application.installApiRoutes() {
     val watchlistRepo by inject<WatchlistRepository>()
     val linkResolveService by inject<LinkResolveService>()
     val linkResolveRateLimiter by inject<LinkResolveRateLimiter>()
+    val cartService by inject<CartService>()
 
     val orderDeps = OrderRoutesDeps(
         itemsRepository = itemsRepo,
@@ -56,6 +58,7 @@ fun Application.installApiRoutes() {
             registerOrdersRoutes(cfg, orderDeps)
             registerWatchlistRoutes(itemsRepo, variantsRepo, watchlistRepo, cfg)
             registerLinkRoutes(linkResolveService, linkResolveRateLimiter)
+            registerCartRoutes(cartService, cfg)
         }
     }
 }
