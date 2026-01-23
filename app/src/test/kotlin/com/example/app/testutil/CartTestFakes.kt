@@ -207,6 +207,18 @@ class InMemoryCartRedisStore(
         return null
     }
 
+    override fun overwriteDedup(key: String, value: String, ttlSec: Int) {
+        val now = nowProvider()
+        dedup[key] = StoredValue(value, now.plusSeconds(ttlSec.toLong()))
+    }
+
+    override fun deleteDedupIfEquals(key: String, value: String) {
+        val existing = dedup[key] ?: return
+        if (existing.value == value) {
+            dedup.remove(key)
+        }
+    }
+
     override fun saveUndo(undoToken: String, cartItemId: Long, ttlSec: Int) {
         val now = nowProvider()
         undo[undoToken] = StoredValue(cartItemId.toString(), now.plusSeconds(ttlSec.toLong()))

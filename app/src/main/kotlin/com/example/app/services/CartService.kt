@@ -82,7 +82,7 @@ class CartService(
                 )
                 return CartAddResult.VariantRequired(
                     listing = listing,
-                    availableVariants = variants.toResolveVariants(),
+                    availableVariants = purchasable.toResolveVariants(),
                     requiredOptions = LinkResolveRequiredOptions(
                         variantRequired = true,
                         autoVariantId = null
@@ -113,22 +113,28 @@ class CartService(
         val existing = cartRedisStore.tryRegisterDedup(dedupKey, dedupValue, config.cart.addDedupWindowSec)
         if (existing != null) {
             val parsed = parseDedupValue(existing)
-            if (parsed != null) {
+            val lineWithCart = parsed?.let { cartItemsRepository.getLineWithCart(it.lineId) }
+            val validDedup = lineWithCart != null &&
+                lineWithCart.cart.buyerUserId == buyerUserId &&
+                lineWithCart.cart.merchantId == context.merchantId
+            if (parsed != null && validDedup) {
                 cartItemsRepository.delete(lineId)
                 val dedupCart = cartsRepository.getOrCreate(context.merchantId, buyerUserId, now)
                 val dto = buildCartDto(dedupCart)
                 return CartAddResult.Added(dto, parsed.undoToken, parsed.lineId)
             }
+            cartRedisStore.overwriteDedup(dedupKey, dedupValue, config.cart.addDedupWindowSec)
         }
 
         try {
             cartRedisStore.saveUndo(undoToken, lineId, config.cart.undoTtlSec)
         } catch (e: Exception) {
             cartItemsRepository.delete(lineId)
+            cartRedisStore.deleteDedupIfEquals(dedupKey, dedupValue)
             throw ApiError("undo_unavailable", HttpStatusCode.ServiceUnavailable, e)
         }
         cartsRepository.touch(cart.id, now)
-        val dto = buildCartDto(cart)
+        val dto = buildCartDto(cart, now)
         return CartAddResult.Added(dto, undoToken, lineId)
     }
 
@@ -172,7 +178,7 @@ class CartService(
             throw ApiError("undo_expired", HttpStatusCode.NotFound)
         }
         cartsRepository.touch(lineWithCart.cart.id, now)
-        return buildCartDto(lineWithCart.cart)
+        return buildCartDto(lineWithCart.cart, now)
     }
 
     suspend fun getCart(
@@ -199,7 +205,7 @@ class CartService(
         if (remove) {
             cartItemsRepository.delete(lineId)
             cartsRepository.touch(lineWithCart.cart.id, now)
-            return buildCartDto(lineWithCart.cart)
+            return buildCartDto(lineWithCart.cart, now)
         }
 
         if (qty != null) {
@@ -224,7 +230,8 @@ class CartService(
             cartsRepository.touch(lineWithCart.cart.id, now)
         }
 
-        return buildCartDto(lineWithCart.cart)
+        val updatedAt = if (qty != null || variantUpdateRequested) now else null
+        return buildCartDto(lineWithCart.cart, updatedAt)
     }
 
     private fun validateVariant(variants: List<Variant>, variantId: String): String {
@@ -236,14 +243,14 @@ class CartService(
         return candidate.id
     }
 
-    private suspend fun buildCartDto(cart: Cart): CartDto {
+    private suspend fun buildCartDto(cart: Cart, updatedAtOverride: Instant? = null): CartDto {
         val items = cartItemsRepository.listByCart(cart.id)
         return CartDto(
             id = cart.id,
             merchantId = cart.merchantId,
             buyerUserId = cart.buyerUserId,
             createdAt = cart.createdAt.toString(),
-            updatedAt = cart.updatedAt.toString(),
+            updatedAt = (updatedAtOverride ?: cart.updatedAt).toString(),
             items = items.map { item ->
                 CartLineDto(
                     lineId = item.id,

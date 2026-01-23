@@ -5,6 +5,8 @@ import org.redisson.api.RedissonClient
 
 interface CartRedisStore {
     fun tryRegisterDedup(key: String, value: String, ttlSec: Int): String?
+    fun overwriteDedup(key: String, value: String, ttlSec: Int)
+    fun deleteDedupIfEquals(key: String, value: String)
     fun saveUndo(undoToken: String, cartItemId: Long, ttlSec: Int)
     fun consumeUndo(undoToken: String): Long?
 }
@@ -22,6 +24,22 @@ class CartRedisStoreRedisson(
                 bucket.get()
             }
         }.getOrNull()
+    }
+
+    override fun overwriteDedup(key: String, value: String, ttlSec: Int) {
+        runCatching {
+            val bucket = redisson.getBucket<String>(key)
+            bucket.set(value, ttlSec.toLong(), TimeUnit.SECONDS)
+        }
+    }
+
+    override fun deleteDedupIfEquals(key: String, value: String) {
+        runCatching {
+            val bucket = redisson.getBucket<String>(key)
+            if (bucket.get() == value) {
+                bucket.delete()
+            }
+        }
     }
 
     override fun saveUndo(undoToken: String, cartItemId: Long, ttlSec: Int) {

@@ -19,6 +19,7 @@ import com.example.domain.Variant
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import java.time.Instant
 
 class CartServiceTest : StringSpec({
@@ -134,6 +135,26 @@ class CartServiceTest : StringSpec({
                 active = true
             )
         )
+        deps.variants.upsert(
+            Variant(
+                id = "v3",
+                itemId = "item-1",
+                size = "XL",
+                sku = null,
+                stock = 5,
+                active = false
+            )
+        )
+        deps.variants.upsert(
+            Variant(
+                id = "v4",
+                itemId = "item-1",
+                size = "XS",
+                sku = null,
+                stock = 0,
+                active = true
+            )
+        )
         deps.prices.upsert(
             PricesDisplay(
                 itemId = "item-1",
@@ -152,6 +173,7 @@ class CartServiceTest : StringSpec({
 
         val required = result as CartAddResult.VariantRequired
         required.requiredOptions.variantRequired shouldBe true
+        required.availableVariants.map { it.id }.sorted() shouldBe listOf("v1", "v2")
         deps.cartItems.listByCart(deps.carts.getOrCreate("m1", 42, now).id).size shouldBe 0
     }
 
@@ -242,6 +264,21 @@ class CartServiceTest : StringSpec({
 
         first.undoToken shouldBe second.undoToken
         first.addedLineId shouldBe second.addedLineId
+        deps.cartItems.listByCart(deps.carts.getOrCreate("m1", 42, now).id).size shouldBe 1
+    }
+
+    "undo clears line so add creates new line within dedup window" {
+        val now = Instant.parse("2024-01-02T00:00:00Z")
+        val deps = cartTestDeps(now)
+        val token = "token-6"
+        setupBasicItem(deps, token, now)
+
+        val first = deps.service.addByToken(42, token, now = now) as CartAddResult.Added
+        deps.service.undo(42, first.undoToken, now = now)
+        val second = deps.service.addByToken(42, token, now = now) as CartAddResult.Added
+
+        second.undoToken shouldNotBe first.undoToken
+        second.addedLineId shouldNotBe first.addedLineId
         deps.cartItems.listByCart(deps.carts.getOrCreate("m1", 42, now).id).size shouldBe 1
     }
 })
