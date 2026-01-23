@@ -7,6 +7,8 @@ import org.jetbrains.exposed.sql.javatime.timestamp
 object MerchantsTable : Table("merchants") {
     val id = varchar("id", 64)
     val name = text("name")
+    val paymentClaimWindowSeconds = integer("payment_claim_window_seconds")
+    val paymentReviewWindowSeconds = integer("payment_review_window_seconds")
     val createdAt = timestamp("created_at")
     override val primaryKey = PrimaryKey(id)
 }
@@ -134,9 +136,9 @@ object OrdersTable : Table("orders") {
     val id = varchar("id", 64)
     val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.RESTRICT)
     val userId = long("user_id")
-    val itemId = reference("item_id", ItemsTable.id, onDelete = ReferenceOption.RESTRICT)
+    val itemId = optReference("item_id", ItemsTable.id, onDelete = ReferenceOption.RESTRICT)
     val variantId = optReference("variant_id", VariantsTable.id, onDelete = ReferenceOption.SET_NULL)
-    val qty = integer("qty")
+    val qty = integer("qty").nullable()
     val currency = text("currency")
     val amountMinor = long("amount_minor")
     val deliveryOption = text("delivery_option").nullable()
@@ -146,9 +148,29 @@ object OrdersTable : Table("orders") {
     val telegramPaymentChargeId = text("telegram_payment_charge_id").nullable()
     val invoiceMessageId = integer("invoice_message_id").nullable()
     val status = varchar("status", 16)
+    val paymentClaimedAt = timestamp("payment_claimed_at").nullable()
+    val paymentDecidedAt = timestamp("payment_decided_at").nullable()
     val createdAt = timestamp("created_at")
     val updatedAt = timestamp("updated_at")
     override val primaryKey = PrimaryKey(id)
+}
+
+object OrderLinesTable : Table("order_line") {
+    val orderId = reference("order_id", OrdersTable.id, onDelete = ReferenceOption.CASCADE)
+    val listingId = reference("listing_id", ItemsTable.id, onDelete = ReferenceOption.RESTRICT)
+    val variantId = optReference("variant_id", VariantsTable.id, onDelete = ReferenceOption.SET_NULL)
+    val qty = integer("qty")
+    val priceSnapshotMinor = long("price_snapshot_minor")
+    val currency = text("currency")
+    val sourceStorefrontId = varchar("source_storefront_id", 64).nullable()
+    val sourceChannelId = long("source_channel_id").nullable()
+    val sourcePostMessageId = integer("source_post_message_id").nullable()
+
+    init {
+        index(false, orderId)
+        index(false, listingId)
+        index(false, variantId)
+    }
 }
 
 object CartsTable : Table("cart") {

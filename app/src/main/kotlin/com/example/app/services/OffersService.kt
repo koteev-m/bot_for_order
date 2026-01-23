@@ -6,6 +6,7 @@ import com.example.app.routes.formatMoney
 import com.example.bots.TelegramClients
 import com.example.db.ItemsRepository
 import com.example.db.OffersRepository
+import com.example.db.OrderLinesRepository
 import com.example.db.OrdersRepository
 import com.example.db.PricesDisplayRepository
 import com.example.db.VariantsRepository
@@ -15,6 +16,7 @@ import com.example.domain.Offer
 import com.example.domain.OfferDecision
 import com.example.domain.OfferStatus
 import com.example.domain.Order
+import com.example.domain.OrderLine
 import com.example.domain.OrderStatus
 import com.example.domain.Variant
 import com.example.domain.evaluateOffer
@@ -54,7 +56,8 @@ data class OfferRepositories(
     val variants: VariantsRepository,
     val prices: PricesDisplayRepository,
     val offers: OffersRepository,
-    val orders: OrdersRepository
+    val orders: OrdersRepository,
+    val orderLines: OrderLinesRepository
 )
 
 data class OfferServicesDeps(
@@ -221,6 +224,21 @@ class OffersService(
         val orderPrice = OrderPrice(currency = currency, amountMinor = amountMinor)
         val order = offer.toPendingOrder(orderId, userId, qty, orderPrice, item.merchantId, now)
         repositories.orders.create(order)
+        repositories.orderLines.createBatch(
+            listOf(
+                OrderLine(
+                    orderId = order.id,
+                    listingId = order.itemId ?: offer.itemId,
+                    variantId = order.variantId,
+                    qty = order.qty ?: qty,
+                    priceSnapshotMinor = order.amountMinor,
+                    currency = order.currency,
+                    sourceStorefrontId = null,
+                    sourceChannelId = null,
+                    sourcePostMessageId = null
+                )
+            )
+        )
         val orderReserveTtl = config.server.orderReserveTtlSec.toLong()
         try {
             reserveManager.ensureOrderReserve(order, offer.id, orderReserveTtl)
@@ -229,9 +247,9 @@ class OffersService(
                 "order_reserve_failed orderId={} offerId={} item={} variant={} qty={}",
                 order.id,
                 offer.id,
-                order.itemId,
+                order.itemId ?: "unknown",
                 order.variantId,
-                order.qty,
+                order.qty ?: 0,
                 error
             )
             throw IllegalStateException("variant not available", error)
@@ -480,6 +498,7 @@ private fun Offer.toPendingOrder(
     telegramPaymentChargeId = null,
     invoiceMessageId = null,
     status = OrderStatus.pending,
+    createdAt = now,
     updatedAt = now
 )
 
@@ -521,24 +540,26 @@ private class ReserveManager(
         if (ttlSec <= 0) return
         val converted = offerId?.let { convertOfferReserve(it, order, ttlSec) } ?: false
         if (converted) return
+        val itemId = requireNotNull(order.itemId) { "order itemId missing" }
+        val qty = requireNotNull(order.qty) { "order qty missing" }
         val payload = StockReservePayload(
-            itemId = order.itemId,
+            itemId = itemId,
             variantId = order.variantId,
-            qty = order.qty,
+            qty = qty,
             userId = order.userId,
             ttlSec = ttlSec,
             from = ReserveSource.ORDER,
             offerId = offerId
         )
-        withStockLock(order.itemId, order.variantId) {
-            ensureStockAvailable(order.itemId, order.variantId, order.qty)
+        withStockLock(itemId, order.variantId) {
+            ensureStockAvailable(itemId, order.variantId, qty)
             val result = holdService.createOrderReserve(order.id, payload, ttlSec)
             log.info(
                 "order_reserve_set orderId={} item={} variant={} qty={} ttl={}s refreshed={}",
                 order.id,
-                order.itemId,
+                itemId,
                 order.variantId,
-                order.qty,
+                qty,
                 ttlSec,
                 result == ReserveWriteResult.REFRESHED
             )
@@ -546,15 +567,17 @@ private class ReserveManager(
     }
 
     private suspend fun convertOfferReserve(offerId: String, order: Order, ttlSec: Long): Boolean {
+        val itemId = requireNotNull(order.itemId) { "order itemId missing" }
+        val qty = requireNotNull(order.qty) { "order qty missing" }
         val converted = holdService.convertOfferToOrderReserve(
             offerId = offerId,
             orderId = order.id,
             extendTtlSec = ttlSec
         ) { payload ->
             payload.copy(
-                itemId = order.itemId,
+                itemId = itemId,
                 variantId = order.variantId,
-                qty = order.qty,
+                qty = qty,
                 userId = order.userId,
                 ttlSec = ttlSec,
                 offerId = payload.offerId ?: offerId,
@@ -566,9 +589,9 @@ private class ReserveManager(
                 "order_reserve_converted orderId={} offerId={} item={} variant={} qty={} ttl={}s",
                 order.id,
                 offerId,
-                order.itemId,
+                itemId,
                 order.variantId,
-                order.qty,
+                qty,
                 ttlSec
             )
         } else {
@@ -576,9 +599,9 @@ private class ReserveManager(
                 "order_reserve_convert_miss orderId={} offerId={} item={} variant={} qty={}",
                 order.id,
                 offerId,
-                order.itemId,
+                itemId,
                 order.variantId,
-                order.qty
+                qty
             )
         }
         return converted

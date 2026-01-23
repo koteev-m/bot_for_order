@@ -12,6 +12,7 @@ import com.example.domain.Merchant
 import com.example.domain.Offer
 import com.example.domain.OfferStatus
 import com.example.domain.Order
+import com.example.domain.OrderLine
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
 import com.example.domain.Post
@@ -102,7 +103,16 @@ interface OrdersRepository {
     suspend fun setStatus(id: String, status: OrderStatus)
     suspend fun setInvoiceMessage(id: String, invoiceMessageId: Int)
     suspend fun markPaid(id: String, provider: String, providerChargeId: String, telegramPaymentChargeId: String)
+    suspend fun setPaymentClaimed(orderId: String, claimedAt: Instant): Boolean
+    suspend fun listPendingClaimOlderThan(cutoff: Instant): List<Order>
+    suspend fun listPendingReviewOlderThan(cutoff: Instant): List<Order>
     suspend fun listPendingOlderThan(cutoff: Instant): List<Order>
+}
+
+interface OrderLinesRepository {
+    suspend fun createBatch(lines: List<OrderLine>)
+    suspend fun listByOrder(orderId: String): List<OrderLine>
+    suspend fun listByOrders(orderIds: List<String>): Map<String, List<OrderLine>>
 }
 
 interface OrderStatusHistoryRepository {

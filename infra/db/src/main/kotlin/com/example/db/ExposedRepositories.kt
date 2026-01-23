@@ -9,6 +9,7 @@ import com.example.db.tables.LinkContextsTable
 import com.example.db.tables.MerchantsTable
 import com.example.db.tables.OffersTable
 import com.example.db.tables.OrderStatusHistoryTable
+import com.example.db.tables.OrderLinesTable
 import com.example.db.tables.OrdersTable
 import com.example.db.tables.PostsTable
 import com.example.db.tables.PricesDisplayTable
@@ -29,6 +30,7 @@ import com.example.domain.Merchant
 import com.example.domain.Offer
 import com.example.domain.OfferStatus
 import com.example.domain.Order
+import com.example.domain.OrderLine
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
 import com.example.domain.Post
@@ -60,6 +62,7 @@ import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.batchInsert
 import org.jetbrains.exposed.sql.select
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.update
@@ -83,7 +86,9 @@ class MerchantsRepositoryExposed(private val tx: DatabaseTx) : MerchantsReposito
     private fun ResultRow.toMerchant(): Merchant =
         Merchant(
             id = this[MerchantsTable.id],
-            name = this[MerchantsTable.name]
+            name = this[MerchantsTable.name],
+            paymentClaimWindowSeconds = this[MerchantsTable.paymentClaimWindowSeconds],
+            paymentReviewWindowSeconds = this[MerchantsTable.paymentReviewWindowSeconds]
         )
 }
 
@@ -591,8 +596,10 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
                 it[telegramPaymentChargeId] = order.telegramPaymentChargeId
                 it[invoiceMessageId] = order.invoiceMessageId
                 it[status] = order.status.name
-                it[createdAt] = CurrentTimestamp()
-                it[updatedAt] = CurrentTimestamp()
+                it[paymentClaimedAt] = order.paymentClaimedAt
+                it[paymentDecidedAt] = order.paymentDecidedAt
+                it[createdAt] = order.createdAt
+                it[updatedAt] = order.updatedAt
             }
         }
     }
@@ -619,7 +626,10 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
                     telegramPaymentChargeId = it[OrdersTable.telegramPaymentChargeId],
                     invoiceMessageId = it[OrdersTable.invoiceMessageId],
                     status = OrderStatus.valueOf(it[OrdersTable.status]),
-                    updatedAt = it[OrdersTable.updatedAt]
+                    createdAt = it[OrdersTable.createdAt],
+                    updatedAt = it[OrdersTable.updatedAt],
+                    paymentClaimedAt = it[OrdersTable.paymentClaimedAt],
+                    paymentDecidedAt = it[OrdersTable.paymentDecidedAt]
                 )
             }
     }
@@ -646,7 +656,10 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
                     telegramPaymentChargeId = it[OrdersTable.telegramPaymentChargeId],
                     invoiceMessageId = it[OrdersTable.invoiceMessageId],
                     status = OrderStatus.valueOf(it[OrdersTable.status]),
-                    updatedAt = it[OrdersTable.updatedAt]
+                    createdAt = it[OrdersTable.createdAt],
+                    updatedAt = it[OrdersTable.updatedAt],
+                    paymentClaimedAt = it[OrdersTable.paymentClaimedAt],
+                    paymentDecidedAt = it[OrdersTable.paymentDecidedAt]
                 )
             }
     }
@@ -655,6 +668,9 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
         tx.tx {
             OrdersTable.update({ OrdersTable.id eq id }) {
                 it[OrdersTable.status] = status.name
+                if (status == OrderStatus.canceled) {
+                    it[OrdersTable.paymentDecidedAt] = CurrentTimestamp()
+                }
                 it[OrdersTable.updatedAt] = CurrentTimestamp()
             }
         }
@@ -681,36 +697,118 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
                 it[OrdersTable.provider] = provider
                 it[OrdersTable.providerChargeId] = providerChargeId
                 it[OrdersTable.telegramPaymentChargeId] = telegramPaymentChargeId
+                it[OrdersTable.paymentDecidedAt] = CurrentTimestamp()
                 it[OrdersTable.updatedAt] = CurrentTimestamp()
             }
         }
+    }
+
+    override suspend fun setPaymentClaimed(orderId: String, claimedAt: Instant): Boolean = tx.tx {
+        OrdersTable.update({
+            (OrdersTable.id eq orderId) and OrdersTable.paymentClaimedAt.isNull()
+        }) {
+            it[paymentClaimedAt] = claimedAt
+            it[updatedAt] = CurrentTimestamp()
+        } > 0
+    }
+
+    override suspend fun listPendingClaimOlderThan(cutoff: Instant): List<Order> = tx.tx {
+        OrdersTable
+            .selectAll()
+            .where {
+                (OrdersTable.status eq OrderStatus.pending.name) and
+                    OrdersTable.paymentClaimedAt.isNull() and
+                    (OrdersTable.createdAt lessEq cutoff)
+            }
+            .map { it.toOrder() }
+    }
+
+    override suspend fun listPendingReviewOlderThan(cutoff: Instant): List<Order> = tx.tx {
+        OrdersTable
+            .selectAll()
+            .where {
+                (OrdersTable.status eq OrderStatus.pending.name) and
+                    OrdersTable.paymentClaimedAt.isNotNull() and
+                    (OrdersTable.paymentClaimedAt lessEq cutoff)
+            }
+            .map { it.toOrder() }
     }
 
     override suspend fun listPendingOlderThan(cutoff: Instant): List<Order> = tx.tx {
         OrdersTable
             .selectAll()
             .where { (OrdersTable.status eq OrderStatus.pending.name) and (OrdersTable.updatedAt lessEq cutoff) }
-            .map {
-                Order(
-                    id = it[OrdersTable.id],
-                    merchantId = it[OrdersTable.merchantId],
-                    userId = it[OrdersTable.userId],
-                    itemId = it[OrdersTable.itemId],
-                    variantId = it[OrdersTable.variantId],
-                    qty = it[OrdersTable.qty],
-                    currency = it[OrdersTable.currency],
-                    amountMinor = it[OrdersTable.amountMinor],
-                    deliveryOption = it[OrdersTable.deliveryOption],
-                    addressJson = it[OrdersTable.addressJson],
-                    provider = it[OrdersTable.provider],
-                    providerChargeId = it[OrdersTable.providerChargeId],
-                    telegramPaymentChargeId = it[OrdersTable.telegramPaymentChargeId],
-                    invoiceMessageId = it[OrdersTable.invoiceMessageId],
-                    status = OrderStatus.valueOf(it[OrdersTable.status]),
-                    updatedAt = it[OrdersTable.updatedAt]
-                )
-            }
+            .map { it.toOrder() }
     }
+
+    private fun ResultRow.toOrder(): Order = Order(
+        id = this[OrdersTable.id],
+        merchantId = this[OrdersTable.merchantId],
+        userId = this[OrdersTable.userId],
+        itemId = this[OrdersTable.itemId],
+        variantId = this[OrdersTable.variantId],
+        qty = this[OrdersTable.qty],
+        currency = this[OrdersTable.currency],
+        amountMinor = this[OrdersTable.amountMinor],
+        deliveryOption = this[OrdersTable.deliveryOption],
+        addressJson = this[OrdersTable.addressJson],
+        provider = this[OrdersTable.provider],
+        providerChargeId = this[OrdersTable.providerChargeId],
+        telegramPaymentChargeId = this[OrdersTable.telegramPaymentChargeId],
+        invoiceMessageId = this[OrdersTable.invoiceMessageId],
+        status = OrderStatus.valueOf(this[OrdersTable.status]),
+        createdAt = this[OrdersTable.createdAt],
+        updatedAt = this[OrdersTable.updatedAt],
+        paymentClaimedAt = this[OrdersTable.paymentClaimedAt],
+        paymentDecidedAt = this[OrdersTable.paymentDecidedAt]
+    )
+}
+
+class OrderLinesRepositoryExposed(private val tx: DatabaseTx) : OrderLinesRepository {
+    override suspend fun createBatch(lines: List<OrderLine>) {
+        if (lines.isEmpty()) return
+        tx.tx {
+            OrderLinesTable.batchInsert(lines) { line ->
+                this[OrderLinesTable.orderId] = line.orderId
+                this[OrderLinesTable.listingId] = line.listingId
+                this[OrderLinesTable.variantId] = line.variantId
+                this[OrderLinesTable.qty] = line.qty
+                this[OrderLinesTable.priceSnapshotMinor] = line.priceSnapshotMinor
+                this[OrderLinesTable.currency] = line.currency
+                this[OrderLinesTable.sourceStorefrontId] = line.sourceStorefrontId
+                this[OrderLinesTable.sourceChannelId] = line.sourceChannelId
+                this[OrderLinesTable.sourcePostMessageId] = line.sourcePostMessageId
+            }
+        }
+    }
+
+    override suspend fun listByOrder(orderId: String): List<OrderLine> = tx.tx {
+        OrderLinesTable
+            .selectAll()
+            .where { OrderLinesTable.orderId eq orderId }
+            .map { it.toOrderLine() }
+    }
+
+    override suspend fun listByOrders(orderIds: List<String>): Map<String, List<OrderLine>> = tx.tx {
+        if (orderIds.isEmpty()) return@tx emptyMap()
+        OrderLinesTable
+            .selectAll()
+            .where { OrderLinesTable.orderId inList orderIds }
+            .map { it.toOrderLine() }
+            .groupBy { it.orderId }
+    }
+
+    private fun ResultRow.toOrderLine(): OrderLine = OrderLine(
+        orderId = this[OrderLinesTable.orderId],
+        listingId = this[OrderLinesTable.listingId],
+        variantId = this[OrderLinesTable.variantId],
+        qty = this[OrderLinesTable.qty],
+        priceSnapshotMinor = this[OrderLinesTable.priceSnapshotMinor],
+        currency = this[OrderLinesTable.currency],
+        sourceStorefrontId = this[OrderLinesTable.sourceStorefrontId],
+        sourceChannelId = this[OrderLinesTable.sourceChannelId],
+        sourcePostMessageId = this[OrderLinesTable.sourcePostMessageId]
+    )
 }
 
 class OrderStatusHistoryRepositoryExposed(private val tx: DatabaseTx) : OrderStatusHistoryRepository {

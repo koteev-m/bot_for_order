@@ -4,8 +4,10 @@ import com.example.app.config.AppConfig
 import com.example.app.services.ORDER_PAYLOAD_PREFIX
 import com.example.bots.TelegramClients
 import com.example.domain.Order
+import com.example.domain.OrderLine
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
+import com.example.domain.hold.OrderHoldRequest
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton
 import com.pengrad.telegrambot.model.request.InlineKeyboardMarkup
 import com.pengrad.telegrambot.model.request.LabeledPrice
@@ -104,21 +106,26 @@ internal suspend fun sendItemCard(chatId: Long, itemId: String, deps: ShopWebhoo
     )
 }
 
-internal suspend fun decrementStock(order: Order, deps: ShopWebhookDeps): Boolean {
-    val variantId = order.variantId ?: return true
-    val updated = deps.variantsRepository.decrementStock(variantId, order.qty)
-    if (!updated) {
-        shopLog.error(
-            "order_stock_mismatch orderId={} variant={} qty={}",
-            order.id,
-            variantId,
-            order.qty
-        )
+internal suspend fun decrementStock(order: Order, lines: List<OrderLine>, deps: ShopWebhookDeps): Boolean {
+    if (lines.isEmpty()) return true
+    var ok = true
+    lines.forEach { line ->
+        val variantId = line.variantId ?: return@forEach
+        val updated = deps.variantsRepository.decrementStock(variantId, line.qty)
+        if (!updated) {
+            shopLog.error(
+                "order_stock_mismatch orderId={} variant={} qty={}",
+                order.id,
+                variantId,
+                line.qty
+            )
+            ok = false
+        }
     }
-    return updated
+    return ok
 }
 
-internal suspend fun handleStockFailure(order: Order, deps: ShopWebhookDeps) {
+internal suspend fun handleStockFailure(order: Order, lines: List<OrderLine>, deps: ShopWebhookDeps) {
     deps.ordersRepository.setStatus(order.id, OrderStatus.canceled)
     deps.orderStatusRepository.append(
         OrderStatusEntry(
@@ -130,7 +137,7 @@ internal suspend fun handleStockFailure(order: Order, deps: ShopWebhookDeps) {
             ts = Instant.now()
         )
     )
-    deps.holdService.deleteReserveByOrder(order.id)
+    deps.orderHoldService.release(order.id, buildOrderHoldRequests(order, lines))
     notifyStockIssue(deps, order.id)
 }
 
@@ -139,4 +146,23 @@ private fun notifyStockIssue(deps: ShopWebhookDeps, orderId: String) {
     deps.config.telegram.adminIds.forEach { adminId ->
         deps.clients.adminBot.execute(SendMessage(adminId, text))
     }
+}
+
+internal fun buildOrderHoldRequests(order: Order, lines: List<OrderLine>): List<OrderHoldRequest> {
+    if (lines.isNotEmpty()) {
+        return lines
+            .groupBy { it.variantId ?: it.listingId }
+            .values
+            .map { group ->
+                val first = group.first()
+                OrderHoldRequest(
+                    listingId = first.listingId,
+                    variantId = first.variantId,
+                    qty = group.sumOf { it.qty }
+                )
+            }
+    }
+    val itemId = order.itemId ?: return emptyList()
+    val qty = order.qty ?: 1
+    return listOf(OrderHoldRequest(listingId = itemId, variantId = order.variantId, qty = qty))
 }

@@ -19,6 +19,8 @@ import com.example.db.MerchantsRepository
 import com.example.db.MerchantsRepositoryExposed
 import com.example.db.OffersRepository
 import com.example.db.OffersRepositoryExposed
+import com.example.db.OrderLinesRepository
+import com.example.db.OrderLinesRepositoryExposed
 import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrderStatusHistoryRepositoryExposed
 import com.example.db.OrdersRepository
@@ -67,6 +69,7 @@ fun dbModule(cfg: AppConfig) = module {
     single<LinkContextsRepository> { LinkContextsRepositoryExposed(get()) }
     single<OffersRepository> { OffersRepositoryExposed(get()) }
     single<OrdersRepository> { OrdersRepositoryExposed(get()) }
+    single<OrderLinesRepository> { OrderLinesRepositoryExposed(get()) }
     single<OrderStatusHistoryRepository> { OrderStatusHistoryRepositoryExposed(get()) }
     single<WatchlistRepository> { WatchlistRepositoryExposed(get()) }
     single<CartsRepository> { CartsRepositoryExposed(get()) }
