@@ -21,6 +21,7 @@ import com.example.db.VariantsRepositoryExposed
 import com.example.db.tables.ItemsTable
 import com.example.db.tables.MerchantPaymentMethodsTable
 import com.example.db.tables.MerchantsTable
+import com.example.db.tables.OrderPaymentClaimsTable
 import com.example.db.tables.VariantsTable
 import com.example.domain.ItemStatus
 import com.example.domain.MerchantPaymentMethod
@@ -28,9 +29,12 @@ import com.example.domain.Order
 import com.example.domain.OrderAttachmentKind
 import com.example.domain.OrderLine
 import com.example.domain.OrderStatus
+import com.example.domain.PaymentClaimStatus
 import com.example.domain.PaymentMethodMode
 import com.example.domain.PaymentMethodType
 import com.example.domain.hold.OrderHoldRequest
+import com.example.domain.hold.ReserveSource
+import com.example.domain.hold.StockReservePayload
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -45,6 +49,8 @@ import com.zaxxer.hikari.HikariDataSource
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.select
 
 class ManualPaymentsServiceTest : StringSpec({
     val dockerAvailable = isDockerAvailable()
@@ -119,6 +125,8 @@ class ManualPaymentsServiceTest : StringSpec({
             }
         }
     }
+
+    fun newMerchantId(): String = "m-${UUID.randomUUID()}"
 
     fun insertItemAndVariant(merchantId: String, variantId: String, stock: Int) = runBlocking {
         dbTx.tx {
@@ -206,11 +214,12 @@ class ManualPaymentsServiceTest : StringSpec({
         Assumptions.assumeTrue(dockerReady, "Docker недоступен или контейнер не стартовал.")
         val cfg = baseTestConfig()
         val crypto = PaymentDetailsCrypto(cfg.manualPayments.detailsEncryptionKey)
-        insertMerchant(cfg.merchants.defaultMerchantId)
+        val merchantId = newMerchantId()
+        insertMerchant(merchantId)
         val variantId = "var-${UUID.randomUUID()}"
-        insertItemAndVariant(cfg.merchants.defaultMerchantId, variantId, stock = 5)
+        insertItemAndVariant(merchantId, variantId, stock = 5)
         val method = MerchantPaymentMethod(
-            merchantId = cfg.merchants.defaultMerchantId,
+            merchantId = merchantId,
             type = PaymentMethodType.MANUAL_CARD,
             mode = PaymentMethodMode.AUTO,
             detailsEncrypted = crypto.encrypt("Pay to card"),
@@ -218,7 +227,7 @@ class ManualPaymentsServiceTest : StringSpec({
         )
         insertPaymentMethod(method)
 
-        val order = createOrder(cfg.merchants.defaultMerchantId, 10L, variantId, qty = 2)
+        val order = createOrder(merchantId, 10L, variantId, qty = 2)
         val holdService = InMemoryOrderHoldService()
         val holdRequests = listOf(OrderHoldRequest(listingId = "item-$variantId", variantId = variantId, qty = 2))
         runBlocking { holdService.tryAcquire(order.id, holdRequests, 300) }
@@ -258,18 +267,19 @@ class ManualPaymentsServiceTest : StringSpec({
         val cfg = baseTestConfig()
         val clock = MutableClock(Instant.parse("2024-01-01T00:00:00Z"))
         val crypto = PaymentDetailsCrypto(cfg.manualPayments.detailsEncryptionKey)
-        insertMerchant(cfg.merchants.defaultMerchantId, claimWindow = 60, reviewWindow = 120)
+        val merchantId = newMerchantId()
+        insertMerchant(merchantId, claimWindow = 60, reviewWindow = 120)
         val variantId = "var-${UUID.randomUUID()}"
-        insertItemAndVariant(cfg.merchants.defaultMerchantId, variantId, stock = 5)
+        insertItemAndVariant(merchantId, variantId, stock = 5)
         val method = MerchantPaymentMethod(
-            merchantId = cfg.merchants.defaultMerchantId,
+            merchantId = merchantId,
             type = PaymentMethodType.MANUAL_CRYPTO,
             mode = PaymentMethodMode.AUTO,
             detailsEncrypted = crypto.encrypt("Wallet"),
             enabled = true
         )
         insertPaymentMethod(method)
-        val order = createOrder(cfg.merchants.defaultMerchantId, 11L, variantId, qty = 1, now = clock.instant())
+        val order = createOrder(merchantId, 11L, variantId, qty = 1, now = clock.instant())
 
         val holdService = InMemoryOrderHoldService { clock.instant() }
         val holdRequests = listOf(OrderHoldRequest(listingId = "item-$variantId", variantId = variantId, qty = 1))
@@ -312,18 +322,19 @@ class ManualPaymentsServiceTest : StringSpec({
         Assumptions.assumeTrue(dockerReady, "Docker недоступен или контейнер не стартовал.")
         val cfg = baseTestConfig()
         val crypto = PaymentDetailsCrypto(cfg.manualPayments.detailsEncryptionKey)
-        insertMerchant(cfg.merchants.defaultMerchantId)
+        val merchantId = newMerchantId()
+        insertMerchant(merchantId)
         val variantId = "var-${UUID.randomUUID()}"
-        insertItemAndVariant(cfg.merchants.defaultMerchantId, variantId, stock = 5)
+        insertItemAndVariant(merchantId, variantId, stock = 5)
         val method = MerchantPaymentMethod(
-            merchantId = cfg.merchants.defaultMerchantId,
+            merchantId = merchantId,
             type = PaymentMethodType.MANUAL_CARD,
             mode = PaymentMethodMode.MANUAL_SEND,
             detailsEncrypted = null,
             enabled = true
         )
         insertPaymentMethod(method)
-        val order = createOrder(cfg.merchants.defaultMerchantId, 12L, variantId, qty = 1)
+        val order = createOrder(merchantId, 12L, variantId, qty = 1)
 
         val service = ManualPaymentsService(
             dbTx,
@@ -360,18 +371,19 @@ class ManualPaymentsServiceTest : StringSpec({
         Assumptions.assumeTrue(dockerReady, "Docker недоступен или контейнер не стартовал.")
         val cfg = baseTestConfig()
         val crypto = PaymentDetailsCrypto(cfg.manualPayments.detailsEncryptionKey)
-        insertMerchant(cfg.merchants.defaultMerchantId)
+        val merchantId = newMerchantId()
+        insertMerchant(merchantId)
         val variantId = "var-${UUID.randomUUID()}"
-        insertItemAndVariant(cfg.merchants.defaultMerchantId, variantId, stock = 5)
+        insertItemAndVariant(merchantId, variantId, stock = 5)
         val method = MerchantPaymentMethod(
-            merchantId = cfg.merchants.defaultMerchantId,
+            merchantId = merchantId,
             type = PaymentMethodType.MANUAL_CRYPTO,
             mode = PaymentMethodMode.AUTO,
             detailsEncrypted = crypto.encrypt("Wallet"),
             enabled = true
         )
         insertPaymentMethod(method)
-        val order = createOrder(cfg.merchants.defaultMerchantId, 13L, variantId, qty = 1)
+        val order = createOrder(merchantId, 13L, variantId, qty = 1)
 
         val storage = InMemoryStorage()
         val service = ManualPaymentsService(
@@ -412,6 +424,136 @@ class ManualPaymentsServiceTest : StringSpec({
             val attachments = attachmentsRepository.listByOrderAndKind(order.id, OrderAttachmentKind.PAYMENT_PROOF)
             attachments shouldHaveSize 1
             storage.objects.containsKey(attachments.first().storageKey) shouldBe true
+        }
+    }
+
+    "reject allows resubmit and refreshes paymentClaimedAt".config(enabled = dockerAvailable) {
+        Assumptions.assumeTrue(dockerReady, "Docker недоступен или контейнер не стартовал.")
+        val cfg = baseTestConfig()
+        val clock = MutableClock(Instant.parse("2024-02-01T00:00:00Z"))
+        val crypto = PaymentDetailsCrypto(cfg.manualPayments.detailsEncryptionKey)
+        val merchantId = newMerchantId()
+        insertMerchant(merchantId, claimWindow = 120, reviewWindow = 120)
+        val variantId = "var-${UUID.randomUUID()}"
+        insertItemAndVariant(merchantId, variantId, stock = 2)
+        val method = MerchantPaymentMethod(
+            merchantId = merchantId,
+            type = PaymentMethodType.MANUAL_CRYPTO,
+            mode = PaymentMethodMode.AUTO,
+            detailsEncrypted = crypto.encrypt("Wallet"),
+            enabled = true
+        )
+        insertPaymentMethod(method)
+        val order = createOrder(merchantId, 20L, variantId, qty = 1, now = clock.instant())
+
+        val service = ManualPaymentsService(
+            dbTx,
+            ordersRepository,
+            orderLinesRepository,
+            orderStatusHistoryRepository,
+            merchantsRepository,
+            paymentMethodsRepository,
+            paymentDetailsRepository,
+            paymentClaimsRepository,
+            attachmentsRepository,
+            variantsRepository,
+            InMemoryOrderHoldService { clock.instant() },
+            InMemoryHoldService { clock.instant() },
+            NoopLockManager(),
+            InMemoryStorage(),
+            crypto,
+            FakeManualPaymentsNotifier(),
+            clock
+        )
+
+        runBlocking {
+            service.selectPaymentMethod(order.id, order.userId, method.type)
+            service.submitClaim(order.id, order.userId, txid = null, comment = "first", attachments = emptyList())
+            val firstClaimedAt = ordersRepository.get(order.id)!!.paymentClaimedAt!!
+            clock.advanceSeconds(10)
+            service.rejectPayment(order.id, adminId = 1L, reason = "no_match")
+            ordersRepository.get(order.id)!!.paymentClaimedAt shouldBe null
+            clock.advanceSeconds(5)
+            val secondClaim = service.submitClaim(order.id, order.userId, txid = null, comment = "second", attachments = emptyList())
+            val refreshed = ordersRepository.get(order.id)!!.paymentClaimedAt
+            secondClaim.status shouldBe PaymentClaimStatus.SUBMITTED
+            refreshed shouldBe clock.instant()
+            refreshed shouldBe firstClaimedAt.plusSeconds(15)
+        }
+    }
+
+    "confirm stock mismatch rejects claim and cancels order".config(enabled = dockerAvailable) {
+        Assumptions.assumeTrue(dockerReady, "Docker недоступен или контейнер не стартовал.")
+        val cfg = baseTestConfig()
+        val clock = MutableClock(Instant.parse("2024-03-01T00:00:00Z"))
+        val crypto = PaymentDetailsCrypto(cfg.manualPayments.detailsEncryptionKey)
+        val merchantId = newMerchantId()
+        insertMerchant(merchantId)
+        val variantId = "var-${UUID.randomUUID()}"
+        insertItemAndVariant(merchantId, variantId, stock = 0)
+        val method = MerchantPaymentMethod(
+            merchantId = merchantId,
+            type = PaymentMethodType.MANUAL_CARD,
+            mode = PaymentMethodMode.AUTO,
+            detailsEncrypted = crypto.encrypt("Pay"),
+            enabled = true
+        )
+        insertPaymentMethod(method)
+        val order = createOrder(merchantId, 30L, variantId, qty = 1, now = clock.instant())
+
+        val orderHoldService = InMemoryOrderHoldService { clock.instant() }
+        val holdRequests = listOf(OrderHoldRequest(listingId = "item-$variantId", variantId = variantId, qty = 1))
+        runBlocking { orderHoldService.tryAcquire(order.id, holdRequests, 300) }
+        val holdService = InMemoryHoldService { clock.instant() }
+        runBlocking {
+            holdService.createOrderReserve(
+                order.id,
+                StockReservePayload(
+                    itemId = "item-$variantId",
+                    variantId = variantId,
+                    qty = 1,
+                    userId = order.userId,
+                    ttlSec = 300,
+                    from = ReserveSource.ORDER
+                ),
+                ttlSec = 300
+            )
+        }
+
+        val service = ManualPaymentsService(
+            dbTx,
+            ordersRepository,
+            orderLinesRepository,
+            orderStatusHistoryRepository,
+            merchantsRepository,
+            paymentMethodsRepository,
+            paymentDetailsRepository,
+            paymentClaimsRepository,
+            attachmentsRepository,
+            variantsRepository,
+            orderHoldService,
+            holdService,
+            NoopLockManager(),
+            InMemoryStorage(),
+            crypto,
+            FakeManualPaymentsNotifier(),
+            clock
+        )
+
+        runBlocking {
+            service.selectPaymentMethod(order.id, order.userId, method.type)
+            service.submitClaim(order.id, order.userId, txid = null, comment = "claim", attachments = emptyList())
+            runCatching { service.confirmPayment(order.id, adminId = 99L) }
+            ordersRepository.get(order.id)!!.status shouldBe OrderStatus.canceled
+            orderHoldService.hasActive(order.id, holdRequests) shouldBe false
+            holdService.hasOrderReserve(order.id) shouldBe false
+            val status = dbTx.tx {
+                OrderPaymentClaimsTable
+                    .select(OrderPaymentClaimsTable.status)
+                    .where { OrderPaymentClaimsTable.orderId eq order.id }
+                    .single()[OrderPaymentClaimsTable.status]
+            }
+            status shouldBe PaymentClaimStatus.REJECTED.name
         }
     }
 })

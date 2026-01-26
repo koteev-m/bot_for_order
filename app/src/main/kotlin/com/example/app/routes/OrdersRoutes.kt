@@ -170,7 +170,11 @@ private suspend fun receiveClaimMultipart(
                     part.dispose()
                     return@forEachPart
                 }
-                val contentType = part.contentType?.toString() ?: "application/octet-stream"
+                val contentType = part.contentType
+                    ?.withoutParameters()
+                    ?.toString()
+                    ?.lowercase()
+                    ?: "application/octet-stream"
                 val bytes = readBytesWithLimit(part.provider(), MAX_ATTACHMENT_BYTES)
                 attachments.add(
                     PaymentClaimAttachment(

@@ -147,7 +147,7 @@ object OrdersTable : Table("orders") {
     val providerChargeId = text("provider_charge_id").nullable()
     val telegramPaymentChargeId = text("telegram_payment_charge_id").nullable()
     val invoiceMessageId = integer("invoice_message_id").nullable()
-    val status = varchar("status", 16)
+    val status = varchar("status", 32)
     val paymentClaimedAt = timestamp("payment_claimed_at").nullable()
     val paymentDecidedAt = timestamp("payment_decided_at").nullable()
     val paymentMethodType = varchar("payment_method_type", 32).nullable()

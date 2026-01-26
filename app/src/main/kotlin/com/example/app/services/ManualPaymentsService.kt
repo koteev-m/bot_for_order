@@ -28,6 +28,7 @@ import com.example.domain.hold.HoldService
 import com.example.domain.hold.LockManager
 import com.example.domain.hold.OrderHoldRequest
 import com.example.domain.hold.OrderHoldService
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import java.io.ByteArrayInputStream
 import java.time.Clock
@@ -119,7 +120,13 @@ class ManualPaymentsService(
                     .getOrElse { throw ApiError("payment_instructions_unavailable") }
             }
             PaymentMethodMode.MANUAL_SEND -> {
-                paymentDetailsRepository.getByOrder(orderId)?.text ?: "ожидаем реквизиты"
+                val stored = paymentDetailsRepository.getByOrder(orderId)?.text ?: return PaymentInstructions(
+                    methodType = methodType,
+                    mode = method.mode,
+                    text = "ожидаем реквизиты"
+                )
+                runCatching { crypto.decrypt(stored) }
+                    .getOrElse { "ожидаем реквизиты" }
             }
         }
         return PaymentInstructions(methodType = methodType, mode = method.mode, text = text)
@@ -180,8 +187,9 @@ class ManualPaymentsService(
             throw ApiError("payment_details_not_allowed", HttpStatusCode.Conflict)
         }
         val now = Instant.now(clock)
+        val encrypted = crypto.encrypt(normalized)
         paymentDetailsRepository.upsert(
-            OrderPaymentDetails(orderId = orderId, providedByAdminId = adminId, text = normalized, createdAt = now)
+            OrderPaymentDetails(orderId = orderId, providedByAdminId = adminId, text = encrypted, createdAt = now)
         )
         if (order.status == OrderStatus.AWAITING_PAYMENT_DETAILS) {
             OrderStatusTransitions.requireAllowed(order.status, OrderStatus.AWAITING_PAYMENT)
@@ -207,9 +215,14 @@ class ManualPaymentsService(
                 throw ApiError("payment_confirm_not_allowed", HttpStatusCode.Conflict)
             }
             val claim = paymentClaimsRepository.getSubmittedByOrder(orderId)
-            claim?.let { paymentClaimsRepository.setStatus(it.id, PaymentClaimStatus.ACCEPTED, it.comment) }
             val lines = orderLinesRepository.listByOrder(orderId)
             if (!decrementStock(order, lines)) {
+                claim?.let { paymentClaimsRepository.setStatus(it.id, PaymentClaimStatus.REJECTED, "stock_mismatch") }
+                OrderStatusTransitions.requireAllowed(order.status, OrderStatus.canceled)
+                ordersRepository.setStatus(orderId, OrderStatus.canceled)
+                appendHistory(orderId, OrderStatus.canceled, "stock_mismatch", adminId)
+                orderHoldService.release(orderId, buildOrderHoldRequests(order, lines))
+                holdService.deleteReserveByOrder(orderId)
                 throw ApiError("stock_mismatch", HttpStatusCode.Conflict)
             }
             OrderStatusTransitions.requireAllowed(order.status, OrderStatus.PAID_CONFIRMED)
@@ -217,6 +230,7 @@ class ManualPaymentsService(
             appendHistory(orderId, OrderStatus.PAID_CONFIRMED, "payment_confirmed", adminId)
             orderHoldService.release(orderId, buildOrderHoldRequests(order, lines))
             holdService.deleteReserveByOrder(orderId)
+            claim?.let { paymentClaimsRepository.setStatus(it.id, PaymentClaimStatus.ACCEPTED, it.comment) }
             ordersRepository.get(orderId) ?: order.copy(status = OrderStatus.PAID_CONFIRMED)
         }
     }
@@ -253,6 +267,7 @@ class ManualPaymentsService(
             }
             val targetStatus = resolveAwaitingStatus(orderId, resolveMethod(order))
             OrderStatusTransitions.requireAllowed(order.status, targetStatus)
+            ordersRepository.clearPaymentClaimedAt(orderId)
             ordersRepository.setStatus(orderId, targetStatus)
             appendHistory(orderId, targetStatus, "payment_rejected:$normalized", adminId)
             val ttlRemaining = max(Duration.between(now, claimDeadline).seconds, 1L)
@@ -334,13 +349,20 @@ class ManualPaymentsService(
             throw ApiError("too_many_attachments")
         }
         attachments.forEach { attachment ->
-            if (!ALLOWED_MIME_TYPES.contains(attachment.contentType.lowercase())) {
+            val normalized = normalizeMimeType(attachment.contentType)
+            if (!ALLOWED_MIME_TYPES.contains(normalized)) {
                 throw ApiError("invalid_attachment_type")
             }
             if (attachment.bytes.size.toLong() > MAX_ATTACHMENT_BYTES) {
                 throw ApiError("attachment_too_large")
             }
         }
+    }
+
+    private fun normalizeMimeType(value: String): String {
+        val trimmed = value.trim()
+        val parsed = runCatching { ContentType.parse(trimmed).withoutParameters().toString() }.getOrNull()
+        return (parsed ?: trimmed.substringBefore(";")).trim().lowercase()
     }
 
     private suspend fun storeAttachments(
