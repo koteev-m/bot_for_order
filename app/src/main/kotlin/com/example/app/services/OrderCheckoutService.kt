@@ -20,12 +20,14 @@ import com.example.domain.hold.LockManager
 import com.example.domain.hold.OrderHoldRequest
 import com.example.domain.hold.OrderHoldService
 import io.ktor.http.HttpStatusCode
+import java.security.MessageDigest
 import java.time.Instant
 import org.jetbrains.exposed.sql.batchInsert
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.update
+import org.slf4j.LoggerFactory
 
 private const val ORDER_CREATE_LOCK_WAIT_MS = 500L
 private const val ORDER_CREATE_LOCK_LEASE_MS = 10_000L
@@ -43,24 +45,30 @@ class OrderCheckoutService(
     private val lockManager: LockManager,
     private val orderDedupStore: OrderDedupStore
 ) {
+    private val log = LoggerFactory.getLogger(OrderCheckoutService::class.java)
+
     suspend fun createFromCart(buyerUserId: Long, now: Instant = Instant.now()): OrderWithLines {
         val merchantId = config.merchants.defaultMerchantId
         val cart = cartsRepository.getByMerchantAndBuyer(merchantId, buyerUserId)
             ?: throw ApiError("cart_empty", HttpStatusCode.Conflict)
         val lockKey = "order:create:${cart.id}:${buyerUserId}"
         return lockManager.withLock(lockKey, ORDER_CREATE_LOCK_WAIT_MS, ORDER_CREATE_LOCK_LEASE_MS) {
-            val dedupKey = buildDedupKey(buyerUserId, cart.id, cart.updatedAt)
-            val existingOrderId = orderDedupStore.get(dedupKey)
-            if (existingOrderId != null) {
-                val existingOrder = ordersRepository.get(existingOrderId)
+            val dedupKey = buildDedupKey(buyerUserId, cart.id)
+            val items = cartItemsRepository.listByCart(cart.id)
+            val snapshotHash = if (items.isNotEmpty()) buildSnapshotHash(items) else null
+            val dedupEntry = orderDedupStore.get(dedupKey)?.let { parseDedupValue(it) }
+            if (dedupEntry != null) {
+                val existingOrder = ordersRepository.get(dedupEntry.orderId)
                 if (existingOrder != null) {
-                    val existingLines = orderLinesRepository.listByOrder(existingOrderId)
-                    return@withLock OrderWithLines(existingOrder, existingLines)
+                    if (items.isEmpty() || dedupEntry.snapshotHash == snapshotHash) {
+                        val existingLines = orderLinesRepository.listByOrder(existingOrder.id)
+                        return@withLock OrderWithLines(existingOrder, existingLines)
+                    }
                 }
-                orderDedupStore.delete(dedupKey)
+                runCatching { orderDedupStore.delete(dedupKey) }
+                    .onFailure { error -> log.warn("order_dedup_cleanup_failed orderId={} reason={}", dedupEntry.orderId, error.message) }
             }
 
-            val items = cartItemsRepository.listByCart(cart.id)
             if (items.isEmpty()) throw ApiError("cart_empty", HttpStatusCode.Conflict)
 
             val normalizedCurrencies = items.map { it.currency.uppercase() }.distinct()
@@ -180,16 +188,59 @@ class OrderCheckoutService(
                 throw error
             }
 
-            orderDedupStore.set(dedupKey, orderId, config.cart.addDedupWindowSec.coerceAtLeast(1))
+            val dedupValue = buildDedupValue(orderId, snapshotHash!!)
+            runCatching {
+                orderDedupStore.set(dedupKey, dedupValue, claimTtlSec.coerceAtLeast(1).toInt())
+            }.onFailure { error ->
+                log.warn("order_dedup_set_failed orderId={} reason={}", orderId, error.message)
+            }
             OrderWithLines(order, lines)
         }
     }
 
-    private fun buildDedupKey(userId: Long, cartId: Long, cartUpdatedAt: Instant): String {
-        return "order:dedup:$userId:$cartId:${cartUpdatedAt.toEpochMilli()}"
+    private fun buildDedupKey(userId: Long, cartId: Long): String {
+        return "order:dedup:$userId:$cartId"
+    }
+
+    private fun buildDedupValue(orderId: String, snapshotHash: String): String {
+        return "$orderId:$snapshotHash"
+    }
+
+    private fun parseDedupValue(value: String): DedupEntry? {
+        val parts = value.split(":", limit = 2)
+        if (parts.isEmpty()) return null
+        val orderId = parts.firstOrNull()?.takeIf { it.isNotBlank() } ?: return null
+        val snapshot = parts.getOrNull(1)?.takeIf { it.isNotBlank() }
+        return DedupEntry(orderId, snapshot)
+    }
+
+    private fun buildSnapshotHash(items: List<com.example.domain.CartItem>): String {
+        val normalized = items
+            .map { item ->
+                listOf(
+                    item.listingId,
+                    item.variantId ?: "",
+                    item.qty.toString(),
+                    item.priceSnapshotMinor.toString(),
+                    item.currency.uppercase(),
+                    item.sourceStorefrontId ?: "",
+                    item.sourceChannelId?.toString() ?: "",
+                    item.sourcePostMessageId?.toString() ?: ""
+                ).joinToString("|")
+            }
+            .sorted()
+            .joinToString(";")
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(normalized.toByteArray(Charsets.UTF_8))
+        return hash.joinToString("") { "%02x".format(it) }
     }
 
     private fun generateOrderId(userId: Long): String = "ord_${System.currentTimeMillis()}_$userId"
+
+    private data class DedupEntry(
+        val orderId: String,
+        val snapshotHash: String?
+    )
 }
 
 data class OrderWithLines(

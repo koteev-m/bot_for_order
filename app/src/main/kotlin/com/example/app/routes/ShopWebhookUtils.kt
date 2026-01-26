@@ -108,21 +108,23 @@ internal suspend fun sendItemCard(chatId: Long, itemId: String, deps: ShopWebhoo
 
 internal suspend fun decrementStock(order: Order, lines: List<OrderLine>, deps: ShopWebhookDeps): Boolean {
     if (lines.isEmpty()) return true
-    var ok = true
-    lines.forEach { line ->
-        val variantId = line.variantId ?: return@forEach
-        val updated = deps.variantsRepository.decrementStock(variantId, line.qty)
-        if (!updated) {
+    val decrements = lines
+        .filter { it.variantId != null }
+        .groupBy { it.variantId!! }
+        .mapValues { (_, group) -> group.sumOf { it.qty } }
+    if (decrements.isEmpty()) return true
+    val updated = deps.variantsRepository.decrementStockBatch(decrements)
+    if (!updated) {
+        decrements.forEach { (variantId, qty) ->
             shopLog.error(
                 "order_stock_mismatch orderId={} variant={} qty={}",
                 order.id,
                 variantId,
-                line.qty
+                qty
             )
-            ok = false
         }
     }
-    return ok
+    return updated
 }
 
 internal suspend fun handleStockFailure(order: Order, lines: List<OrderLine>, deps: ShopWebhookDeps) {
@@ -138,6 +140,7 @@ internal suspend fun handleStockFailure(order: Order, lines: List<OrderLine>, de
         )
     )
     deps.orderHoldService.release(order.id, buildOrderHoldRequests(order, lines))
+    deps.holdService.deleteReserveByOrder(order.id)
     notifyStockIssue(deps, order.id)
 }
 

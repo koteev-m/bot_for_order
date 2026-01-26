@@ -2,6 +2,7 @@ package com.example.app.services
 
 import com.example.app.baseTestConfig
 import com.example.app.api.ApiError
+import com.example.app.testutil.InMemoryHoldService
 import com.example.app.testutil.InMemoryOrderDedupStore
 import com.example.app.testutil.InMemoryOrderHoldService
 import com.example.app.testutil.NoopLockManager
@@ -341,7 +342,9 @@ class OrderCheckoutServiceTest : StringSpec({
             merchantsRepository = merchantsRepository,
             historyRepository = orderStatusHistoryRepository,
             orderHoldService = holdService,
+            holdService = InMemoryHoldService { now },
             clients = com.example.bots.TelegramClients("token", "token", null),
+            sendBuyerNotifications = false,
             sweepIntervalSec = 1,
             clock = clock
         )

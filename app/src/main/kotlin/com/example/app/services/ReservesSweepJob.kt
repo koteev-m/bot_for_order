@@ -9,6 +9,7 @@ import com.example.db.OrdersRepository
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
 import com.example.domain.OrderLine
+import com.example.domain.hold.HoldService
 import com.example.domain.hold.OrderHoldService
 import com.example.domain.hold.OrderHoldRequest
 import com.pengrad.telegrambot.request.SendMessage
@@ -37,7 +38,9 @@ data class ReservesSweepDeps(
     val merchantsRepository: MerchantsRepository,
     val historyRepository: OrderStatusHistoryRepository,
     val orderHoldService: OrderHoldService,
+    val holdService: HoldService,
     val clients: TelegramClients,
+    val sendBuyerNotifications: Boolean = true,
     val sweepIntervalSec: Int,
     val clock: Clock = Clock.systemUTC(),
     val log: Logger = LoggerFactory.getLogger(ReservesSweepJob::class.java)
@@ -53,7 +56,9 @@ class ReservesSweepJob(
     private val merchantsRepository = deps.merchantsRepository
     private val historyRepository = deps.historyRepository
     private val orderHoldService = deps.orderHoldService
+    private val holdService = deps.holdService
     private val clients = deps.clients
+    private val sendBuyerNotifications = deps.sendBuyerNotifications
     private val sweepIntervalSec = deps.sweepIntervalSec
     private val clock = deps.clock
     private val log = deps.log
@@ -118,11 +123,13 @@ class ReservesSweepJob(
         )
         val lines = orderLinesRepository.listByOrder(orderId)
         orderHoldService.release(orderId, buildOrderHoldRequests(lines))
+        holdService.deleteReserveByOrder(orderId)
         notifyBuyer(userId, orderId)
         log.info("order_payment_timeout orderId={} user={} reason={}", orderId, userId, reason)
     }
 
     private fun notifyBuyer(userId: Long, orderId: String) {
+        if (!sendBuyerNotifications) return
         val text = RESERVE_EXPIRED_MESSAGE.format(orderId)
         runCatching {
             clients.shopBot.execute(SendMessage(userId, text))
@@ -157,6 +164,7 @@ fun Application.installReservesSweepJob(cfg: AppConfig) {
     val merchantsRepository by inject<MerchantsRepository>()
     val orderStatusRepository by inject<OrderStatusHistoryRepository>()
     val orderHoldService by inject<OrderHoldService>()
+    val holdService by inject<HoldService>()
     val clients by inject<TelegramClients>()
     val deps = ReservesSweepDeps(
         ordersRepository = ordersRepository,
@@ -164,6 +172,7 @@ fun Application.installReservesSweepJob(cfg: AppConfig) {
         merchantsRepository = merchantsRepository,
         historyRepository = orderStatusRepository,
         orderHoldService = orderHoldService,
+        holdService = holdService,
         clients = clients,
         sweepIntervalSec = cfg.server.reservesSweepSec,
         log = environment.log

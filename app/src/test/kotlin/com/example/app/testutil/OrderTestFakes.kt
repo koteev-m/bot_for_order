@@ -1,9 +1,12 @@
 package com.example.app.testutil
 
 import com.example.app.services.OrderDedupStore
+import com.example.domain.hold.HoldService
 import com.example.domain.hold.LockManager
 import com.example.domain.hold.OrderHoldRequest
 import com.example.domain.hold.OrderHoldService
+import com.example.domain.hold.ReserveWriteResult
+import com.example.domain.hold.StockReservePayload
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
@@ -121,6 +124,77 @@ class InMemoryOrderDedupStore(
 
     override fun delete(key: String) {
         storage.remove(key)
+    }
+}
+
+class InMemoryHoldService(
+    private val nowProvider: () -> Instant = { Instant.now() }
+) : HoldService {
+    private data class ReserveEntry(
+        val payload: StockReservePayload,
+        val expiresAt: Instant
+    )
+
+    private val orderReserves = ConcurrentHashMap<String, ReserveEntry>()
+    private val offerReserves = ConcurrentHashMap<String, ReserveEntry>()
+
+    override suspend fun createOfferReserve(
+        offerId: String,
+        payload: StockReservePayload,
+        ttlSec: Long
+    ): ReserveWriteResult {
+        val result = if (offerReserves.containsKey(offerId)) ReserveWriteResult.REFRESHED else ReserveWriteResult.CREATED
+        offerReserves[offerId] = ReserveEntry(payload, nowProvider().plusSeconds(ttlSec.coerceAtLeast(1)))
+        return result
+    }
+
+    override suspend fun createOrderReserve(
+        orderId: String,
+        payload: StockReservePayload,
+        ttlSec: Long
+    ): ReserveWriteResult {
+        val result = if (orderReserves.containsKey(orderId)) ReserveWriteResult.REFRESHED else ReserveWriteResult.CREATED
+        orderReserves[orderId] = ReserveEntry(payload, nowProvider().plusSeconds(ttlSec.coerceAtLeast(1)))
+        return result
+    }
+
+    override suspend fun convertOfferToOrderReserve(
+        offerId: String,
+        orderId: String,
+        extendTtlSec: Long,
+        updatePayload: (StockReservePayload) -> StockReservePayload
+    ): Boolean {
+        val existing = offerReserves.remove(offerId) ?: return false
+        val updatedPayload = updatePayload(existing.payload)
+        orderReserves[orderId] = ReserveEntry(
+            updatedPayload,
+            nowProvider().plusSeconds(extendTtlSec.coerceAtLeast(1))
+        )
+        return true
+    }
+
+    override suspend fun deleteReserveByOrder(orderId: String): Boolean {
+        return orderReserves.remove(orderId) != null
+    }
+
+    override suspend fun deleteReserveByOffer(offerId: String): Boolean {
+        return offerReserves.remove(offerId) != null
+    }
+
+    override suspend fun hasOrderReserve(orderId: String): Boolean {
+        val now = nowProvider()
+        val existing = orderReserves[orderId]
+        if (existing != null && existing.expiresAt.isBefore(now)) {
+            orderReserves.remove(orderId)
+            return false
+        }
+        return existing != null
+    }
+
+    override suspend fun releaseExpired() {
+        val now = nowProvider()
+        orderReserves.entries.removeIf { it.value.expiresAt.isBefore(now) }
+        offerReserves.entries.removeIf { it.value.expiresAt.isBefore(now) }
     }
 }
 

@@ -17,8 +17,10 @@ class OrderDedupStoreRedisson(
     }.getOrNull()
 
     override fun set(key: String, value: String, ttlSec: Int) {
-        val bucket = redisson.getBucket<String>(key)
-        bucket.set(value, ttlSec.toLong(), TimeUnit.SECONDS)
+        runCatching {
+            val bucket = redisson.getBucket<String>(key)
+            bucket.set(value, ttlSec.toLong(), TimeUnit.SECONDS)
+        }
     }
 
     override fun delete(key: String) {

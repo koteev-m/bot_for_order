@@ -8,6 +8,7 @@ import com.example.domain.Order
 import com.example.domain.OrderLine
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
+import com.example.domain.hold.HoldService
 import com.example.domain.hold.OrderHoldService
 import com.example.domain.hold.OrderHoldRequest
 import com.pengrad.telegrambot.request.SendMessage
@@ -22,6 +23,7 @@ class OrderStatusService(
     private val historyRepository: OrderStatusHistoryRepository,
     private val clients: TelegramClients,
     private val orderHoldService: OrderHoldService,
+    private val holdService: HoldService,
     private val clock: Clock = Clock.systemUTC()
 ) {
 
@@ -48,6 +50,7 @@ class OrderStatusService(
         if (newStatus == OrderStatus.canceled) {
             val lines = orderLinesRepository.listByOrder(orderId)
             orderHoldService.release(orderId, buildOrderHoldRequests(order, lines))
+            holdService.deleteReserveByOrder(orderId)
         }
         val entry = OrderStatusEntry(
             id = 0,
