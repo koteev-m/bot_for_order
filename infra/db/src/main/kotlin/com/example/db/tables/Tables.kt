@@ -62,7 +62,7 @@ object ItemsTable : Table("items") {
     val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.RESTRICT)
     val title = text("title")
     val description = text("description")
-    val status = varchar("status", 16)
+    val status = varchar("status", 32)
     val allowBargain = bool("allow_bargain")
     val bargainRulesJson = text("bargain_rules_json").nullable()
     val createdAt = timestamp("created_at")
@@ -150,9 +150,67 @@ object OrdersTable : Table("orders") {
     val status = varchar("status", 16)
     val paymentClaimedAt = timestamp("payment_claimed_at").nullable()
     val paymentDecidedAt = timestamp("payment_decided_at").nullable()
+    val paymentMethodType = varchar("payment_method_type", 32).nullable()
+    val paymentMethodSelectedAt = timestamp("payment_method_selected_at").nullable()
     val createdAt = timestamp("created_at")
     val updatedAt = timestamp("updated_at")
     override val primaryKey = PrimaryKey(id)
+}
+
+object MerchantPaymentMethodsTable : Table("merchant_payment_method") {
+    val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.CASCADE)
+    val type = varchar("type", 32)
+    val mode = varchar("mode", 32)
+    val detailsEncrypted = text("details_encrypted").nullable()
+    val enabled = bool("enabled")
+
+    init {
+        index(false, merchantId, enabled)
+    }
+
+    override val primaryKey = PrimaryKey(merchantId, type)
+}
+
+object OrderPaymentDetailsTable : Table("order_payment_details") {
+    val orderId = reference("order_id", OrdersTable.id, onDelete = ReferenceOption.CASCADE)
+    val providedByAdminId = long("provided_by_admin_id")
+    val text = text("text")
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(orderId)
+}
+
+object OrderPaymentClaimsTable : Table("order_payment_claim") {
+    val id = long("id").autoIncrement()
+    val orderId = reference("order_id", OrdersTable.id, onDelete = ReferenceOption.CASCADE)
+    val methodType = varchar("method_type", 32)
+    val txid = text("txid").nullable()
+    val comment = text("comment").nullable()
+    val createdAt = timestamp("created_at")
+    val status = varchar("status", 16)
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index(false, orderId)
+        index(false, status)
+    }
+}
+
+object OrderAttachmentsTable : Table("order_attachment") {
+    val id = long("id").autoIncrement()
+    val orderId = reference("order_id", OrdersTable.id, onDelete = ReferenceOption.CASCADE)
+    val claimId = optReference("claim_id", OrderPaymentClaimsTable.id, onDelete = ReferenceOption.SET_NULL)
+    val kind = varchar("kind", 32)
+    val storageKey = text("storage_key").nullable()
+    val telegramFileId = text("telegram_file_id").nullable()
+    val mime = text("mime")
+    val size = long("size")
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index(false, orderId)
+        index(false, claimId)
+    }
 }
 
 object OrderLinesTable : Table("order_line") {
@@ -210,7 +268,7 @@ object CartItemsTable : Table("cart_item") {
 object OrderStatusHistoryTable : Table("order_status_history") {
     val id = long("id").autoIncrement()
     val orderId = reference("order_id", OrdersTable.id, onDelete = ReferenceOption.CASCADE)
-    val status = varchar("status", 16)
+    val status = varchar("status", 32)
     val comment = text("comment").nullable()
     val ts = timestamp("ts")
     val actorId = long("actor_id").nullable()

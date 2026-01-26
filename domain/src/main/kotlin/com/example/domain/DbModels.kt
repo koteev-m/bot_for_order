@@ -141,7 +141,42 @@ data class Offer(
 
 @Suppress("EnumNaming")
 @Serializable
-enum class OrderStatus { pending, paid, fulfillment, shipped, delivered, canceled }
+enum class OrderStatus {
+    pending,
+    paid,
+    fulfillment,
+    shipped,
+    delivered,
+    canceled,
+    AWAITING_PAYMENT_DETAILS,
+    AWAITING_PAYMENT,
+    PAYMENT_UNDER_REVIEW,
+    PAID_CONFIRMED
+}
+
+@Serializable
+enum class PaymentMethodType {
+    MANUAL_CARD,
+    MANUAL_CRYPTO
+}
+
+@Serializable
+enum class PaymentMethodMode {
+    AUTO,
+    MANUAL_SEND
+}
+
+@Serializable
+enum class PaymentClaimStatus {
+    SUBMITTED,
+    REJECTED,
+    ACCEPTED
+}
+
+@Serializable
+enum class OrderAttachmentKind {
+    PAYMENT_PROOF
+}
 
 @Serializable
 data class Order(
@@ -167,7 +202,10 @@ data class Order(
     @Serializable(with = InstantIsoSerializer::class)
     val paymentClaimedAt: Instant? = null,
     @Serializable(with = InstantIsoSerializer::class)
-    val paymentDecidedAt: Instant? = null
+    val paymentDecidedAt: Instant? = null,
+    val paymentMethodType: PaymentMethodType? = null,
+    @Serializable(with = InstantIsoSerializer::class)
+    val paymentMethodSelectedAt: Instant? = null
 )
 
 @Serializable
@@ -192,6 +230,50 @@ data class OrderStatusEntry(
     val actorId: Long?,
     @Serializable(with = InstantIsoSerializer::class)
     val ts: Instant
+)
+
+@Serializable
+data class MerchantPaymentMethod(
+    val merchantId: String,
+    val type: PaymentMethodType,
+    val mode: PaymentMethodMode,
+    val detailsEncrypted: String?,
+    val enabled: Boolean
+)
+
+@Serializable
+data class OrderPaymentDetails(
+    val orderId: String,
+    val providedByAdminId: Long,
+    val text: String,
+    @Serializable(with = InstantIsoSerializer::class)
+    val createdAt: Instant
+)
+
+@Serializable
+data class OrderPaymentClaim(
+    val id: Long,
+    val orderId: String,
+    val methodType: PaymentMethodType,
+    val txid: String?,
+    val comment: String?,
+    @Serializable(with = InstantIsoSerializer::class)
+    val createdAt: Instant,
+    val status: PaymentClaimStatus
+)
+
+@Serializable
+data class OrderAttachment(
+    val id: Long,
+    val orderId: String,
+    val claimId: Long?,
+    val kind: OrderAttachmentKind,
+    val storageKey: String?,
+    val telegramFileId: String?,
+    val mime: String,
+    val size: Long,
+    @Serializable(with = InstantIsoSerializer::class)
+    val createdAt: Instant
 )
 
 @Serializable

@@ -14,6 +14,8 @@ object ConfigLoader {
         db = loadDbConfig(),
         redis = loadRedisConfig(),
         payments = loadPaymentsConfig(),
+        manualPayments = loadManualPaymentsConfig(),
+        storage = loadStorageConfig(),
         server = loadServerConfig(),
         fx = loadFxConfig(),
         logging = loadLoggingConfig(),
@@ -130,6 +132,31 @@ object ConfigLoader {
             shippingRegionAllowlist = shippingAllowlist,
             shippingBaseStdMinor = shippingStdMinor,
             shippingBaseExpMinor = shippingExpMinor
+        )
+    }
+
+    private fun loadManualPaymentsConfig(): ManualPaymentsConfig {
+        val key = parseBase64KeyEnv("PAYMENTS_DETAILS_KEY_B64", expectedSize = 32)
+        return ManualPaymentsConfig(detailsEncryptionKey = key)
+    }
+
+    private fun loadStorageConfig(): StorageConfig {
+        val endpoint = requireNonBlank("STORAGE_ENDPOINT")
+        validateStorageEndpoint(endpoint)
+        val region = requireNonBlank("STORAGE_REGION")
+        val bucket = requireNonBlank("STORAGE_BUCKET")
+        val accessKey = requireNonBlank("STORAGE_ACCESS_KEY")
+        val secretKey = requireNonBlank("STORAGE_SECRET_KEY")
+        val presignTtlSeconds = parsePositiveLongEnv("STORAGE_PRESIGN_TTL_SEC", defaultValue = 300)
+        val pathPrefix = System.getenv("STORAGE_PATH_PREFIX")?.trim()?.takeIf { it.isNotBlank() }
+        return StorageConfig(
+            endpoint = endpoint,
+            region = region,
+            bucket = bucket,
+            accessKey = accessKey,
+            secretKey = secretKey,
+            presignTtlSeconds = presignTtlSeconds,
+            pathPrefix = pathPrefix
         )
     }
 

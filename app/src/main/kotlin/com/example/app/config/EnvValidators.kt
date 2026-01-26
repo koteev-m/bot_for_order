@@ -12,6 +12,13 @@ internal fun validateRedisUrl(url: String) {
     require(uri.scheme?.startsWith("redis") == true) { "REDIS_URL must start with redis:// or rediss://" }
 }
 
+internal fun validateStorageEndpoint(url: String) {
+    val uri = runCatching { URI(url) }.getOrElse { error("STORAGE_ENDPOINT invalid: ${it.message}") }
+    require(uri.scheme == "http" || uri.scheme == "https") {
+        "STORAGE_ENDPOINT must start with http:// or https://"
+    }
+}
+
 internal fun parseDisplayCurrencies(raw: String?): Set<String> {
     val fallback = setOf("RUB", "USD", "EUR", "USDT_TS")
     val values = raw?.split(",")

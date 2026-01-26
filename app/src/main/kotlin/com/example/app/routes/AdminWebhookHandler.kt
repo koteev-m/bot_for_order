@@ -7,10 +7,13 @@ import com.example.app.services.MediaStateStore
 import com.example.app.services.MediaType
 import com.example.app.services.OrderStatusService
 import com.example.app.services.OffersService
+import com.example.app.services.ManualPaymentsService
 import com.example.app.services.PendingMedia
+import com.example.app.services.PaymentDetailsStateStore
 import com.example.app.services.PostService
 import com.example.app.tg.TgMessage
 import com.example.app.tg.TgUpdate
+import com.example.app.tg.TgCallbackQuery
 import com.example.bots.TelegramClients
 import com.example.db.ItemMediaRepository
 import com.example.domain.ItemMedia
@@ -20,6 +23,7 @@ import com.pengrad.telegrambot.model.request.InputMediaVideo
 import com.pengrad.telegrambot.model.request.ParseMode
 import com.pengrad.telegrambot.request.SendMediaGroup
 import com.pengrad.telegrambot.request.SendMessage
+import com.pengrad.telegrambot.request.AnswerCallbackQuery
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
@@ -45,6 +49,8 @@ fun Application.installAdminWebhook() {
     val orderStatusService by inject<OrderStatusService>()
     val offersService by inject<OffersService>()
     val inventoryService by inject<InventoryService>()
+    val manualPaymentsService by inject<ManualPaymentsService>()
+    val paymentDetailsStateStore by inject<PaymentDetailsStateStore>()
 
     val json = Json { ignoreUnknownKeys = true }
     val deps = AdminWebhookDeps(
@@ -55,10 +61,12 @@ fun Application.installAdminWebhook() {
         itemsService = itemsService,
         itemMediaRepository = itemMediaRepository,
         mediaStateStore = mediaStateStore,
+        paymentDetailsStateStore = paymentDetailsStateStore,
         postService = postService,
         orderStatusService = orderStatusService,
         offersService = offersService,
-        inventoryService = inventoryService
+        inventoryService = inventoryService,
+        manualPaymentsService = manualPaymentsService
     )
 
     routing {
@@ -77,10 +85,12 @@ private data class AdminWebhookDeps(
     val itemsService: ItemsService,
     val itemMediaRepository: ItemMediaRepository,
     val mediaStateStore: MediaStateStore,
+    val paymentDetailsStateStore: PaymentDetailsStateStore,
     val postService: PostService,
     val orderStatusService: OrderStatusService,
     val offersService: OffersService,
-    val inventoryService: InventoryService
+    val inventoryService: InventoryService,
+    val manualPaymentsService: ManualPaymentsService
 )
 
 private suspend fun handleAdminUpdate(
@@ -94,6 +104,13 @@ private suspend fun handleAdminUpdate(
             call.respond(HttpStatusCode.OK)
             return
         }
+
+    val callback = update.callbackQuery
+    if (callback != null) {
+        handleAdminCallback(callback, deps)
+        call.respond(HttpStatusCode.OK)
+        return
+    }
 
     val message = update.message
     val fromId = message?.from?.id
@@ -115,7 +132,11 @@ private suspend fun handleAdminUpdate(
         reply("⛔ Команда доступна только администраторам.")
     } else {
         val text = message.text?.trim().orEmpty()
-        if (text.startsWith("/")) {
+        val pendingDetailsOrderId = deps.paymentDetailsStateStore.get(fromId)
+        if (pendingDetailsOrderId != null && text.isNotBlank() && !text.startsWith("/")) {
+            handlePaymentDetailsMessage(chatId, fromId, pendingDetailsOrderId, text, deps, reply)
+            deps.paymentDetailsStateStore.clear(fromId)
+        } else if (text.startsWith("/")) {
             handleAdminCommand(chatId, fromId, text, deps, reply)
         } else {
             handleMediaCollection(fromId, chatId, message, deps, reply)
@@ -123,6 +144,72 @@ private suspend fun handleAdminUpdate(
     }
 
     call.respond(HttpStatusCode.OK)
+}
+
+private suspend fun handleAdminCallback(callback: TgCallbackQuery, deps: AdminWebhookDeps) {
+    val fromId = callback.from.id
+    val chatId = callback.message?.chat?.id ?: fromId
+    val data = callback.data ?: return
+    val reply: (String) -> Unit = { html ->
+        deps.clients.adminBot.execute(
+            SendMessage(chatId, html)
+                .parseMode(ParseMode.HTML)
+                .disablePreview()
+        )
+    }
+    if (!deps.config.telegram.adminIds.contains(fromId)) {
+        reply("⛔ Команда доступна только администраторам.")
+        deps.clients.adminBot.execute(AnswerCallbackQuery(callback.id))
+        return
+    }
+    val parts = data.split(":", limit = 3)
+    if (parts.size < 3 || parts[0] != "payment") {
+        deps.clients.adminBot.execute(AnswerCallbackQuery(callback.id))
+        return
+    }
+    val action = parts[1]
+    val orderId = parts[2]
+    when (action) {
+        "confirm" -> {
+            runCatching { deps.manualPaymentsService.confirmPayment(orderId, fromId) }
+                .onSuccess { reply("✅ Оплата подтверждена для заказа <code>$orderId</code>.") }
+                .onFailure { reply("⚠️ Не удалось подтвердить оплату.") }
+        }
+        "reject" -> {
+            runCatching { deps.manualPaymentsService.rejectPayment(orderId, fromId, "not_paid") }
+                .onSuccess { reply("❌ Оплата отклонена для заказа <code>$orderId</code>.") }
+                .onFailure { reply("⚠️ Не удалось отклонить оплату.") }
+        }
+        "clarify" -> {
+            runCatching { deps.manualPaymentsService.requestClarification(orderId) }
+                .onSuccess { reply("🕒 Запрос на уточнение отправлен для заказа <code>$orderId</code>.") }
+                .onFailure { reply("⚠️ Не удалось отправить запрос на уточнение.") }
+        }
+        "details" -> {
+            deps.paymentDetailsStateStore.start(fromId, orderId)
+            reply("📤 Отправьте реквизиты одним сообщением для заказа <code>$orderId</code>.")
+        }
+    }
+    deps.clients.adminBot.execute(AnswerCallbackQuery(callback.id))
+}
+
+private suspend fun handlePaymentDetailsMessage(
+    chatId: Long,
+    adminId: Long,
+    orderId: String,
+    text: String,
+    deps: AdminWebhookDeps,
+    reply: (String) -> Unit
+) {
+    runCatching { deps.manualPaymentsService.setPaymentDetails(orderId, adminId, text) }
+        .onSuccess { reply("✅ Реквизиты сохранены для заказа <code>$orderId</code>.") }
+        .onFailure {
+            deps.clients.adminBot.execute(
+                SendMessage(chatId, "⚠️ Не удалось сохранить реквизиты.")
+                    .parseMode(ParseMode.HTML)
+                    .disablePreview()
+            )
+        }
 }
 
 private suspend fun handleAdminCommand(
@@ -308,4 +395,3 @@ private fun handleMediaCollection(
 
     return true
 }
-

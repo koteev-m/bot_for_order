@@ -10,6 +10,8 @@ data class AppConfig(
     val db: DbConfig,
     val redis: RedisConfig,
     val payments: PaymentsConfig,
+    val manualPayments: ManualPaymentsConfig,
+    val storage: StorageConfig,
     val server: ServerConfig,
     val fx: FxConfig,
     val logging: LoggingConfig,
@@ -67,6 +69,20 @@ data class PaymentsConfig(
     val shippingRegionAllowlist: Set<String>,
     val shippingBaseStdMinor: Long,
     val shippingBaseExpMinor: Long
+)
+
+data class ManualPaymentsConfig(
+    val detailsEncryptionKey: ByteArray
+)
+
+data class StorageConfig(
+    val endpoint: String,
+    val region: String,
+    val bucket: String,
+    val accessKey: String,
+    val secretKey: String,
+    val presignTtlSeconds: Long,
+    val pathPrefix: String?
 )
 
 data class ServerConfig(

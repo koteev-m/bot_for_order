@@ -19,6 +19,7 @@ kvision = "9.1.1"
 micrometer = "1.13.6"
 logstash = "8.1"
 testcontainers = "1.20.3"
+awsSdk = "2.25.69"
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
@@ -80,3 +81,4 @@ logstash-logback-encoder = { module = "net.logstash.logback:logstash-logback-enc
 slf4j-api = { module = "org.slf4j:slf4j-api", version = "2.0.16" }
 micrometer-core = { module = "io.micrometer:micrometer-core", version.ref = "micrometer" }
 micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus", version.ref = "micrometer" }
+aws-sdk-s3 = { module = "software.amazon.awssdk:s3", version.ref = "awsSdk" }

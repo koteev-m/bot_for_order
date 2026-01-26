@@ -8,12 +8,14 @@ import com.example.app.config.HealthConfig
 import com.example.app.config.LinkContextConfig
 import com.example.app.config.LinkResolveRateLimitConfig
 import com.example.app.config.LoggingConfig
+import com.example.app.config.ManualPaymentsConfig
 import com.example.app.config.MerchantsConfig
 import com.example.app.config.MetricsConfig
 import com.example.app.config.PaymentsConfig
 import com.example.app.config.RedisConfig
 import com.example.app.config.SecurityConfig
 import com.example.app.config.ServerConfig
+import com.example.app.config.StorageConfig
 import com.example.app.config.TelegramConfig
 import com.example.app.config.TelegramInitDataConfig
 
@@ -55,6 +57,18 @@ internal fun baseTestConfig(
         shippingRegionAllowlist = emptySet(),
         shippingBaseStdMinor = 0,
         shippingBaseExpMinor = 0
+    ),
+    manualPayments = ManualPaymentsConfig(
+        detailsEncryptionKey = ByteArray(32) { 1 }
+    ),
+    storage = StorageConfig(
+        endpoint = "http://localhost",
+        region = "us-east-1",
+        bucket = "test",
+        accessKey = "key",
+        secretKey = "secret",
+        presignTtlSeconds = 300,
+        pathPrefix = null
     ),
     server = ServerConfig(
         publicBaseUrl = "http://localhost",

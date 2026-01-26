@@ -41,10 +41,7 @@ class OrderStatusService(
             return ChangeResult(order = order, changed = false)
         }
 
-        val allowedTargets = ALLOWED_TRANSITIONS[order.status].orEmpty()
-        require(allowedTargets.contains(newStatus)) {
-            "transition ${order.status} -> $newStatus is not allowed"
-        }
+        OrderStatusTransitions.requireAllowed(order.status, newStatus)
 
         ordersRepository.setStatus(orderId, newStatus)
         if (newStatus == OrderStatus.canceled) {
@@ -115,17 +112,9 @@ class OrderStatusService(
     }
 
     companion object {
-        private val ALLOWED_TRANSITIONS: Map<OrderStatus, Set<OrderStatus>> = mapOf(
-            OrderStatus.pending to setOf(OrderStatus.paid, OrderStatus.canceled),
-            OrderStatus.paid to setOf(OrderStatus.fulfillment, OrderStatus.canceled),
-            OrderStatus.fulfillment to setOf(OrderStatus.shipped, OrderStatus.canceled),
-            OrderStatus.shipped to setOf(OrderStatus.delivered, OrderStatus.canceled),
-            OrderStatus.delivered to emptySet(),
-            OrderStatus.canceled to emptySet()
-        )
-
         private val STATUS_NOTIFICATIONS: Map<OrderStatus, String> = mapOf(
             OrderStatus.paid to PAID_MESSAGE,
+            OrderStatus.PAID_CONFIRMED to PAID_MESSAGE,
             OrderStatus.fulfillment to FULFILLMENT_MESSAGE,
             OrderStatus.shipped to SHIPPED_MESSAGE,
             OrderStatus.delivered to DELIVERED_MESSAGE,

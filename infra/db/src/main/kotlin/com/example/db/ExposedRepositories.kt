@@ -7,10 +7,14 @@ import com.example.db.tables.ItemMediaTable
 import com.example.db.tables.ItemsTable
 import com.example.db.tables.LinkContextsTable
 import com.example.db.tables.MerchantsTable
+import com.example.db.tables.MerchantPaymentMethodsTable
 import com.example.db.tables.OffersTable
 import com.example.db.tables.OrderStatusHistoryTable
 import com.example.db.tables.OrderLinesTable
 import com.example.db.tables.OrdersTable
+import com.example.db.tables.OrderAttachmentsTable
+import com.example.db.tables.OrderPaymentClaimsTable
+import com.example.db.tables.OrderPaymentDetailsTable
 import com.example.db.tables.PostsTable
 import com.example.db.tables.PricesDisplayTable
 import com.example.db.tables.StorefrontsTable
@@ -27,12 +31,20 @@ import com.example.domain.LinkAction
 import com.example.domain.LinkButton
 import com.example.domain.LinkContext
 import com.example.domain.Merchant
+import com.example.domain.MerchantPaymentMethod
 import com.example.domain.Offer
 import com.example.domain.OfferStatus
 import com.example.domain.Order
+import com.example.domain.OrderAttachment
+import com.example.domain.OrderAttachmentKind
 import com.example.domain.OrderLine
+import com.example.domain.OrderPaymentClaim
+import com.example.domain.OrderPaymentDetails
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
+import com.example.domain.PaymentClaimStatus
+import com.example.domain.PaymentMethodMode
+import com.example.domain.PaymentMethodType
 import com.example.domain.Post
 import com.example.domain.PricesDisplay
 import com.example.domain.Storefront
@@ -621,6 +633,8 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
                 it[status] = order.status.name
                 it[paymentClaimedAt] = order.paymentClaimedAt
                 it[paymentDecidedAt] = order.paymentDecidedAt
+                it[paymentMethodType] = order.paymentMethodType?.name
+                it[paymentMethodSelectedAt] = order.paymentMethodSelectedAt
                 it[createdAt] = order.createdAt
                 it[updatedAt] = order.updatedAt
             }
@@ -652,7 +666,9 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
                     createdAt = it[OrdersTable.createdAt],
                     updatedAt = it[OrdersTable.updatedAt],
                     paymentClaimedAt = it[OrdersTable.paymentClaimedAt],
-                    paymentDecidedAt = it[OrdersTable.paymentDecidedAt]
+                    paymentDecidedAt = it[OrdersTable.paymentDecidedAt],
+                    paymentMethodType = it[OrdersTable.paymentMethodType]?.let(PaymentMethodType::valueOf),
+                    paymentMethodSelectedAt = it[OrdersTable.paymentMethodSelectedAt]
                 )
             }
     }
@@ -682,7 +698,9 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
                     createdAt = it[OrdersTable.createdAt],
                     updatedAt = it[OrdersTable.updatedAt],
                     paymentClaimedAt = it[OrdersTable.paymentClaimedAt],
-                    paymentDecidedAt = it[OrdersTable.paymentDecidedAt]
+                    paymentDecidedAt = it[OrdersTable.paymentDecidedAt],
+                    paymentMethodType = it[OrdersTable.paymentMethodType]?.let(PaymentMethodType::valueOf),
+                    paymentMethodSelectedAt = it[OrdersTable.paymentMethodSelectedAt]
                 )
             }
     }
@@ -691,7 +709,7 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
         tx.tx {
             OrdersTable.update({ OrdersTable.id eq id }) {
                 it[OrdersTable.status] = status.name
-                if (status == OrderStatus.canceled) {
+                if (status == OrderStatus.canceled || status == OrderStatus.PAID_CONFIRMED) {
                     it[OrdersTable.paymentDecidedAt] = CurrentTimestamp()
                 }
                 it[OrdersTable.updatedAt] = CurrentTimestamp()
@@ -735,11 +753,26 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
         } > 0
     }
 
+    override suspend fun setPaymentMethodSelection(orderId: String, type: PaymentMethodType, selectedAt: Instant): Boolean =
+        tx.tx {
+            OrdersTable.update({
+                (OrdersTable.id eq orderId) and OrdersTable.paymentMethodType.isNull()
+            }) {
+                it[paymentMethodType] = type.name
+                it[paymentMethodSelectedAt] = selectedAt
+                it[updatedAt] = CurrentTimestamp()
+            } > 0
+        }
+
     override suspend fun listPendingClaimOlderThan(cutoff: Instant): List<Order> = tx.tx {
         OrdersTable
             .selectAll()
             .where {
-                (OrdersTable.status eq OrderStatus.pending.name) and
+                (OrdersTable.status inList listOf(
+                    OrderStatus.pending.name,
+                    OrderStatus.AWAITING_PAYMENT_DETAILS.name,
+                    OrderStatus.AWAITING_PAYMENT.name
+                )) and
                     OrdersTable.paymentClaimedAt.isNull() and
                     (OrdersTable.createdAt lessEq cutoff)
             }
@@ -750,7 +783,10 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
         OrdersTable
             .selectAll()
             .where {
-                (OrdersTable.status eq OrderStatus.pending.name) and
+                (OrdersTable.status inList listOf(
+                    OrderStatus.pending.name,
+                    OrderStatus.PAYMENT_UNDER_REVIEW.name
+                )) and
                     OrdersTable.paymentClaimedAt.isNotNull() and
                     (OrdersTable.paymentClaimedAt lessEq cutoff)
             }
@@ -783,7 +819,9 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
         createdAt = this[OrdersTable.createdAt],
         updatedAt = this[OrdersTable.updatedAt],
         paymentClaimedAt = this[OrdersTable.paymentClaimedAt],
-        paymentDecidedAt = this[OrdersTable.paymentDecidedAt]
+        paymentDecidedAt = this[OrdersTable.paymentDecidedAt],
+        paymentMethodType = this[OrdersTable.paymentMethodType]?.let(PaymentMethodType::valueOf),
+        paymentMethodSelectedAt = this[OrdersTable.paymentMethodSelectedAt]
     )
 }
 
@@ -865,6 +903,170 @@ class OrderStatusHistoryRepositoryExposed(private val tx: DatabaseTx) : OrderSta
             )
         }
     }
+}
+
+class MerchantPaymentMethodsRepositoryExposed(private val tx: DatabaseTx) : MerchantPaymentMethodsRepository {
+    override suspend fun getEnabledMethod(merchantId: String, type: PaymentMethodType): MerchantPaymentMethod? = tx.tx {
+        MerchantPaymentMethodsTable
+            .selectAll()
+            .where {
+                (MerchantPaymentMethodsTable.merchantId eq merchantId) and
+                    (MerchantPaymentMethodsTable.type eq type.name) and
+                    (MerchantPaymentMethodsTable.enabled eq true)
+            }
+            .singleOrNull()
+            ?.toMerchantPaymentMethod()
+    }
+
+    override suspend fun getMethod(merchantId: String, type: PaymentMethodType): MerchantPaymentMethod? = tx.tx {
+        MerchantPaymentMethodsTable
+            .selectAll()
+            .where {
+                (MerchantPaymentMethodsTable.merchantId eq merchantId) and
+                    (MerchantPaymentMethodsTable.type eq type.name)
+            }
+            .singleOrNull()
+            ?.toMerchantPaymentMethod()
+    }
+
+    private fun ResultRow.toMerchantPaymentMethod(): MerchantPaymentMethod =
+        MerchantPaymentMethod(
+            merchantId = this[MerchantPaymentMethodsTable.merchantId],
+            type = PaymentMethodType.valueOf(this[MerchantPaymentMethodsTable.type]),
+            mode = PaymentMethodMode.valueOf(this[MerchantPaymentMethodsTable.mode]),
+            detailsEncrypted = this[MerchantPaymentMethodsTable.detailsEncrypted],
+            enabled = this[MerchantPaymentMethodsTable.enabled]
+        )
+}
+
+class OrderPaymentDetailsRepositoryExposed(private val tx: DatabaseTx) : OrderPaymentDetailsRepository {
+    override suspend fun getByOrder(orderId: String): OrderPaymentDetails? = tx.tx {
+        OrderPaymentDetailsTable
+            .selectAll()
+            .where { OrderPaymentDetailsTable.orderId eq orderId }
+            .singleOrNull()
+            ?.toDetails()
+    }
+
+    override suspend fun upsert(details: OrderPaymentDetails) {
+        tx.tx {
+            val updated = OrderPaymentDetailsTable.update({ OrderPaymentDetailsTable.orderId eq details.orderId }) {
+                it[providedByAdminId] = details.providedByAdminId
+                it[text] = details.text
+                it[createdAt] = details.createdAt
+            }
+            if (updated == 0) {
+                OrderPaymentDetailsTable.insert {
+                    it[orderId] = details.orderId
+                    it[providedByAdminId] = details.providedByAdminId
+                    it[text] = details.text
+                    it[createdAt] = details.createdAt
+                }
+            }
+        }
+    }
+
+    private fun ResultRow.toDetails(): OrderPaymentDetails =
+        OrderPaymentDetails(
+            orderId = this[OrderPaymentDetailsTable.orderId],
+            providedByAdminId = this[OrderPaymentDetailsTable.providedByAdminId],
+            text = this[OrderPaymentDetailsTable.text],
+            createdAt = this[OrderPaymentDetailsTable.createdAt]
+        )
+}
+
+class OrderPaymentClaimsRepositoryExposed(private val tx: DatabaseTx) : OrderPaymentClaimsRepository {
+    override suspend fun getSubmittedByOrder(orderId: String): OrderPaymentClaim? = tx.tx {
+        OrderPaymentClaimsTable
+            .selectAll()
+            .where {
+                (OrderPaymentClaimsTable.orderId eq orderId) and
+                    (OrderPaymentClaimsTable.status eq PaymentClaimStatus.SUBMITTED.name)
+            }
+            .singleOrNull()
+            ?.toClaim()
+    }
+
+    override suspend fun insertClaim(claim: OrderPaymentClaim): Long = tx.tx {
+        OrderPaymentClaimsTable.insert {
+            it[orderId] = claim.orderId
+            it[methodType] = claim.methodType.name
+            it[txid] = claim.txid
+            it[comment] = claim.comment
+            it[createdAt] = claim.createdAt
+            it[status] = claim.status.name
+        }.requireGeneratedId(OrderPaymentClaimsTable.id)
+    }
+
+    override suspend fun setStatus(id: Long, status: PaymentClaimStatus, comment: String?) {
+        tx.tx {
+            OrderPaymentClaimsTable.update({ OrderPaymentClaimsTable.id eq id }) {
+                it[OrderPaymentClaimsTable.status] = status.name
+                it[OrderPaymentClaimsTable.comment] = comment
+            }
+        }
+    }
+
+    private fun ResultRow.toClaim(): OrderPaymentClaim =
+        OrderPaymentClaim(
+            id = this[OrderPaymentClaimsTable.id],
+            orderId = this[OrderPaymentClaimsTable.orderId],
+            methodType = PaymentMethodType.valueOf(this[OrderPaymentClaimsTable.methodType]),
+            txid = this[OrderPaymentClaimsTable.txid],
+            comment = this[OrderPaymentClaimsTable.comment],
+            createdAt = this[OrderPaymentClaimsTable.createdAt],
+            status = PaymentClaimStatus.valueOf(this[OrderPaymentClaimsTable.status])
+        )
+}
+
+class OrderAttachmentsRepositoryExposed(private val tx: DatabaseTx) : OrderAttachmentsRepository {
+    override suspend fun create(attachment: OrderAttachment): Long = tx.tx {
+        OrderAttachmentsTable.insert {
+            it[orderId] = attachment.orderId
+            it[claimId] = attachment.claimId
+            it[kind] = attachment.kind.name
+            it[storageKey] = attachment.storageKey
+            it[telegramFileId] = attachment.telegramFileId
+            it[mime] = attachment.mime
+            it[size] = attachment.size
+            it[createdAt] = attachment.createdAt
+        }.requireGeneratedId(OrderAttachmentsTable.id)
+    }
+
+    override suspend fun getById(id: Long): OrderAttachment? = tx.tx {
+        OrderAttachmentsTable
+            .selectAll()
+            .where { OrderAttachmentsTable.id eq id }
+            .singleOrNull()
+            ?.toAttachment()
+    }
+
+    override suspend fun listByOrder(orderId: String): List<OrderAttachment> = tx.tx {
+        OrderAttachmentsTable
+            .selectAll()
+            .where { OrderAttachmentsTable.orderId eq orderId }
+            .map { it.toAttachment() }
+    }
+
+    override suspend fun listByOrderAndKind(orderId: String, kind: OrderAttachmentKind): List<OrderAttachment> = tx.tx {
+        OrderAttachmentsTable
+            .selectAll()
+            .where { (OrderAttachmentsTable.orderId eq orderId) and (OrderAttachmentsTable.kind eq kind.name) }
+            .map { it.toAttachment() }
+    }
+
+    private fun ResultRow.toAttachment(): OrderAttachment =
+        OrderAttachment(
+            id = this[OrderAttachmentsTable.id],
+            orderId = this[OrderAttachmentsTable.orderId],
+            claimId = this[OrderAttachmentsTable.claimId],
+            kind = OrderAttachmentKind.valueOf(this[OrderAttachmentsTable.kind]),
+            storageKey = this[OrderAttachmentsTable.storageKey],
+            telegramFileId = this[OrderAttachmentsTable.telegramFileId],
+            mime = this[OrderAttachmentsTable.mime],
+            size = this[OrderAttachmentsTable.size],
+            createdAt = this[OrderAttachmentsTable.createdAt]
+        )
 }
 
 class CartsRepositoryExposed(private val tx: DatabaseTx) : CartsRepository {

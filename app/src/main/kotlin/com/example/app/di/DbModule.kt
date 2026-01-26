@@ -19,8 +19,14 @@ import com.example.db.MerchantsRepository
 import com.example.db.MerchantsRepositoryExposed
 import com.example.db.OffersRepository
 import com.example.db.OffersRepositoryExposed
+import com.example.db.OrderAttachmentsRepository
+import com.example.db.OrderAttachmentsRepositoryExposed
 import com.example.db.OrderLinesRepository
 import com.example.db.OrderLinesRepositoryExposed
+import com.example.db.OrderPaymentClaimsRepository
+import com.example.db.OrderPaymentClaimsRepositoryExposed
+import com.example.db.OrderPaymentDetailsRepository
+import com.example.db.OrderPaymentDetailsRepositoryExposed
 import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrderStatusHistoryRepositoryExposed
 import com.example.db.OrdersRepository
@@ -34,6 +40,8 @@ import com.example.db.StorefrontsRepositoryExposed
 import com.example.db.VariantsRepository
 import com.example.db.VariantsRepositoryExposed
 import com.example.db.WatchlistRepositoryExposed
+import com.example.db.MerchantPaymentMethodsRepository
+import com.example.db.MerchantPaymentMethodsRepositoryExposed
 import com.example.domain.watchlist.WatchlistRepository
 import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
@@ -71,6 +79,10 @@ fun dbModule(cfg: AppConfig) = module {
     single<OrdersRepository> { OrdersRepositoryExposed(get()) }
     single<OrderLinesRepository> { OrderLinesRepositoryExposed(get()) }
     single<OrderStatusHistoryRepository> { OrderStatusHistoryRepositoryExposed(get()) }
+    single<MerchantPaymentMethodsRepository> { MerchantPaymentMethodsRepositoryExposed(get()) }
+    single<OrderPaymentDetailsRepository> { OrderPaymentDetailsRepositoryExposed(get()) }
+    single<OrderPaymentClaimsRepository> { OrderPaymentClaimsRepositoryExposed(get()) }
+    single<OrderAttachmentsRepository> { OrderAttachmentsRepositoryExposed(get()) }
     single<WatchlistRepository> { WatchlistRepositoryExposed(get()) }
     single<CartsRepository> { CartsRepositoryExposed(get()) }
     single<CartItemsRepository> { CartItemsRepositoryExposed(get()) }
