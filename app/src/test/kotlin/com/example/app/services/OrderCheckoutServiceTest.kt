@@ -37,8 +37,8 @@ import kotlinx.coroutines.runBlocking
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assumptions
 import org.testcontainers.containers.PostgreSQLContainer
-import io.ktor.server.application.Application
-import io.ktor.server.testing.TestApplicationEnvironment
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.netty.Netty
 
 class OrderCheckoutServiceTest : StringSpec({
     val dockerAvailable = isDockerAvailable()
@@ -348,7 +348,8 @@ class OrderCheckoutServiceTest : StringSpec({
             sweepIntervalSec = 1,
             clock = clock
         )
-        val job = ReservesSweepJob(application = Application(TestApplicationEnvironment()), deps = deps)
+        val server = embeddedServer(Netty, port = 0) { }
+        val job = ReservesSweepJob(application = server.application, deps = deps)
         runBlocking { job.runOnceForTests() }
 
         val canceled = ordersRepository.get(order.id)
