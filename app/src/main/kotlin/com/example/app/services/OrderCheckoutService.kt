@@ -26,6 +26,7 @@ import org.jetbrains.exposed.sql.batchInsert
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.deleteWhere
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.update
 import org.slf4j.LoggerFactory
 
@@ -147,25 +148,25 @@ class OrderCheckoutService(
             try {
                 dbTx.tx {
                     OrdersTable.insert {
-                        it[id] = order.id
-                        it[merchantId] = order.merchantId
-                        it[userId] = order.userId
-                        it[itemId] = order.itemId
-                        it[variantId] = order.variantId
-                        it[qty] = order.qty
-                        it[currency] = order.currency
-                        it[amountMinor] = order.amountMinor
-                        it[deliveryOption] = order.deliveryOption
-                        it[addressJson] = order.addressJson
-                        it[provider] = order.provider
-                        it[providerChargeId] = order.providerChargeId
-                        it[telegramPaymentChargeId] = order.telegramPaymentChargeId
-                        it[invoiceMessageId] = order.invoiceMessageId
-                        it[status] = order.status.name
-                        it[paymentClaimedAt] = order.paymentClaimedAt
-                        it[paymentDecidedAt] = order.paymentDecidedAt
-                        it[createdAt] = order.createdAt
-                        it[updatedAt] = order.updatedAt
+                        it[OrdersTable.id] = order.id
+                        it[OrdersTable.merchantId] = order.merchantId
+                        it[OrdersTable.userId] = order.userId
+                        it[OrdersTable.itemId] = order.itemId
+                        it[OrdersTable.variantId] = order.variantId
+                        it[OrdersTable.qty] = order.qty
+                        it[OrdersTable.currency] = order.currency
+                        it[OrdersTable.amountMinor] = order.amountMinor
+                        it[OrdersTable.deliveryOption] = order.deliveryOption
+                        it[OrdersTable.addressJson] = order.addressJson
+                        it[OrdersTable.provider] = order.provider
+                        it[OrdersTable.providerChargeId] = order.providerChargeId
+                        it[OrdersTable.telegramPaymentChargeId] = order.telegramPaymentChargeId
+                        it[OrdersTable.invoiceMessageId] = order.invoiceMessageId
+                        it[OrdersTable.status] = order.status.name
+                        it[OrdersTable.paymentClaimedAt] = order.paymentClaimedAt
+                        it[OrdersTable.paymentDecidedAt] = order.paymentDecidedAt
+                        it[OrdersTable.createdAt] = order.createdAt
+                        it[OrdersTable.updatedAt] = order.updatedAt
                     }
                     OrderLinesTable.batchInsert(lines) { line ->
                         this[OrderLinesTable.orderId] = line.orderId
