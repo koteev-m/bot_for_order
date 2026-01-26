@@ -50,7 +50,8 @@ internal val HELP_REPLY = """
     1) /media &lt;ITEM_ID&gt; → собрать 2–10 фото/видео → /media_done
     2) /preview &lt;ITEM_ID&gt; → проверить альбом
     3) <b>/post &lt;ITEM_ID&gt;</b> → отправить альбом в канал и добавить кнопку «Купить»
-    В канале используется URL-кнопка (Direct Link Mini App ?startapp=).
+    В канале используются URL-кнопки «Добавить в корзину» и «Оформить».
+    Direct Link Mini App использует ?startapp=<opaque_token>.
     <b>/counter &lt;OFFER_ID&gt; &lt;amount&gt;</b> — отправить контр-офер покупателю
     <b>/stock &lt;VARIANT_ID&gt; &lt;STOCK&gt;</b> — установить остаток варианта
 """.trimIndent()

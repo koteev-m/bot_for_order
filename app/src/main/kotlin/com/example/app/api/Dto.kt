@@ -123,3 +123,34 @@ data class WatchlistSubscribeRequest(
 data class SimpleResponse(
     val ok: Boolean = true
 )
+
+@Serializable
+data class LinkResolveRequest(
+    val token: String
+)
+
+@Serializable
+data class LinkSource(
+    val merchantId: String? = null,
+    val storefrontId: String? = null,
+    val channelId: Long? = null,
+    val postId: Long? = null
+)
+
+@Serializable
+data class LinkItemSummary(
+    val itemId: String,
+    val title: String,
+    val description: String
+)
+
+@Serializable
+data class LinkResolveResponse(
+    val action: String,
+    val button: String? = null,
+    val item: LinkItemSummary? = null,
+    val variantHint: String? = null,
+    val requiresVariant: Boolean = false,
+    val source: LinkSource = LinkSource(),
+    val legacy: Boolean = false
+)

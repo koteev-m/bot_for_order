@@ -1,6 +1,8 @@
 package com.example.app.routes
 
 import com.example.app.config.AppConfig
+import com.example.app.services.LinkContextService
+import com.example.app.services.LinkResolveResult
 import com.example.app.services.ORDER_PAYLOAD_PREFIX
 import com.example.app.services.PaymentsService
 import com.example.app.tg.TgMessage
@@ -9,7 +11,6 @@ import com.example.app.tg.TgUpdate
 import com.example.app.tg.TgPreCheckoutQuery
 import com.example.app.tg.TgShippingQuery
 import com.example.bots.TelegramClients
-import com.example.bots.startapp.StartAppCodec
 import com.example.db.ItemsRepository
 import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrdersRepository
@@ -46,6 +47,7 @@ fun Application.installShopWebhook() {
     val ordersRepo by inject<OrdersRepository>()
     val orderStatusRepo by inject<OrderStatusHistoryRepository>()
     val paymentsService by inject<PaymentsService>()
+    val linkContextService by inject<LinkContextService>()
     val lockManager by inject<LockManager>()
     val holdService by inject<HoldService>()
 
@@ -58,6 +60,7 @@ fun Application.installShopWebhook() {
         ordersRepository = ordersRepo,
         orderStatusRepository = orderStatusRepo,
         paymentsService = paymentsService,
+        linkContextService = linkContextService,
         lockManager = lockManager,
         holdService = holdService,
         json = Json { ignoreUnknownKeys = true }
@@ -80,6 +83,7 @@ internal data class ShopWebhookDeps(
     val ordersRepository: OrdersRepository,
     val orderStatusRepository: OrderStatusHistoryRepository,
     val paymentsService: PaymentsService,
+    val linkContextService: LinkContextService,
     val lockManager: LockManager,
     val holdService: HoldService,
     val json: Json
@@ -158,12 +162,16 @@ private suspend fun handleStart(chatId: Long, args: String, deps: ShopWebhookDep
         return
     }
 
-    val param = runCatching { StartAppCodec.decode(args) }.getOrElse {
+    val resolved = deps.linkContextService.resolve(args)
+    val itemId = when (resolved) {
+        is LinkResolveResult.Found -> resolved.context.itemId
+        LinkResolveResult.Expired, LinkResolveResult.Revoked, LinkResolveResult.NotFound -> null
+    }
+    if (itemId == null) {
         deps.clients.replyShopHtml(chatId, INVALID_PARAM_MESSAGE)
         return
     }
-
-    sendItemCard(chatId = chatId, itemId = param.itemId, deps = deps)
+    sendItemCard(chatId = chatId, itemId = itemId, deps = deps)
 }
 
 private suspend fun handleOpen(chatId: Long, args: String, deps: ShopWebhookDeps) {

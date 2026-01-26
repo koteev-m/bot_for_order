@@ -2,6 +2,7 @@ package com.example.miniapp
 
 import com.example.miniapp.api.ApiClient
 import com.example.miniapp.api.ItemResponse
+import com.example.miniapp.api.LinkResolveRequest
 import com.example.miniapp.api.OfferAcceptRequest
 import com.example.miniapp.api.OfferRequest
 import com.example.miniapp.api.OrderCreateRequest
@@ -144,13 +145,22 @@ class MiniApp : Application() {
                 })
 
                 val qp = UrlQuery.parse(window.location.search)
-                val itemId = qp["item"]
-                    ?: TelegramBridge.startParam()?.let { StartAppCodecJs.decode(it).itemId }
-                if (itemId == null) {
-                    titleEl.content = "Не указан товар"
-                    descEl.content = "Откройте Mini App по кнопке «Купить» или передайте ?item=<ID>."
-                } else {
-                    loadItem(itemId, titleEl, descEl, priceEl, infoEl, variantSelect)
+                val directItemId = qp["item"]
+                val startToken = TelegramBridge.startParam()
+                when {
+                    directItemId != null -> loadItem(directItemId, titleEl, descEl, priceEl, infoEl, variantSelect)
+                    startToken != null -> resolveStartToken(
+                        startToken,
+                        titleEl,
+                        descEl,
+                        priceEl,
+                        infoEl,
+                        variantSelect
+                    )
+                    else -> {
+                        titleEl.content = "Не указан товар"
+                        descEl.content = "Откройте Mini App по кнопке «Купить» или передайте ?item=<ID>."
+                    }
                 }
                 val offerIdParam = qp["offer"]
                 val actionParam = qp["action"]
@@ -180,6 +190,39 @@ class MiniApp : Application() {
                 }
                 .onFailure { e ->
                     descEl.content = "Ошибка загрузки товара: ${e.message ?: e.toString()}"
+                }
+        }
+    }
+
+    private fun resolveStartToken(
+        token: String,
+        titleEl: Div,
+        descEl: Div,
+        priceEl: Div,
+        infoEl: Div,
+        variantSelect: TomSelect
+    ) {
+        TelegramBridge.ready()
+        scope.launch {
+            runCatching { api.resolveLink(LinkResolveRequest(token = token)) }
+                .onSuccess { resp ->
+                    val itemId = resp.item?.itemId
+                        ?: runCatching { StartAppCodecJs.decode(token).itemId }.getOrNull()
+                    if (itemId == null) {
+                        titleEl.content = "Ссылка недоступна"
+                        descEl.content = "Ссылка устарела или недействительна."
+                        return@onSuccess
+                    }
+                    loadItem(itemId, titleEl, descEl, priceEl, infoEl, variantSelect)
+                }
+                .onFailure {
+                    val fallback = runCatching { StartAppCodecJs.decode(token).itemId }.getOrNull()
+                    if (fallback != null) {
+                        loadItem(fallback, titleEl, descEl, priceEl, infoEl, variantSelect)
+                    } else {
+                        titleEl.content = "Ссылка недоступна"
+                        descEl.content = "Ссылка устарела или недействительна."
+                    }
                 }
         }
     }

@@ -2,9 +2,12 @@ package com.example.app.di
 
 import com.example.app.config.AppConfig
 import com.example.app.services.InventoryService
+import com.example.app.services.LinkContextService
 import com.example.app.services.PriceDropNotifierImpl
 import com.example.app.services.RestockAlertService
 import com.example.app.services.RestockNotifierImpl
+import com.example.app.services.SecureRandomLinkTokenGenerator
+import com.example.app.services.LinkTokenGenerator
 import com.example.bots.TelegramClients
 import com.example.domain.watchlist.PriceDropNotifier
 import com.example.domain.watchlist.RestockNotifier
@@ -28,4 +31,6 @@ fun appModule(config: AppConfig, meterRegistry: MeterRegistry?) = module {
     single<RestockNotifier> { RestockNotifierImpl(config, get(), get(), get()) }
     single { RestockAlertService(get(), get(), config.server.watchlistRestockEnabled) }
     single { InventoryService(get(), get()) }
+    single<LinkTokenGenerator> { SecureRandomLinkTokenGenerator() }
+    single { LinkContextService(get(), get()) }
 }

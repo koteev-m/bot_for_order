@@ -69,6 +69,35 @@ data class Post(
 
 @Suppress("EnumNaming")
 @Serializable
+enum class LinkButton { ADD, BUY, CART, PRODUCT }
+
+@Suppress("EnumNaming")
+@Serializable
+enum class LinkAction { add_to_cart, buy_now, open_product }
+
+@Serializable
+data class LinkContext(
+    val id: Long,
+    val token: String,
+    val merchantId: String?,
+    val storefrontId: String?,
+    val channelId: Long?,
+    val postId: Long?,
+    val button: LinkButton?,
+    val action: LinkAction,
+    val itemId: String?,
+    val variantHint: String?,
+    @Serializable(with = InstantIsoSerializer::class)
+    val createdAt: Instant,
+    @Serializable(with = InstantIsoSerializer::class)
+    val expiresAt: Instant?,
+    @Serializable(with = InstantIsoSerializer::class)
+    val revokedAt: Instant?,
+    val metaJson: String?
+)
+
+@Suppress("EnumNaming")
+@Serializable
 enum class OfferStatus { new, auto_accept, countered, accepted, declined, expired }
 
 @Serializable

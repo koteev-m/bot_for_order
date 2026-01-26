@@ -57,6 +57,30 @@ object PostsTable : Table("posts") {
     override val primaryKey = PrimaryKey(id)
 }
 
+object LinkContextsTable : Table("link_context") {
+    val id = long("id").autoIncrement()
+    val token = varchar("token", 64)
+    val merchantId = varchar("merchant_id", 64).nullable()
+    val storefrontId = varchar("storefront_id", 64).nullable()
+    val channelId = long("channel_id").nullable()
+    val postId = long("post_id").nullable()
+    val button = varchar("button", 16).nullable()
+    val action = varchar("action", 32)
+    val itemId = reference("item_id", ItemsTable.id, onDelete = ReferenceOption.SET_NULL).nullable()
+    val variantHint = varchar("variant_hint", 64).nullable()
+    val createdAt = timestamp("created_at")
+    val expiresAt = timestamp("expires_at").nullable()
+    val revokedAt = timestamp("revoked_at").nullable()
+    val metaJson = text("meta_json").nullable()
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        uniqueIndex(token)
+        index(false, channelId)
+        index(false, postId)
+    }
+}
+
 object OffersTable : Table("offers") {
     val id = varchar("id", 64)
     val itemId = reference("item_id", ItemsTable.id, onDelete = ReferenceOption.CASCADE)

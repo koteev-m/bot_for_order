@@ -3,6 +3,7 @@ package com.example.app.routes
 import com.example.app.config.AppConfig
 import com.example.app.services.OffersService
 import com.example.app.services.PaymentsService
+import com.example.app.services.LinkContextService
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemsRepository
 import com.example.db.OrderStatusHistoryRepository
@@ -23,6 +24,7 @@ fun Application.installApiRoutes() {
     val mediaRepo by inject<ItemMediaRepository>()
     val variantsRepo by inject<VariantsRepository>()
     val pricesRepo by inject<PricesDisplayRepository>()
+    val linkContextService by inject<LinkContextService>()
     val ordersRepo by inject<OrdersRepository>()
     val historyRepo by inject<OrderStatusHistoryRepository>()
     val paymentsService by inject<PaymentsService>()
@@ -49,6 +51,7 @@ fun Application.installApiRoutes() {
             registerOfferRoutes(offersService)
             registerOrdersRoutes(cfg, orderDeps)
             registerWatchlistRoutes(itemsRepo, variantsRepo, watchlistRepo, cfg)
+            registerLinkRoutes(linkContextService, itemsRepo, variantsRepo)
         }
     }
 }

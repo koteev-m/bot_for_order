@@ -2,6 +2,7 @@ package com.example.db
 
 import com.example.db.tables.ItemMediaTable
 import com.example.db.tables.ItemsTable
+import com.example.db.tables.LinkContextsTable
 import com.example.db.tables.OffersTable
 import com.example.db.tables.OrderStatusHistoryTable
 import com.example.db.tables.OrdersTable
@@ -13,6 +14,9 @@ import com.example.domain.BargainRules
 import com.example.domain.Item
 import com.example.domain.ItemMedia
 import com.example.domain.ItemStatus
+import com.example.domain.LinkAction
+import com.example.domain.LinkButton
+import com.example.domain.LinkContext
 import com.example.domain.Offer
 import com.example.domain.OfferStatus
 import com.example.domain.Order
@@ -53,6 +57,7 @@ import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.intLiteral
 import org.jetbrains.exposed.sql.statements.InsertStatement
+import org.jetbrains.exposed.exceptions.ExposedSQLException
 
 private val json = Json
 
@@ -306,6 +311,59 @@ class PostsRepositoryExposed(private val tx: DatabaseTx) : PostsRepository {
                 )
             }
     }
+}
+
+class LinkContextRepositoryExposed(private val tx: DatabaseTx) : LinkContextRepository {
+    override suspend fun create(context: LinkContext): Long = tx.tx {
+        try {
+            LinkContextsTable.insert {
+                it[token] = context.token
+                it[merchantId] = context.merchantId
+                it[storefrontId] = context.storefrontId
+                it[channelId] = context.channelId
+                it[postId] = context.postId
+                it[button] = context.button?.name
+                it[action] = context.action.name
+                it[itemId] = context.itemId
+                it[variantHint] = context.variantHint
+                it[createdAt] = context.createdAt
+                it[expiresAt] = context.expiresAt
+                it[revokedAt] = context.revokedAt
+                it[metaJson] = context.metaJson
+            }.requireGeneratedId(LinkContextsTable.id)
+        } catch (error: ExposedSQLException) {
+            if (error.sqlState == "23505") {
+                throw DuplicateTokenException("link_context token already exists", error)
+            }
+            throw error
+        }
+    }
+
+    override suspend fun getByToken(token: String): LinkContext? = tx.tx {
+        LinkContextsTable
+            .selectAll()
+            .where { LinkContextsTable.token eq token }
+            .singleOrNull()
+            ?.toLinkContext()
+    }
+
+    private fun ResultRow.toLinkContext(): LinkContext =
+        LinkContext(
+            id = this[LinkContextsTable.id],
+            token = this[LinkContextsTable.token],
+            merchantId = this[LinkContextsTable.merchantId],
+            storefrontId = this[LinkContextsTable.storefrontId],
+            channelId = this[LinkContextsTable.channelId],
+            postId = this[LinkContextsTable.postId],
+            button = this[LinkContextsTable.button]?.let { LinkButton.valueOf(it) },
+            action = LinkAction.valueOf(this[LinkContextsTable.action]),
+            itemId = this[LinkContextsTable.itemId],
+            variantHint = this[LinkContextsTable.variantHint],
+            createdAt = this[LinkContextsTable.createdAt],
+            expiresAt = this[LinkContextsTable.expiresAt],
+            revokedAt = this[LinkContextsTable.revokedAt],
+            metaJson = this[LinkContextsTable.metaJson]
+        )
 }
 
 class OffersRepositoryExposed(private val tx: DatabaseTx) : OffersRepository {

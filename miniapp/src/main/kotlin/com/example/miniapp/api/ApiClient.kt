@@ -44,4 +44,7 @@ class ApiClient(
 
     suspend fun subscribeWatchlist(req: WatchlistSubscribeRequest): SimpleResponse =
         client.post("$baseUrl/api/watchlist") { setBody(req) }.body()
+
+    suspend fun resolveLink(req: LinkResolveRequest): LinkResolveResponse =
+        client.post("$baseUrl/api/link/resolve") { setBody(req) }.body()
 }

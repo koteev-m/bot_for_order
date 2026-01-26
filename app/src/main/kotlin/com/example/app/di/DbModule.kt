@@ -7,6 +7,8 @@ import com.example.db.ItemMediaRepository
 import com.example.db.ItemMediaRepositoryExposed
 import com.example.db.ItemsRepository
 import com.example.db.ItemsRepositoryExposed
+import com.example.db.LinkContextRepository
+import com.example.db.LinkContextRepositoryExposed
 import com.example.db.OffersRepository
 import com.example.db.OffersRepositoryExposed
 import com.example.db.OrderStatusHistoryRepository
@@ -49,6 +51,7 @@ fun dbModule(cfg: AppConfig) = module {
     single<VariantsRepository> { VariantsRepositoryExposed(get()) }
     single<PricesDisplayRepository> { PricesDisplayRepositoryExposed(get()) }
     single<PostsRepository> { PostsRepositoryExposed(get()) }
+    single<LinkContextRepository> { LinkContextRepositoryExposed(get()) }
     single<OffersRepository> { OffersRepositoryExposed(get()) }
     single<OrdersRepository> { OrdersRepositoryExposed(get()) }
     single<OrderStatusHistoryRepository> { OrderStatusHistoryRepositoryExposed(get()) }

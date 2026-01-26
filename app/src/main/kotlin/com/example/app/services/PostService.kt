@@ -3,10 +3,11 @@ package com.example.app.services
 import com.example.app.config.AppConfig
 import com.example.bots.TelegramClients
 import com.example.bots.startapp.DirectLink
-import com.example.bots.startapp.StartAppParam
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemsRepository
 import com.example.db.PostsRepository
+import com.example.domain.LinkAction
+import com.example.domain.LinkButton
 import com.example.domain.ItemStatus
 import com.example.domain.Post
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton
@@ -26,7 +27,8 @@ class PostService(
     private val clients: TelegramClients,
     private val itemsRepository: ItemsRepository,
     private val itemMediaRepository: ItemMediaRepository,
-    private val postsRepository: PostsRepository
+    private val postsRepository: PostsRepository,
+    private val linkContextService: LinkContextService
 ) {
     private val log = LoggerFactory.getLogger(PostService::class.java)
     private val cachedShopUsername = AtomicReference<String?>()
@@ -75,13 +77,33 @@ class PostService(
         val messages = sendResponse.messages() ?: error("sendMediaGroup failed: no messages")
         val messageIds = messages.map { it.messageId() }
 
+        val firstMessageId = messageIds.first()
         val shopUsername = resolveShopBotUsername()
-        val link = DirectLink.forMiniApp(shopUsername, null, StartAppParam(itemId = itemId))
+        val addToken = linkContextService.create(
+            LinkContextInput(
+                channelId = channelId,
+                postId = firstMessageId.toLong(),
+                button = LinkButton.ADD,
+                action = LinkAction.add_to_cart,
+                itemId = itemId
+            )
+        ).token
+        val buyToken = linkContextService.create(
+            LinkContextInput(
+                channelId = channelId,
+                postId = firstMessageId.toLong(),
+                button = LinkButton.BUY,
+                action = LinkAction.buy_now,
+                itemId = itemId
+            )
+        ).token
+        val addLink = DirectLink.forMiniAppToken(shopUsername, null, addToken)
+        val buyLink = DirectLink.forMiniAppToken(shopUsername, null, buyToken)
         val keyboard = InlineKeyboardMarkup(
-            InlineKeyboardButton("Купить").url(link)
+            InlineKeyboardButton("Добавить в корзину").url(addLink),
+            InlineKeyboardButton("Оформить").url(buyLink)
         )
 
-        val firstMessageId = messageIds.first()
         val newCaption = formatCaption(item.title, item.description)
         val editRequest = EditMessageCaption(channelId, firstMessageId)
             .caption(newCaption)

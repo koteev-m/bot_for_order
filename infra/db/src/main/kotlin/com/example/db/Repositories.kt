@@ -4,6 +4,7 @@ import com.example.domain.BargainRules
 import com.example.domain.Item
 import com.example.domain.ItemMedia
 import com.example.domain.ItemStatus
+import com.example.domain.LinkContext
 import com.example.domain.Offer
 import com.example.domain.OfferStatus
 import com.example.domain.Order
@@ -44,6 +45,13 @@ interface PostsRepository {
     suspend fun insert(post: Post): Long
     suspend fun listByItem(itemId: String): List<Post>
 }
+
+interface LinkContextRepository {
+    suspend fun create(context: LinkContext): Long
+    suspend fun getByToken(token: String): LinkContext?
+}
+
+class DuplicateTokenException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 
 interface OffersRepository {
     suspend fun create(offer: Offer)
