@@ -107,22 +107,45 @@ internal suspend fun sendItemCard(chatId: Long, itemId: String, deps: ShopWebhoo
 }
 
 internal suspend fun decrementStock(order: Order, lines: List<OrderLine>, deps: ShopWebhookDeps): Boolean {
-    if (lines.isEmpty()) return true
-    val decrements = lines
-        .filter { it.variantId != null }
-        .groupBy { it.variantId!! }
-        .mapValues { (_, group) -> group.sumOf { it.qty } }
-    if (decrements.isEmpty()) return true
-    val updated = deps.variantsRepository.decrementStockBatch(decrements)
-    if (!updated) {
-        decrements.forEach { (variantId, qty) ->
-            shopLog.error(
-                "order_stock_mismatch orderId={} variant={} qty={}",
-                order.id,
-                variantId,
-                qty
-            )
+    if (lines.isNotEmpty()) {
+        val decrements = lines
+            .filter { it.variantId != null }
+            .groupBy { it.variantId!! }
+            .mapValues { (_, group) -> group.sumOf { it.qty } }
+        if (decrements.isEmpty()) return true
+        val updated = deps.variantsRepository.decrementStockBatch(decrements)
+        if (!updated) {
+            decrements.forEach { (variantId, qty) ->
+                shopLog.error(
+                    "order_stock_mismatch orderId={} variant={} qty={}",
+                    order.id,
+                    variantId,
+                    qty
+                )
+            }
         }
+        return updated
+    }
+
+    val variantId = order.variantId ?: return true
+    val qty = order.qty
+    if (qty == null || qty <= 0) {
+        shopLog.warn(
+            "order_stock_invalid_qty orderId={} variant={} qty={}",
+            order.id,
+            variantId,
+            qty
+        )
+        return false
+    }
+    val updated = deps.variantsRepository.decrementStockBatch(mapOf(variantId to qty))
+    if (!updated) {
+        shopLog.error(
+            "order_stock_mismatch orderId={} variant={} qty={}",
+            order.id,
+            variantId,
+            qty
+        )
     }
     return updated
 }
