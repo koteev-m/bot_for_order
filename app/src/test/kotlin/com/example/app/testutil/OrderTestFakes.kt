@@ -7,8 +7,15 @@ import com.example.domain.hold.OrderHoldRequest
 import com.example.domain.hold.OrderHoldService
 import com.example.domain.hold.ReserveWriteResult
 import com.example.domain.hold.StockReservePayload
+import com.example.app.services.ManualPaymentsNotifier
+import com.example.domain.Order
+import com.example.domain.OrderPaymentClaim
+import com.example.domain.PaymentMethodMode
+import com.example.app.storage.Storage
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
+import java.io.InputStream
+import java.time.Duration
 
 class InMemoryOrderHoldService(
     private val nowProvider: () -> Instant = { Instant.now() }
@@ -200,4 +207,28 @@ class InMemoryHoldService(
 
 class NoopLockManager : LockManager {
     override suspend fun <T> withLock(key: String, waitMs: Long, leaseMs: Long, action: suspend () -> T): T = action()
+}
+
+class InMemoryStorage : Storage {
+    val objects = ConcurrentHashMap<String, ByteArray>()
+    override fun putObject(stream: InputStream, key: String, contentType: String, size: Long) {
+        objects[key] = stream.readBytes()
+    }
+
+    override fun presignGet(key: String, ttl: Duration): String {
+        return "https://storage.local/$key?ttl=${ttl.seconds}"
+    }
+}
+
+class FakeManualPaymentsNotifier : ManualPaymentsNotifier {
+    val adminNotifications = mutableListOf<String>()
+    val buyerNotifications = mutableListOf<Long>()
+
+    override fun notifyAdminClaim(order: Order, claim: OrderPaymentClaim, attachmentCount: Int, mode: PaymentMethodMode) {
+        adminNotifications.add(order.id)
+    }
+
+    override fun notifyBuyerClarification(order: Order) {
+        buyerNotifications.add(order.userId)
+    }
 }

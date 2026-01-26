@@ -94,7 +94,7 @@ class ReservesSweepJob(
             val merchant = merchantsRepository.getById(order.merchantId) ?: return@forEach
             val claimDeadline = order.createdAt.plusSeconds(merchant.paymentClaimWindowSeconds.toLong())
             if (now.isAfter(claimDeadline)) {
-                cancelOrder(order.id, order.userId, "payment_timeout")
+                cancelOrder(order.id, order.userId, "PAYMENT_TIMEOUT")
             }
         }
 
@@ -104,7 +104,7 @@ class ReservesSweepJob(
             val claimedAt = order.paymentClaimedAt ?: return@forEach
             val reviewDeadline = claimedAt.plusSeconds(merchant.paymentReviewWindowSeconds.toLong())
             if (now.isAfter(reviewDeadline)) {
-                cancelOrder(order.id, order.userId, "payment_review_timeout")
+                cancelOrder(order.id, order.userId, "PAYMENT_REVIEW_TIMEOUT")
             }
         }
     }

@@ -1,6 +1,7 @@
 package com.example.app.security
 
 import com.example.app.api.ApiError
+import com.example.app.config.AppConfig
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.ApplicationCallPipeline
@@ -41,6 +42,14 @@ fun ApplicationCall.requireUserId(): Long {
         return this.attributes[InitDataAuth.VERIFIED_USER_ATTR]
     }
     throw ApiError("unauthorized", HttpStatusCode.Unauthorized)
+}
+
+fun ApplicationCall.requireAdminId(config: AppConfig): Long {
+    val userId = requireUserId()
+    if (!config.telegram.adminIds.contains(userId)) {
+        throw ApiError("forbidden", HttpStatusCode.Forbidden)
+    }
+    return userId
 }
 
 private fun unauthorized(reason: String, cause: Throwable? = null): Nothing =

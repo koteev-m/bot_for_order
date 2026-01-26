@@ -8,7 +8,8 @@ data class TgUpdate(
     @SerialName("update_id") val updateId: Long,
     val message: TgMessage? = null,
     @SerialName("shipping_query") val shippingQuery: TgShippingQuery? = null,
-    @SerialName("pre_checkout_query") val preCheckoutQuery: TgPreCheckoutQuery? = null
+    @SerialName("pre_checkout_query") val preCheckoutQuery: TgPreCheckoutQuery? = null,
+    @SerialName("callback_query") val callbackQuery: TgCallbackQuery? = null
 )
 
 @Serializable
@@ -89,4 +90,12 @@ data class TgSuccessfulPayment(
     @SerialName("invoice_payload") val invoicePayload: String,
     @SerialName("telegram_payment_charge_id") val telegramPaymentChargeId: String,
     @SerialName("provider_payment_charge_id") val providerPaymentChargeId: String
+)
+
+@Serializable
+data class TgCallbackQuery(
+    val id: String,
+    val from: TgUser,
+    val message: TgMessage? = null,
+    val data: String? = null
 )

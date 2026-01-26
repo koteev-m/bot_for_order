@@ -15,3 +15,12 @@ internal fun parseLogLevelEnv(name: String, defaultValue: String): String {
     }
     return value
 }
+
+internal fun parseBase64KeyEnv(name: String, expectedSize: Int): ByteArray {
+    val raw = System.getenv(name)?.takeIf { it.isNotBlank() }
+        ?: error("Missing required env: $name")
+    val decoded = runCatching { java.util.Base64.getDecoder().decode(raw.trim()) }
+        .getOrElse { error("Env $name must be base64: ${it.message}") }
+    require(decoded.size == expectedSize) { "Env $name must be $expectedSize bytes" }
+    return decoded
+}

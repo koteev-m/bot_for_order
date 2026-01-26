@@ -9,14 +9,20 @@ import com.example.app.services.LinkContextService
 import com.example.app.services.LinkResolveRateLimiter
 import com.example.app.services.LinkResolveService
 import com.example.app.services.LinkTokenHasher
+import com.example.app.services.ManualPaymentsNotifier
+import com.example.app.services.ManualPaymentsService
 import com.example.app.services.OrderDedupStore
 import com.example.app.services.OrderDedupStoreRedisson
 import com.example.app.services.OrderCheckoutService
+import com.example.app.services.PaymentDetailsCrypto
 import com.example.app.services.PriceDropNotifierImpl
 import com.example.app.services.RestockAlertService
 import com.example.app.services.RestockNotifierImpl
 import com.example.app.services.StorefrontService
+import com.example.app.services.TelegramManualPaymentsNotifier
 import com.example.app.security.TelegramInitDataVerifier
+import com.example.app.storage.S3Storage
+import com.example.app.storage.Storage
 import com.example.bots.TelegramClients
 import com.example.domain.watchlist.PriceDropNotifier
 import com.example.domain.watchlist.RestockNotifier
@@ -46,6 +52,29 @@ fun appModule(config: AppConfig, meterRegistry: MeterRegistry?) = module {
     single<OrderDedupStore> { OrderDedupStoreRedisson(get()) }
     single { CartService(config, get(), get(), get(), get(), get(), get(), get(), get()) }
     single { OrderCheckoutService(config, get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single<Storage> { S3Storage(config.storage) }
+    single { PaymentDetailsCrypto(config.manualPayments.detailsEncryptionKey) }
+    single<ManualPaymentsNotifier> { TelegramManualPaymentsNotifier(config, get()) }
+    single {
+        ManualPaymentsService(
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get(),
+            get()
+        )
+    }
 
     single<PriceDropNotifier> { PriceDropNotifierImpl(config, get(), get()) }
     single<RestockNotifier> { RestockNotifierImpl(config, get(), get(), get()) }

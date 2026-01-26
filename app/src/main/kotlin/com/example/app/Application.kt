@@ -15,6 +15,7 @@ import com.example.app.observability.registerBuildInfoMeter
 import com.example.app.observability.REQUEST_ID_MDC_KEY
 import com.example.app.observability.USER_ID_MDC_KEY
 import com.example.app.routes.installAdminWebhook
+import com.example.app.routes.installAdminApiRoutes
 import com.example.app.routes.installApiRoutes
 import com.example.app.routes.installBaseRoutes
 import com.example.app.routes.installShopWebhook
@@ -77,6 +78,7 @@ fun Application.module() {
     configureServerPlugins()
 
     installAdminWebhook()
+    installAdminApiRoutes()
     installShopWebhook()
     installApiRoutes()
     installStaticAppRoutes()

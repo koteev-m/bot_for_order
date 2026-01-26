@@ -45,6 +45,7 @@ dependencies {
     implementation(libs.koin.core)
     implementation(libs.koin.ktor)
     implementation(libs.koin.logger)
+    implementation(libs.aws.sdk.s3)
     runtimeOnly(libs.logback.classic)
     runtimeOnly(libs.logstash.logback.encoder)
 

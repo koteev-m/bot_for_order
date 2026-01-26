@@ -12,13 +12,20 @@ import com.example.domain.Merchant
 import com.example.domain.Offer
 import com.example.domain.OfferStatus
 import com.example.domain.Order
+import com.example.domain.OrderAttachment
 import com.example.domain.OrderLine
+import com.example.domain.OrderPaymentClaim
+import com.example.domain.OrderPaymentDetails
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
+import com.example.domain.MerchantPaymentMethod
 import com.example.domain.Post
 import com.example.domain.PricesDisplay
 import com.example.domain.Storefront
 import com.example.domain.Variant
+import com.example.domain.PaymentClaimStatus
+import com.example.domain.PaymentMethodType
+import com.example.domain.OrderAttachmentKind
 import java.time.Instant
 
 interface MerchantsRepository {
@@ -105,6 +112,7 @@ interface OrdersRepository {
     suspend fun setInvoiceMessage(id: String, invoiceMessageId: Int)
     suspend fun markPaid(id: String, provider: String, providerChargeId: String, telegramPaymentChargeId: String)
     suspend fun setPaymentClaimed(orderId: String, claimedAt: Instant): Boolean
+    suspend fun setPaymentMethodSelection(orderId: String, type: PaymentMethodType, selectedAt: Instant): Boolean
     suspend fun listPendingClaimOlderThan(cutoff: Instant): List<Order>
     suspend fun listPendingReviewOlderThan(cutoff: Instant): List<Order>
     suspend fun listPendingOlderThan(cutoff: Instant): List<Order>
@@ -119,6 +127,29 @@ interface OrderLinesRepository {
 interface OrderStatusHistoryRepository {
     suspend fun append(entry: OrderStatusEntry): Long
     suspend fun list(orderId: String, limit: Int? = null): List<OrderStatusEntry>
+}
+
+interface MerchantPaymentMethodsRepository {
+    suspend fun getEnabledMethod(merchantId: String, type: PaymentMethodType): MerchantPaymentMethod?
+    suspend fun getMethod(merchantId: String, type: PaymentMethodType): MerchantPaymentMethod?
+}
+
+interface OrderPaymentDetailsRepository {
+    suspend fun getByOrder(orderId: String): OrderPaymentDetails?
+    suspend fun upsert(details: OrderPaymentDetails)
+}
+
+interface OrderPaymentClaimsRepository {
+    suspend fun getSubmittedByOrder(orderId: String): OrderPaymentClaim?
+    suspend fun insertClaim(claim: OrderPaymentClaim): Long
+    suspend fun setStatus(id: Long, status: PaymentClaimStatus, comment: String?)
+}
+
+interface OrderAttachmentsRepository {
+    suspend fun create(attachment: OrderAttachment): Long
+    suspend fun getById(id: Long): OrderAttachment?
+    suspend fun listByOrder(orderId: String): List<OrderAttachment>
+    suspend fun listByOrderAndKind(orderId: String, kind: OrderAttachmentKind): List<OrderAttachment>
 }
 
 data class CartItemWithCart(

@@ -165,6 +165,8 @@ class OrderCheckoutService(
                         it[OrdersTable.status] = order.status.name
                         it[OrdersTable.paymentClaimedAt] = order.paymentClaimedAt
                         it[OrdersTable.paymentDecidedAt] = order.paymentDecidedAt
+                        it[OrdersTable.paymentMethodType] = order.paymentMethodType?.name
+                        it[OrdersTable.paymentMethodSelectedAt] = order.paymentMethodSelectedAt
                         it[OrdersTable.createdAt] = order.createdAt
                         it[OrdersTable.updatedAt] = order.updatedAt
                     }

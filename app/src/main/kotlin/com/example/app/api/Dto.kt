@@ -123,6 +123,52 @@ data class OrderLineDto(
 )
 
 @Serializable
+data class PaymentSelectRequest(
+    val methodType: String
+)
+
+@Serializable
+data class PaymentSelectResponse(
+    val orderId: String,
+    val status: String
+)
+
+@Serializable
+data class PaymentInstructionsResponse(
+    val methodType: String,
+    val mode: String,
+    val text: String
+)
+
+@Serializable
+data class PaymentClaimRequest(
+    val txid: String? = null,
+    val comment: String? = null
+)
+
+@Serializable
+data class PaymentClaimResponse(
+    val id: Long,
+    val status: String,
+    val createdAt: String
+)
+
+@Serializable
+data class AdminPaymentDetailsRequest(
+    val text: String
+)
+
+@Serializable
+data class AdminPaymentRejectRequest(
+    val reason: String
+)
+
+@Serializable
+data class AttachmentUrlResponse(
+    val url: String
+)
+
+@Serializable
 data class OrdersPage(
     val items: List<OrderCard>
 )

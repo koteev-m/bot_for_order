@@ -4,6 +4,7 @@ import com.example.app.config.AppConfig
 import com.example.app.services.CartService
 import com.example.app.services.LinkResolveRateLimiter
 import com.example.app.services.LinkResolveService
+import com.example.app.services.ManualPaymentsService
 import com.example.app.services.OffersService
 import com.example.app.services.OrderCheckoutService
 import com.example.app.services.PaymentsService
@@ -31,6 +32,7 @@ fun Application.installApiRoutes() {
     val orderLinesRepo by inject<OrderLinesRepository>()
     val historyRepo by inject<OrderStatusHistoryRepository>()
     val paymentsService by inject<PaymentsService>()
+    val manualPaymentsService by inject<ManualPaymentsService>()
     val offersService by inject<OffersService>()
     val cfg by inject<AppConfig>()
     val initDataVerifier by inject<TelegramInitDataVerifier>()
@@ -46,7 +48,8 @@ fun Application.installApiRoutes() {
         orderLinesRepository = orderLinesRepo,
         historyRepository = historyRepo,
         paymentsService = paymentsService,
-        orderCheckoutService = orderCheckoutService
+        orderCheckoutService = orderCheckoutService,
+        manualPaymentsService = manualPaymentsService
     )
 
     routing {
