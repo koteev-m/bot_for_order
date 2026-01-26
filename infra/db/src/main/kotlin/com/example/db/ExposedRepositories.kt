@@ -387,6 +387,29 @@ class VariantsRepositoryExposed(private val tx: DatabaseTx) : VariantsRepository
             updated > 0
         }
     }
+
+    override suspend fun decrementStockBatch(variantQty: Map<String, Int>): Boolean {
+        if (variantQty.isEmpty()) return true
+        return tx.tx {
+            variantQty.forEach { (variantId, qty) ->
+                require(qty > 0) { "qty must be > 0" }
+                val updated = VariantsTable.update({
+                    (VariantsTable.id eq variantId) and
+                        (VariantsTable.stock greaterEq qty) and
+                        (VariantsTable.active eq true)
+                }) {
+                    with(SqlExpressionBuilder) {
+                        it.update(VariantsTable.stock, VariantsTable.stock - intLiteral(qty))
+                    }
+                }
+                if (updated == 0) {
+                    rollback()
+                    return@tx false
+                }
+            }
+            true
+        }
+    }
 }
 
 class PricesDisplayRepositoryExposed(private val tx: DatabaseTx) : PricesDisplayRepository {

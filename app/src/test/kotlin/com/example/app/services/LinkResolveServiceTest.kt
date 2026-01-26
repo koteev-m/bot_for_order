@@ -290,4 +290,17 @@ private class InMemoryVariantsRepository : VariantsRepository {
         storage[variantId] = existing.copy(stock = existing.stock - qty)
         return true
     }
+
+    override suspend fun decrementStockBatch(variantQty: Map<String, Int>): Boolean {
+        if (variantQty.isEmpty()) return true
+        val snapshot = storage.toMutableMap()
+        variantQty.forEach { (variantId, qty) ->
+            val existing = snapshot[variantId] ?: return false
+            if (!existing.active || existing.stock < qty) return false
+            snapshot[variantId] = existing.copy(stock = existing.stock - qty)
+        }
+        storage.clear()
+        storage.putAll(snapshot)
+        return true
+    }
 }

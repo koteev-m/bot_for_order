@@ -19,10 +19,10 @@ import com.example.db.PricesDisplayRepository
 import com.example.db.VariantsRepository
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
+import com.example.domain.hold.HoldService
 import com.example.domain.hold.LockManager
 import com.example.domain.hold.OrderHoldService
 import com.pengrad.telegrambot.model.request.ShippingOption
-import com.pengrad.telegrambot.request.SendMessage
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.call
@@ -51,6 +51,7 @@ fun Application.installShopWebhook() {
     val paymentsService by inject<PaymentsService>()
     val lockManager by inject<LockManager>()
     val orderHoldService by inject<OrderHoldService>()
+    val holdService by inject<HoldService>()
 
     val deps = ShopWebhookDeps(
         config = cfg,
@@ -65,6 +66,7 @@ fun Application.installShopWebhook() {
         paymentsService = paymentsService,
         lockManager = lockManager,
         orderHoldService = orderHoldService,
+        holdService = holdService,
         json = Json { ignoreUnknownKeys = true }
     )
 
@@ -89,6 +91,7 @@ internal data class ShopWebhookDeps(
     val paymentsService: PaymentsService,
     val lockManager: LockManager,
     val orderHoldService: OrderHoldService,
+    val holdService: HoldService,
     val json: Json
 )
 
@@ -311,6 +314,7 @@ private suspend fun handleSuccessfulPayment(
                 )
             )
             deps.orderHoldService.release(orderId, buildOrderHoldRequests(order, lines))
+            deps.holdService.deleteReserveByOrder(orderId)
             reply = PAYMENT_CONFIRMED_REPLY.format(orderId)
             shopLog.info(
                 "order paid orderId={} item={} variant={} qty={}",
@@ -364,7 +368,8 @@ private suspend fun evaluatePreCheckout(
         else -> {
             val lines = deps.orderLinesRepository.listByOrder(orderId)
             val holdRequests = buildOrderHoldRequests(order, lines)
-            val holdsActive = deps.orderHoldService.hasActive(orderId, holdRequests)
+            val holdsActive = deps.orderHoldService.hasActive(orderId, holdRequests) ||
+                deps.holdService.hasOrderReserve(orderId)
             if (!holdsActive) {
                 return PreCheckoutDecision(
                     ok = false,
@@ -380,8 +385,19 @@ private suspend fun evaluatePreCheckout(
                     logMessage = "pre_checkout merchant missing orderId=$orderId",
                     warn = true
                 )
-            deps.ordersRepository.setPaymentClaimed(orderId, Instant.now())
-            deps.orderHoldService.extend(orderId, holdRequests, merchant.paymentReviewWindowSeconds.toLong())
+            val now = Instant.now()
+            val claimedNow = deps.ordersRepository.setPaymentClaimed(orderId, now)
+            val claimedAt = if (claimedNow) {
+                now
+            } else {
+                deps.ordersRepository.get(orderId)?.paymentClaimedAt ?: now
+            }
+            val reviewDeadline = claimedAt.plusSeconds(merchant.paymentReviewWindowSeconds.toLong())
+            val ttlRemaining = kotlin.math.max(
+                java.time.Duration.between(now, reviewDeadline).seconds,
+                1L
+            )
+            deps.orderHoldService.extend(orderId, holdRequests, ttlRemaining)
             PreCheckoutDecision(
                 ok = true,
                 logMessage = "pre_checkout approved orderId=$orderId",

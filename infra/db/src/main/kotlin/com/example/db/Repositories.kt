@@ -62,6 +62,7 @@ interface VariantsRepository {
     suspend fun setStock(variantId: String, stock: Int): StockChange?
     suspend fun getById(id: String): Variant?
     suspend fun decrementStock(variantId: String, qty: Int): Boolean
+    suspend fun decrementStockBatch(variantQty: Map<String, Int>): Boolean
 }
 
 interface PricesDisplayRepository {
