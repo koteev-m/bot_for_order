@@ -13,7 +13,8 @@ val offersModule = module {
                 variants = get(),
                 prices = get(),
                 offers = get(),
-                orders = get()
+                orders = get(),
+                orderLines = get()
             ),
             deps = OfferServicesDeps(
                 holdService = get(),

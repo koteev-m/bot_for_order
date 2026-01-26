@@ -11,15 +11,16 @@ import com.example.app.tg.TgShippingQuery
 import com.example.bots.TelegramClients
 import com.example.bots.startapp.StartAppCodec
 import com.example.db.ItemsRepository
+import com.example.db.MerchantsRepository
+import com.example.db.OrderLinesRepository
 import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrdersRepository
 import com.example.db.PricesDisplayRepository
 import com.example.db.VariantsRepository
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
-import com.example.domain.hold.HoldService
 import com.example.domain.hold.LockManager
-import com.pengrad.telegrambot.model.request.ParseMode
+import com.example.domain.hold.OrderHoldService
 import com.pengrad.telegrambot.model.request.ShippingOption
 import com.pengrad.telegrambot.request.SendMessage
 import io.ktor.http.HttpStatusCode
@@ -44,10 +45,12 @@ fun Application.installShopWebhook() {
     val pricesRepo by inject<PricesDisplayRepository>()
     val variantsRepo by inject<VariantsRepository>()
     val ordersRepo by inject<OrdersRepository>()
+    val orderLinesRepo by inject<OrderLinesRepository>()
+    val merchantsRepo by inject<MerchantsRepository>()
     val orderStatusRepo by inject<OrderStatusHistoryRepository>()
     val paymentsService by inject<PaymentsService>()
     val lockManager by inject<LockManager>()
-    val holdService by inject<HoldService>()
+    val orderHoldService by inject<OrderHoldService>()
 
     val deps = ShopWebhookDeps(
         config = cfg,
@@ -56,10 +59,12 @@ fun Application.installShopWebhook() {
         pricesRepository = pricesRepo,
         variantsRepository = variantsRepo,
         ordersRepository = ordersRepo,
+        orderLinesRepository = orderLinesRepo,
+        merchantsRepository = merchantsRepo,
         orderStatusRepository = orderStatusRepo,
         paymentsService = paymentsService,
         lockManager = lockManager,
-        holdService = holdService,
+        orderHoldService = orderHoldService,
         json = Json { ignoreUnknownKeys = true }
     )
 
@@ -78,10 +83,12 @@ internal data class ShopWebhookDeps(
     val pricesRepository: PricesDisplayRepository,
     val variantsRepository: VariantsRepository,
     val ordersRepository: OrdersRepository,
+    val orderLinesRepository: OrderLinesRepository,
+    val merchantsRepository: MerchantsRepository,
     val orderStatusRepository: OrderStatusHistoryRepository,
     val paymentsService: PaymentsService,
     val lockManager: LockManager,
-    val holdService: HoldService,
+    val orderHoldService: OrderHoldService,
     val json: Json
 )
 
@@ -280,9 +287,10 @@ private suspend fun handleSuccessfulPayment(
                 reply = PAYMENT_ALREADY_CONFIRMED_REPLY.format(orderId)
                 return@withLock
             }
-            val stockOk = decrementStock(order, deps)
+            val lines = deps.orderLinesRepository.listByOrder(orderId)
+            val stockOk = decrementStock(order, lines, deps)
             if (!stockOk) {
-                handleStockFailure(order, deps)
+                handleStockFailure(order, lines, deps)
                 reply = PAYMENT_STOCK_FAILED_REPLY
                 return@withLock
             }
@@ -302,14 +310,14 @@ private suspend fun handleSuccessfulPayment(
                     ts = Instant.now()
                 )
             )
-            deps.holdService.deleteReserveByOrder(orderId)
+            deps.orderHoldService.release(orderId, buildOrderHoldRequests(order, lines))
             reply = PAYMENT_CONFIRMED_REPLY.format(orderId)
             shopLog.info(
                 "order paid orderId={} item={} variant={} qty={}",
                 orderId,
-                order.itemId,
+                order.itemId ?: "n/a",
                 order.variantId,
-                order.qty
+                order.qty ?: 0
             )
         }
     } catch (error: IllegalStateException) {
@@ -353,17 +361,33 @@ private suspend fun evaluatePreCheckout(
                 "expected=${order.amountMinor} actual=${query.totalAmount}",
             warn = true
         )
-        !deps.holdService.hasOrderReserve(orderId) -> PreCheckoutDecision(
-            ok = false,
-            errorMessage = PRECHECK_RESERVE_ERROR,
-            logMessage = "pre_checkout reserve missing orderId=$orderId",
-            warn = true
-        )
-        else -> PreCheckoutDecision(
-            ok = true,
-            logMessage = "pre_checkout approved orderId=$orderId",
-            warn = false
-        )
+        else -> {
+            val lines = deps.orderLinesRepository.listByOrder(orderId)
+            val holdRequests = buildOrderHoldRequests(order, lines)
+            val holdsActive = deps.orderHoldService.hasActive(orderId, holdRequests)
+            if (!holdsActive) {
+                return PreCheckoutDecision(
+                    ok = false,
+                    errorMessage = PRECHECK_RESERVE_ERROR,
+                    logMessage = "pre_checkout reserve missing orderId=$orderId",
+                    warn = true
+                )
+            }
+            val merchant = deps.merchantsRepository.getById(order.merchantId)
+                ?: return PreCheckoutDecision(
+                    ok = false,
+                    errorMessage = PRECHECK_GENERIC_ERROR,
+                    logMessage = "pre_checkout merchant missing orderId=$orderId",
+                    warn = true
+                )
+            deps.ordersRepository.setPaymentClaimed(orderId, Instant.now())
+            deps.orderHoldService.extend(orderId, holdRequests, merchant.paymentReviewWindowSeconds.toLong())
+            PreCheckoutDecision(
+                ok = true,
+                logMessage = "pre_checkout approved orderId=$orderId",
+                warn = false
+            )
+        }
     }
 }
 

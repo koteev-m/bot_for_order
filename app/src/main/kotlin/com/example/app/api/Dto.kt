@@ -99,14 +99,27 @@ data class OrderHistoryEntry(
 @Serializable
 data class OrderCard(
     val orderId: String,
-    val itemId: String,
+    val itemId: String? = null,
     val variantId: String? = null,
-    val qty: Int,
+    val qty: Int? = null,
     val currency: String,
     val amountMinor: Long,
     val status: String,
     val updatedAt: String,
+    val lines: List<OrderLineDto> = emptyList(),
     val history: List<OrderHistoryEntry>
+)
+
+@Serializable
+data class OrderLineDto(
+    val listingId: String,
+    val variantId: String? = null,
+    val qty: Int,
+    val priceSnapshotMinor: Long,
+    val currency: String,
+    val sourceStorefrontId: String? = null,
+    val sourceChannelId: Long? = null,
+    val sourcePostMessageId: Int? = null
 )
 
 @Serializable

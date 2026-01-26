@@ -1,12 +1,15 @@
 package com.example.app.services
 
 import com.example.bots.TelegramClients
+import com.example.db.OrderLinesRepository
 import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrdersRepository
 import com.example.domain.Order
+import com.example.domain.OrderLine
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
-import com.example.domain.hold.HoldService
+import com.example.domain.hold.OrderHoldService
+import com.example.domain.hold.OrderHoldRequest
 import com.pengrad.telegrambot.request.SendMessage
 import java.time.Clock
 import java.time.Instant
@@ -15,9 +18,10 @@ import org.slf4j.LoggerFactory
 
 class OrderStatusService(
     private val ordersRepository: OrdersRepository,
+    private val orderLinesRepository: OrderLinesRepository,
     private val historyRepository: OrderStatusHistoryRepository,
     private val clients: TelegramClients,
-    private val holdService: HoldService,
+    private val orderHoldService: OrderHoldService,
     private val clock: Clock = Clock.systemUTC()
 ) {
 
@@ -42,7 +46,8 @@ class OrderStatusService(
 
         ordersRepository.setStatus(orderId, newStatus)
         if (newStatus == OrderStatus.canceled) {
-            holdService.deleteReserveByOrder(orderId)
+            val lines = orderLinesRepository.listByOrder(orderId)
+            orderHoldService.release(orderId, buildOrderHoldRequests(order, lines))
         }
         val entry = OrderStatusEntry(
             id = 0,
@@ -86,6 +91,25 @@ class OrderStatusService(
         val order: Order,
         val changed: Boolean
     )
+
+    private fun buildOrderHoldRequests(order: Order, lines: List<OrderLine>): List<OrderHoldRequest> {
+        if (lines.isNotEmpty()) {
+            return lines
+                .groupBy { it.variantId ?: it.listingId }
+                .values
+                .map { group ->
+                    val first = group.first()
+                    OrderHoldRequest(
+                        listingId = first.listingId,
+                        variantId = first.variantId,
+                        qty = group.sumOf { it.qty }
+                    )
+                }
+        }
+        val itemId = order.itemId ?: return emptyList()
+        val qty = order.qty ?: 1
+        return listOf(OrderHoldRequest(listingId = itemId, variantId = order.variantId, qty = qty))
+    }
 
     companion object {
         private val ALLOWED_TRANSITIONS: Map<OrderStatus, Set<OrderStatus>> = mapOf(

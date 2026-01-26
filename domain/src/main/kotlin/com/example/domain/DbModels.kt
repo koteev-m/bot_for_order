@@ -11,7 +11,9 @@ enum class ItemStatus { draft, active, sold }
 @Serializable
 data class Merchant(
     val id: String,
-    val name: String
+    val name: String,
+    val paymentClaimWindowSeconds: Int,
+    val paymentReviewWindowSeconds: Int
 )
 
 @Serializable
@@ -146,9 +148,9 @@ data class Order(
     val id: String,
     val merchantId: String,
     val userId: Long,
-    val itemId: String,
+    val itemId: String?,
     val variantId: String?,
-    val qty: Int,
+    val qty: Int?,
     val currency: String,
     val amountMinor: Long,
     val deliveryOption: String?,
@@ -159,7 +161,26 @@ data class Order(
     val invoiceMessageId: Int? = null,
     val status: OrderStatus,
     @Serializable(with = InstantIsoSerializer::class)
-    val updatedAt: Instant
+    val createdAt: Instant,
+    @Serializable(with = InstantIsoSerializer::class)
+    val updatedAt: Instant,
+    @Serializable(with = InstantIsoSerializer::class)
+    val paymentClaimedAt: Instant? = null,
+    @Serializable(with = InstantIsoSerializer::class)
+    val paymentDecidedAt: Instant? = null
+)
+
+@Serializable
+data class OrderLine(
+    val orderId: String,
+    val listingId: String,
+    val variantId: String?,
+    val qty: Int,
+    val priceSnapshotMinor: Long,
+    val currency: String,
+    val sourceStorefrontId: String?,
+    val sourceChannelId: Long?,
+    val sourcePostMessageId: Int?
 )
 
 @Serializable

@@ -9,6 +9,9 @@ import com.example.app.services.LinkContextService
 import com.example.app.services.LinkResolveRateLimiter
 import com.example.app.services.LinkResolveService
 import com.example.app.services.LinkTokenHasher
+import com.example.app.services.OrderDedupStore
+import com.example.app.services.OrderDedupStoreRedisson
+import com.example.app.services.OrderCheckoutService
 import com.example.app.services.PriceDropNotifierImpl
 import com.example.app.services.RestockAlertService
 import com.example.app.services.RestockNotifierImpl
@@ -40,7 +43,9 @@ fun appModule(config: AppConfig, meterRegistry: MeterRegistry?) = module {
     single { LinkResolveRateLimiter(get(), get(), config.linkResolveRateLimit) }
     single { StorefrontService(get(), get(), get()) }
     single<CartRedisStore> { CartRedisStoreRedisson(get()) }
+    single<OrderDedupStore> { OrderDedupStoreRedisson(get()) }
     single { CartService(config, get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { OrderCheckoutService(config, get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
     single<PriceDropNotifier> { PriceDropNotifierImpl(config, get(), get()) }
     single<RestockNotifier> { RestockNotifierImpl(config, get(), get(), get()) }

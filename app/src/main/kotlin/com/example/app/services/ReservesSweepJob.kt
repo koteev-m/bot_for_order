@@ -2,12 +2,15 @@ package com.example.app.services
 
 import com.example.app.config.AppConfig
 import com.example.bots.TelegramClients
+import com.example.db.MerchantsRepository
+import com.example.db.OrderLinesRepository
 import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrdersRepository
-import com.example.domain.Order
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
-import com.example.domain.hold.HoldService
+import com.example.domain.OrderLine
+import com.example.domain.hold.OrderHoldService
+import com.example.domain.hold.OrderHoldRequest
 import com.pengrad.telegrambot.request.SendMessage
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationStopped
@@ -30,11 +33,12 @@ private const val RESERVE_EXPIRED_MESSAGE = "⏳ Резерв заказа %s и
 
 data class ReservesSweepDeps(
     val ordersRepository: OrdersRepository,
+    val orderLinesRepository: OrderLinesRepository,
+    val merchantsRepository: MerchantsRepository,
     val historyRepository: OrderStatusHistoryRepository,
-    val holdService: HoldService,
+    val orderHoldService: OrderHoldService,
     val clients: TelegramClients,
     val sweepIntervalSec: Int,
-    val orderReserveTtlSec: Int,
     val clock: Clock = Clock.systemUTC(),
     val log: Logger = LoggerFactory.getLogger(ReservesSweepJob::class.java)
 )
@@ -45,17 +49,18 @@ class ReservesSweepJob(
 ) {
 
     private val ordersRepository = deps.ordersRepository
+    private val orderLinesRepository = deps.orderLinesRepository
+    private val merchantsRepository = deps.merchantsRepository
     private val historyRepository = deps.historyRepository
-    private val holdService = deps.holdService
+    private val orderHoldService = deps.orderHoldService
     private val clients = deps.clients
     private val sweepIntervalSec = deps.sweepIntervalSec
-    private val orderReserveTtlSec = deps.orderReserveTtlSec
     private val clock = deps.clock
     private val log = deps.log
 
     fun start() {
-        if (orderReserveTtlSec <= 0 || sweepIntervalSec <= 0) {
-            log.warn("reserves_sweep_disabled ttl={} interval={}", orderReserveTtlSec, sweepIntervalSec)
+        if (sweepIntervalSec <= 0) {
+            log.warn("reserves_sweep_disabled interval={}", sweepIntervalSec)
             return
         }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineName("ReservesSweepJob"))
@@ -73,71 +78,94 @@ class ReservesSweepJob(
         }
     }
 
+    internal suspend fun runOnceForTests() {
+        sweepOnce()
+    }
+
     private suspend fun sweepOnce() {
-        holdService.releaseExpired()
-        val cutoff = clock.instant().minusSeconds(orderReserveTtlSec.toLong())
-        val staleOrders = ordersRepository.listPendingOlderThan(cutoff)
-        if (staleOrders.isEmpty()) {
-            return
-        }
-        staleOrders.forEach { order ->
-            val hasReserve = holdService.hasOrderReserve(order.id)
-            if (hasReserve) {
-                return@forEach
+        val now = clock.instant()
+        val claimCandidates = ordersRepository.listPendingClaimOlderThan(now)
+        claimCandidates.forEach { order ->
+            val merchant = merchantsRepository.getById(order.merchantId) ?: return@forEach
+            val claimDeadline = order.createdAt.plusSeconds(merchant.paymentClaimWindowSeconds.toLong())
+            if (now.isAfter(claimDeadline)) {
+                cancelOrder(order.id, order.userId, "payment_timeout")
             }
-            cancelOrder(order)
+        }
+
+        val reviewCandidates = ordersRepository.listPendingReviewOlderThan(now)
+        reviewCandidates.forEach { order ->
+            val merchant = merchantsRepository.getById(order.merchantId) ?: return@forEach
+            val claimedAt = order.paymentClaimedAt ?: return@forEach
+            val reviewDeadline = claimedAt.plusSeconds(merchant.paymentReviewWindowSeconds.toLong())
+            if (now.isAfter(reviewDeadline)) {
+                cancelOrder(order.id, order.userId, "payment_review_timeout")
+            }
         }
     }
 
-    private suspend fun cancelOrder(order: Order) {
-        ordersRepository.setStatus(order.id, OrderStatus.canceled)
+    private suspend fun cancelOrder(orderId: String, userId: Long, reason: String) {
+        ordersRepository.setStatus(orderId, OrderStatus.canceled)
         historyRepository.append(
             OrderStatusEntry(
                 id = 0,
-                orderId = order.id,
+                orderId = orderId,
                 status = OrderStatus.canceled,
-                comment = "reserve_expired",
+                comment = reason,
                 actorId = null,
                 ts = Instant.now(clock)
             )
         )
-        holdService.deleteReserveByOrder(order.id)
-        notifyBuyer(order)
-        log.info(
-            "order_reserve_expired orderId={} user={} item={} variant={}",
-            order.id,
-            order.userId,
-            order.itemId,
-            order.variantId
-        )
+        val lines = orderLinesRepository.listByOrder(orderId)
+        orderHoldService.release(orderId, buildOrderHoldRequests(lines))
+        notifyBuyer(userId, orderId)
+        log.info("order_payment_timeout orderId={} user={} reason={}", orderId, userId, reason)
     }
 
-    private fun notifyBuyer(order: Order) {
-        val text = RESERVE_EXPIRED_MESSAGE.format(order.id)
+    private fun notifyBuyer(userId: Long, orderId: String) {
+        val text = RESERVE_EXPIRED_MESSAGE.format(orderId)
         runCatching {
-            clients.shopBot.execute(SendMessage(order.userId, text))
+            clients.shopBot.execute(SendMessage(userId, text))
         }.onFailure { error ->
             log.warn(
                 "reserve_expired_notify_failed orderId={} reason={}",
-                order.id,
+                orderId,
                 error.message
             )
         }
     }
 }
 
+private fun buildOrderHoldRequests(lines: List<OrderLine>): List<OrderHoldRequest> {
+    if (lines.isEmpty()) return emptyList()
+    return lines
+        .groupBy { it.variantId ?: it.listingId }
+        .values
+        .map { group ->
+            val first = group.first()
+            OrderHoldRequest(
+                listingId = first.listingId,
+                variantId = first.variantId,
+                qty = group.sumOf { it.qty }
+            )
+        }
+}
+
 fun Application.installReservesSweepJob(cfg: AppConfig) {
     val ordersRepository by inject<OrdersRepository>()
+    val orderLinesRepository by inject<OrderLinesRepository>()
+    val merchantsRepository by inject<MerchantsRepository>()
     val orderStatusRepository by inject<OrderStatusHistoryRepository>()
-    val holdService by inject<HoldService>()
+    val orderHoldService by inject<OrderHoldService>()
     val clients by inject<TelegramClients>()
     val deps = ReservesSweepDeps(
         ordersRepository = ordersRepository,
+        orderLinesRepository = orderLinesRepository,
+        merchantsRepository = merchantsRepository,
         historyRepository = orderStatusRepository,
-        holdService = holdService,
+        orderHoldService = orderHoldService,
         clients = clients,
         sweepIntervalSec = cfg.server.reservesSweepSec,
-        orderReserveTtlSec = cfg.server.orderReserveTtlSec,
         log = environment.log
     )
     ReservesSweepJob(this, deps).start()

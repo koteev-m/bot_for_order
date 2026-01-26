@@ -1,21 +1,21 @@
 package com.example.app.routes
 
-import com.example.app.services.OffersService
-import com.example.app.services.PaymentsService
 import com.example.app.config.AppConfig
 import com.example.app.services.CartService
 import com.example.app.services.LinkResolveRateLimiter
 import com.example.app.services.LinkResolveService
+import com.example.app.services.OffersService
+import com.example.app.services.OrderCheckoutService
+import com.example.app.services.PaymentsService
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemsRepository
+import com.example.db.OrderLinesRepository
 import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrdersRepository
 import com.example.db.PricesDisplayRepository
 import com.example.db.VariantsRepository
 import com.example.app.security.installInitDataAuth
 import com.example.app.security.TelegramInitDataVerifier
-import com.example.domain.hold.HoldService
-import com.example.domain.hold.LockManager
 import com.example.domain.watchlist.WatchlistRepository
 import io.ktor.server.application.Application
 import io.ktor.server.routing.route
@@ -28,26 +28,25 @@ fun Application.installApiRoutes() {
     val variantsRepo by inject<VariantsRepository>()
     val pricesRepo by inject<PricesDisplayRepository>()
     val ordersRepo by inject<OrdersRepository>()
+    val orderLinesRepo by inject<OrderLinesRepository>()
     val historyRepo by inject<OrderStatusHistoryRepository>()
     val paymentsService by inject<PaymentsService>()
     val offersService by inject<OffersService>()
-    val holdService by inject<HoldService>()
-    val lockManager by inject<LockManager>()
     val cfg by inject<AppConfig>()
     val initDataVerifier by inject<TelegramInitDataVerifier>()
     val watchlistRepo by inject<WatchlistRepository>()
     val linkResolveService by inject<LinkResolveService>()
     val linkResolveRateLimiter by inject<LinkResolveRateLimiter>()
     val cartService by inject<CartService>()
+    val orderCheckoutService by inject<OrderCheckoutService>()
 
     val orderDeps = OrderRoutesDeps(
         itemsRepository = itemsRepo,
-        variantsRepository = variantsRepo,
         ordersRepository = ordersRepo,
+        orderLinesRepository = orderLinesRepo,
         historyRepository = historyRepo,
         paymentsService = paymentsService,
-        holdService = holdService,
-        lockManager = lockManager
+        orderCheckoutService = orderCheckoutService
     )
 
     routing {
@@ -55,7 +54,7 @@ fun Application.installApiRoutes() {
             installInitDataAuth(initDataVerifier)
             registerItemRoutes(itemsRepo, mediaRepo, variantsRepo, pricesRepo, cfg)
             registerOfferRoutes(offersService)
-            registerOrdersRoutes(cfg, orderDeps)
+            registerOrdersRoutes(orderDeps)
             registerWatchlistRoutes(itemsRepo, variantsRepo, watchlistRepo, cfg)
             registerLinkRoutes(linkResolveService, linkResolveRateLimiter)
             registerCartRoutes(cartService, cfg)

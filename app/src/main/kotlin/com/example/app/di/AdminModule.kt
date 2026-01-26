@@ -27,5 +27,5 @@ val adminModule = module {
             get<StorefrontsRepository>()
         )
     }
-    single { OrderStatusService(get(), get(), get(), get()) }
+    single { OrderStatusService(get(), get(), get(), get(), get()) }
 }
