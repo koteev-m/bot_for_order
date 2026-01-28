@@ -16,6 +16,8 @@ import com.example.app.tg.TgMessage
 import com.example.app.tg.TgUpdate
 import com.example.app.tg.TgCallbackQuery
 import com.example.bots.TelegramClients
+import com.example.db.OrderDeliveryRepository
+import com.example.db.OrdersRepository
 import com.example.db.ItemMediaRepository
 import com.example.domain.ItemMedia
 import com.pengrad.telegrambot.model.request.InputMedia
@@ -53,6 +55,8 @@ fun Application.installAdminWebhook() {
     val manualPaymentsService by inject<ManualPaymentsService>()
     val paymentDetailsStateStore by inject<PaymentDetailsStateStore>()
     val paymentRejectReasonStateStore by inject<PaymentRejectReasonStateStore>()
+    val ordersRepository by inject<OrdersRepository>()
+    val orderDeliveryRepository by inject<OrderDeliveryRepository>()
 
     val json = Json { ignoreUnknownKeys = true }
     val deps = AdminWebhookDeps(
@@ -69,7 +73,9 @@ fun Application.installAdminWebhook() {
         orderStatusService = orderStatusService,
         offersService = offersService,
         inventoryService = inventoryService,
-        manualPaymentsService = manualPaymentsService
+        manualPaymentsService = manualPaymentsService,
+        ordersRepository = ordersRepository,
+        orderDeliveryRepository = orderDeliveryRepository
     )
 
     routing {
@@ -94,7 +100,9 @@ private data class AdminWebhookDeps(
     val orderStatusService: OrderStatusService,
     val offersService: OffersService,
     val inventoryService: InventoryService,
-    val manualPaymentsService: ManualPaymentsService
+    val manualPaymentsService: ManualPaymentsService,
+    val ordersRepository: OrdersRepository,
+    val orderDeliveryRepository: OrderDeliveryRepository
 )
 
 private suspend fun handleAdminUpdate(
@@ -269,6 +277,7 @@ private suspend fun handleAdminCommand(
         STATUS_COMMAND -> handleStatusCommand(args, fromId, deps.orderStatusService, reply)
         COUNTER_COMMAND -> handleCounterCommand(args, fromId, deps.offersService, reply)
         STOCK_COMMAND -> handleStockCommand(args, deps.inventoryService, reply)
+        ORDER_COMMAND -> handleOrderCommand(args, deps.ordersRepository, deps.orderDeliveryRepository, reply)
         else -> reply("Неизвестная команда. Напишите <code>/help</code>.")
     }
 }

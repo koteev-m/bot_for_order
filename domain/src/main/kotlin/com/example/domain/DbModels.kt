@@ -161,6 +161,11 @@ enum class PaymentMethodType {
 }
 
 @Serializable
+enum class DeliveryMethodType {
+    CDEK_PICKUP_MANUAL
+}
+
+@Serializable
 enum class PaymentMethodMode {
     AUTO,
     MANUAL_SEND
@@ -248,6 +253,34 @@ data class OrderPaymentDetails(
     val text: String,
     @Serializable(with = InstantIsoSerializer::class)
     val createdAt: Instant
+)
+
+@Serializable
+data class MerchantDeliveryMethod(
+    val merchantId: String,
+    val type: DeliveryMethodType,
+    val enabled: Boolean,
+    val requiredFieldsJson: String
+)
+
+@Serializable
+data class OrderDelivery(
+    val orderId: String,
+    val type: DeliveryMethodType,
+    val fieldsJson: String,
+    @Serializable(with = InstantIsoSerializer::class)
+    val createdAt: Instant,
+    @Serializable(with = InstantIsoSerializer::class)
+    val updatedAt: Instant
+)
+
+@Serializable
+data class BuyerDeliveryProfile(
+    val merchantId: String,
+    val buyerUserId: Long,
+    val fieldsJson: String,
+    @Serializable(with = InstantIsoSerializer::class)
+    val updatedAt: Instant
 )
 
 @Serializable

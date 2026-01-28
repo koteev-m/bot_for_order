@@ -42,6 +42,12 @@ import com.example.db.VariantsRepositoryExposed
 import com.example.db.WatchlistRepositoryExposed
 import com.example.db.MerchantPaymentMethodsRepository
 import com.example.db.MerchantPaymentMethodsRepositoryExposed
+import com.example.db.MerchantDeliveryMethodsRepository
+import com.example.db.MerchantDeliveryMethodsRepositoryExposed
+import com.example.db.OrderDeliveryRepository
+import com.example.db.OrderDeliveryRepositoryExposed
+import com.example.db.BuyerDeliveryProfileRepository
+import com.example.db.BuyerDeliveryProfileRepositoryExposed
 import com.example.domain.watchlist.WatchlistRepository
 import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
@@ -80,9 +86,12 @@ fun dbModule(cfg: AppConfig) = module {
     single<OrderLinesRepository> { OrderLinesRepositoryExposed(get()) }
     single<OrderStatusHistoryRepository> { OrderStatusHistoryRepositoryExposed(get()) }
     single<MerchantPaymentMethodsRepository> { MerchantPaymentMethodsRepositoryExposed(get()) }
+    single<MerchantDeliveryMethodsRepository> { MerchantDeliveryMethodsRepositoryExposed(get()) }
     single<OrderPaymentDetailsRepository> { OrderPaymentDetailsRepositoryExposed(get()) }
     single<OrderPaymentClaimsRepository> { OrderPaymentClaimsRepositoryExposed(get()) }
     single<OrderAttachmentsRepository> { OrderAttachmentsRepositoryExposed(get()) }
+    single<OrderDeliveryRepository> { OrderDeliveryRepositoryExposed(get()) }
+    single<BuyerDeliveryProfileRepository> { BuyerDeliveryProfileRepositoryExposed(get()) }
     single<WatchlistRepository> { WatchlistRepositoryExposed(get()) }
     single<CartsRepository> { CartsRepositoryExposed(get()) }
     single<CartItemsRepository> { CartItemsRepositoryExposed(get()) }
