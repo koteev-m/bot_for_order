@@ -223,8 +223,13 @@ internal suspend fun handleOrderCommand(
     }
     val delivery = orderDeliveryRepository.getByOrder(orderId)
     val deliveryLines = delivery?.let {
-        val fields = DeliveryFieldsCodec.decodeFields(it.fieldsJson)
-        buildDeliverySummary(fields)
+        runCatching {
+            val fields = DeliveryFieldsCodec.decodeFields(it.fieldsJson)
+            buildDeliverySummary(fields)
+        }.getOrElse {
+            reply("⚠️ Не удалось получить данные заказа.")
+            return
+        }
     }
     val base = buildString {
         appendLine("🧾 Заказ <code>${order.id}</code>")
@@ -240,7 +245,7 @@ private fun buildDeliverySummary(fields: JsonObject): List<String> {
     val lines = mutableListOf<String>()
     lines.add("🚚 Доставка: CDEK ПВЗ (manual)")
     listOf("pvzCode" to "Код ПВЗ", "pvzAddress" to "Адрес ПВЗ", "city" to "Город").forEach { (key, label) ->
-        val value = fields[key].asNonBlankString()
+        val value = fields[key].asNonBlankString()?.let(::escapeHtml)
         if (value != null) {
             lines.add("$label: $value")
         }
