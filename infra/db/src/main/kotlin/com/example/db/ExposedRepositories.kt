@@ -753,6 +753,13 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
         } > 0
     }
 
+    override suspend fun clearPaymentClaimedAt(orderId: String): Boolean = tx.tx {
+        OrdersTable.update({ OrdersTable.id eq orderId }) {
+            it[paymentClaimedAt] = null
+            it[updatedAt] = CurrentTimestamp()
+        } > 0
+    }
+
     override suspend fun setPaymentMethodSelection(orderId: String, type: PaymentMethodType, selectedAt: Instant): Boolean =
         tx.tx {
             OrdersTable.update({

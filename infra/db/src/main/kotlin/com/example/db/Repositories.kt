@@ -112,6 +112,7 @@ interface OrdersRepository {
     suspend fun setInvoiceMessage(id: String, invoiceMessageId: Int)
     suspend fun markPaid(id: String, provider: String, providerChargeId: String, telegramPaymentChargeId: String)
     suspend fun setPaymentClaimed(orderId: String, claimedAt: Instant): Boolean
+    suspend fun clearPaymentClaimedAt(orderId: String): Boolean
     suspend fun setPaymentMethodSelection(orderId: String, type: PaymentMethodType, selectedAt: Instant): Boolean
     suspend fun listPendingClaimOlderThan(cutoff: Instant): List<Order>
     suspend fun listPendingReviewOlderThan(cutoff: Instant): List<Order>

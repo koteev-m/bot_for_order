@@ -10,6 +10,7 @@ import com.example.app.services.OffersService
 import com.example.app.services.ManualPaymentsService
 import com.example.app.services.PendingMedia
 import com.example.app.services.PaymentDetailsStateStore
+import com.example.app.services.PaymentRejectReasonStateStore
 import com.example.app.services.PostService
 import com.example.app.tg.TgMessage
 import com.example.app.tg.TgUpdate
@@ -51,6 +52,7 @@ fun Application.installAdminWebhook() {
     val inventoryService by inject<InventoryService>()
     val manualPaymentsService by inject<ManualPaymentsService>()
     val paymentDetailsStateStore by inject<PaymentDetailsStateStore>()
+    val paymentRejectReasonStateStore by inject<PaymentRejectReasonStateStore>()
 
     val json = Json { ignoreUnknownKeys = true }
     val deps = AdminWebhookDeps(
@@ -62,6 +64,7 @@ fun Application.installAdminWebhook() {
         itemMediaRepository = itemMediaRepository,
         mediaStateStore = mediaStateStore,
         paymentDetailsStateStore = paymentDetailsStateStore,
+        paymentRejectReasonStateStore = paymentRejectReasonStateStore,
         postService = postService,
         orderStatusService = orderStatusService,
         offersService = offersService,
@@ -86,6 +89,7 @@ private data class AdminWebhookDeps(
     val itemMediaRepository: ItemMediaRepository,
     val mediaStateStore: MediaStateStore,
     val paymentDetailsStateStore: PaymentDetailsStateStore,
+    val paymentRejectReasonStateStore: PaymentRejectReasonStateStore,
     val postService: PostService,
     val orderStatusService: OrderStatusService,
     val offersService: OffersService,
@@ -133,7 +137,11 @@ private suspend fun handleAdminUpdate(
     } else {
         val text = message.text?.trim().orEmpty()
         val pendingDetailsOrderId = deps.paymentDetailsStateStore.get(fromId)
-        if (pendingDetailsOrderId != null && text.isNotBlank() && !text.startsWith("/")) {
+        val pendingRejectOrderId = deps.paymentRejectReasonStateStore.get(fromId)
+        if (pendingRejectOrderId != null && text.isNotBlank() && !text.startsWith("/")) {
+            handlePaymentRejectMessage(chatId, fromId, pendingRejectOrderId, text, deps, reply)
+            deps.paymentRejectReasonStateStore.clear(fromId)
+        } else if (pendingDetailsOrderId != null && text.isNotBlank() && !text.startsWith("/")) {
             handlePaymentDetailsMessage(chatId, fromId, pendingDetailsOrderId, text, deps, reply)
             deps.paymentDetailsStateStore.clear(fromId)
         } else if (text.startsWith("/")) {
@@ -176,9 +184,9 @@ private suspend fun handleAdminCallback(callback: TgCallbackQuery, deps: AdminWe
                 .onFailure { reply("⚠️ Не удалось подтвердить оплату.") }
         }
         "reject" -> {
-            runCatching { deps.manualPaymentsService.rejectPayment(orderId, fromId, "not_paid") }
-                .onSuccess { reply("❌ Оплата отклонена для заказа <code>$orderId</code>.") }
-                .onFailure { reply("⚠️ Не удалось отклонить оплату.") }
+            deps.paymentDetailsStateStore.clear(fromId)
+            deps.paymentRejectReasonStateStore.start(fromId, orderId)
+            reply("❌ Укажите причину отклонения одним сообщением для заказа <code>$orderId</code>.")
         }
         "clarify" -> {
             runCatching { deps.manualPaymentsService.requestClarification(orderId) }
@@ -212,6 +220,25 @@ private suspend fun handlePaymentDetailsMessage(
         }
 }
 
+private suspend fun handlePaymentRejectMessage(
+    chatId: Long,
+    adminId: Long,
+    orderId: String,
+    text: String,
+    deps: AdminWebhookDeps,
+    reply: (String) -> Unit
+) {
+    runCatching { deps.manualPaymentsService.rejectPayment(orderId, adminId, text) }
+        .onSuccess { reply("❌ Оплата отклонена для заказа <code>$orderId</code>.") }
+        .onFailure {
+            deps.clients.adminBot.execute(
+                SendMessage(chatId, "⚠️ Не удалось отклонить оплату.")
+                    .parseMode(ParseMode.HTML)
+                    .disablePreview()
+            )
+        }
+}
+
 private suspend fun handleAdminCommand(
     chatId: Long,
     fromId: Long,
@@ -223,6 +250,11 @@ private suspend fun handleAdminCommand(
     when (command) {
         "/start" -> reply(START_REPLY)
         "/help" -> reply(HELP_REPLY)
+        "/cancel" -> {
+            deps.paymentDetailsStateStore.clear(fromId)
+            deps.paymentRejectReasonStateStore.clear(fromId)
+            reply("Действие отменено.")
+        }
         "/new" -> handleCreateDraft(chatId, args, deps.clients, deps.itemsService)
         "/media" -> handleMediaStart(fromId, chatId, args, deps.mediaStateStore, reply)
         "/media_done" -> handleMediaFinalize(fromId, deps.mediaStateStore, deps.itemMediaRepository, reply)

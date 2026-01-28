@@ -9,6 +9,7 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.services.s3.S3Configuration
 import software.amazon.awssdk.services.s3.model.GetObjectRequest
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
 import software.amazon.awssdk.services.s3.presigner.S3Presigner
@@ -23,17 +24,22 @@ class S3Storage(
     )
     private val region = Region.of(config.region)
     private val endpoint = URI(config.endpoint)
+    private val s3Configuration = S3Configuration.builder()
+        .pathStyleAccessEnabled(true)
+        .build()
 
     private val s3Client: S3Client = S3Client.builder()
         .endpointOverride(endpoint)
         .credentialsProvider(credentials)
         .region(region)
+        .serviceConfiguration(s3Configuration)
         .build()
 
     private val presigner: S3Presigner = S3Presigner.builder()
         .endpointOverride(endpoint)
         .credentialsProvider(credentials)
         .region(region)
+        .serviceConfiguration(s3Configuration)
         .build()
 
     override fun putObject(stream: InputStream, key: String, contentType: String, size: Long) {
