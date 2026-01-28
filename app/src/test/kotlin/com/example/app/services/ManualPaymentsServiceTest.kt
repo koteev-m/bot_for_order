@@ -50,7 +50,7 @@ import kotlinx.coroutines.runBlocking
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.select
+import org.jetbrains.exposed.sql.selectAll
 
 class ManualPaymentsServiceTest : StringSpec({
     val dockerAvailable = isDockerAvailable()
@@ -549,7 +549,7 @@ class ManualPaymentsServiceTest : StringSpec({
             holdService.hasOrderReserve(order.id) shouldBe false
             val status = dbTx.tx {
                 OrderPaymentClaimsTable
-                    .select(OrderPaymentClaimsTable.status)
+                    .selectAll()
                     .where { OrderPaymentClaimsTable.orderId eq order.id }
                     .single()[OrderPaymentClaimsTable.status]
             }

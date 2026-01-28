@@ -376,7 +376,8 @@ class ManualPaymentsService(
         attachments.forEach { attachment ->
             val key = buildStorageKey(orderId)
             val stream = ByteArrayInputStream(attachment.bytes)
-            storage.putObject(stream, key, attachment.contentType, attachment.bytes.size.toLong())
+            val mime = normalizeMimeType(attachment.contentType)
+            storage.putObject(stream, key, mime, attachment.bytes.size.toLong())
             val record = OrderAttachment(
                 id = 0,
                 orderId = orderId,
@@ -384,7 +385,7 @@ class ManualPaymentsService(
                 kind = OrderAttachmentKind.PAYMENT_PROOF,
                 storageKey = key,
                 telegramFileId = null,
-                mime = attachment.contentType,
+                mime = mime,
                 size = attachment.bytes.size.toLong(),
                 createdAt = now
             )

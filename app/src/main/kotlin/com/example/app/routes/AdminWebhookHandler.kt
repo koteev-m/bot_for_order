@@ -179,6 +179,8 @@ private suspend fun handleAdminCallback(callback: TgCallbackQuery, deps: AdminWe
     val orderId = parts[2]
     when (action) {
         "confirm" -> {
+            deps.paymentDetailsStateStore.clear(fromId)
+            deps.paymentRejectReasonStateStore.clear(fromId)
             runCatching { deps.manualPaymentsService.confirmPayment(orderId, fromId) }
                 .onSuccess { reply("✅ Оплата подтверждена для заказа <code>$orderId</code>.") }
                 .onFailure { reply("⚠️ Не удалось подтвердить оплату.") }
@@ -186,14 +188,17 @@ private suspend fun handleAdminCallback(callback: TgCallbackQuery, deps: AdminWe
         "reject" -> {
             deps.paymentDetailsStateStore.clear(fromId)
             deps.paymentRejectReasonStateStore.start(fromId, orderId)
-            reply("❌ Укажите причину отклонения одним сообщением для заказа <code>$orderId</code>.")
+            reply("❌ Укажите причину отклонения одним сообщением для заказа <code>$orderId</code>. Для отмены: /cancel.")
         }
         "clarify" -> {
+            deps.paymentDetailsStateStore.clear(fromId)
+            deps.paymentRejectReasonStateStore.clear(fromId)
             runCatching { deps.manualPaymentsService.requestClarification(orderId) }
                 .onSuccess { reply("🕒 Запрос на уточнение отправлен для заказа <code>$orderId</code>.") }
                 .onFailure { reply("⚠️ Не удалось отправить запрос на уточнение.") }
         }
         "details" -> {
+            deps.paymentRejectReasonStateStore.clear(fromId)
             deps.paymentDetailsStateStore.start(fromId, orderId)
             reply("📤 Отправьте реквизиты одним сообщением для заказа <code>$orderId</code>.")
         }
