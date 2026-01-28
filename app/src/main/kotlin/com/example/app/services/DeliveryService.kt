@@ -116,7 +116,7 @@ internal object DeliveryFieldsCodec {
             val primitive = value as? JsonPrimitive
             val text = primitive?.takeIf { it.isString }?.content?.trim()
             if (text.isNullOrEmpty()) {
-                throw ApiError("delivery_required_field_missing: $key", HttpStatusCode.BadRequest)
+                throw ApiError("delivery_required_field_missing", HttpStatusCode.BadRequest)
             }
         }
     }

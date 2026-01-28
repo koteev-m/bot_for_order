@@ -155,7 +155,7 @@ class DeliveryServiceTest : StringSpec({
             }
         }
         error.status.value shouldBe 400
-        error.message?.startsWith("delivery_required_field_missing") shouldBe true
+        error.message shouldBe "delivery_required_field_missing"
     }
 
     "order delivery upsert updates timestamps".config(enabled = dockerAvailable) {
