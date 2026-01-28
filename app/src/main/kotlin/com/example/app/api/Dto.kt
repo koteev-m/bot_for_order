@@ -4,6 +4,7 @@ import com.example.domain.LinkAction
 import com.example.domain.LinkButton
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 data class ItemResponse(
@@ -107,7 +108,14 @@ data class OrderCard(
     val status: String,
     val updatedAt: String,
     val lines: List<OrderLineDto> = emptyList(),
-    val history: List<OrderHistoryEntry>
+    val history: List<OrderHistoryEntry>,
+    val delivery: OrderDeliverySummary? = null
+)
+
+@Serializable
+data class OrderDeliverySummary(
+    val type: String,
+    val fields: JsonObject
 )
 
 @Serializable
@@ -151,6 +159,30 @@ data class PaymentClaimResponse(
     val id: Long,
     val status: String,
     val createdAt: String
+)
+
+@Serializable
+data class OrderDeliveryRequest(
+    val fields: JsonObject
+)
+
+@Serializable
+data class OrderDeliveryResponse(
+    val type: String,
+    val fields: JsonObject,
+    val createdAt: String,
+    val updatedAt: String
+)
+
+@Serializable
+data class BuyerDeliveryProfileRequest(
+    val fields: JsonObject
+)
+
+@Serializable
+data class BuyerDeliveryProfileResponse(
+    val fields: JsonObject? = null,
+    val updatedAt: String? = null
 )
 
 @Serializable

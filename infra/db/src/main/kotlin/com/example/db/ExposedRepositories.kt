@@ -7,12 +7,14 @@ import com.example.db.tables.ItemMediaTable
 import com.example.db.tables.ItemsTable
 import com.example.db.tables.LinkContextsTable
 import com.example.db.tables.MerchantsTable
+import com.example.db.tables.MerchantDeliveryMethodsTable
 import com.example.db.tables.MerchantPaymentMethodsTable
 import com.example.db.tables.OffersTable
 import com.example.db.tables.OrderStatusHistoryTable
 import com.example.db.tables.OrderLinesTable
 import com.example.db.tables.OrdersTable
 import com.example.db.tables.OrderAttachmentsTable
+import com.example.db.tables.OrderDeliveryTable
 import com.example.db.tables.OrderPaymentClaimsTable
 import com.example.db.tables.OrderPaymentDetailsTable
 import com.example.db.tables.PostsTable
@@ -20,6 +22,7 @@ import com.example.db.tables.PricesDisplayTable
 import com.example.db.tables.StorefrontsTable
 import com.example.db.tables.VariantsTable
 import com.example.db.tables.WatchlistTable
+import com.example.db.tables.BuyerDeliveryProfileTable
 import com.example.domain.BargainRules
 import com.example.domain.ChannelBinding
 import com.example.domain.Cart
@@ -31,17 +34,20 @@ import com.example.domain.LinkAction
 import com.example.domain.LinkButton
 import com.example.domain.LinkContext
 import com.example.domain.Merchant
+import com.example.domain.MerchantDeliveryMethod
 import com.example.domain.MerchantPaymentMethod
 import com.example.domain.Offer
 import com.example.domain.OfferStatus
 import com.example.domain.Order
 import com.example.domain.OrderAttachment
 import com.example.domain.OrderAttachmentKind
+import com.example.domain.OrderDelivery
 import com.example.domain.OrderLine
 import com.example.domain.OrderPaymentClaim
 import com.example.domain.OrderPaymentDetails
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
+import com.example.domain.BuyerDeliveryProfile
 import com.example.domain.PaymentClaimStatus
 import com.example.domain.PaymentMethodMode
 import com.example.domain.PaymentMethodType
@@ -50,6 +56,7 @@ import com.example.domain.PricesDisplay
 import com.example.domain.Storefront
 import com.example.domain.Variant
 import com.example.domain.WatchTrigger
+import com.example.domain.DeliveryMethodType
 import com.example.domain.watchlist.PriceDropSubscription
 import com.example.domain.watchlist.RestockSubscription
 import com.example.domain.watchlist.WatchlistRepository
@@ -946,6 +953,42 @@ class MerchantPaymentMethodsRepositoryExposed(private val tx: DatabaseTx) : Merc
         )
 }
 
+class MerchantDeliveryMethodsRepositoryExposed(private val tx: DatabaseTx) : MerchantDeliveryMethodsRepository {
+    override suspend fun getEnabledMethod(
+        merchantId: String,
+        type: DeliveryMethodType
+    ): MerchantDeliveryMethod? = tx.tx {
+        MerchantDeliveryMethodsTable
+            .selectAll()
+            .where {
+                (MerchantDeliveryMethodsTable.merchantId eq merchantId) and
+                    (MerchantDeliveryMethodsTable.type eq type.name) and
+                    (MerchantDeliveryMethodsTable.enabled eq true)
+            }
+            .singleOrNull()
+            ?.toMerchantDeliveryMethod()
+    }
+
+    override suspend fun getMethod(merchantId: String, type: DeliveryMethodType): MerchantDeliveryMethod? = tx.tx {
+        MerchantDeliveryMethodsTable
+            .selectAll()
+            .where {
+                (MerchantDeliveryMethodsTable.merchantId eq merchantId) and
+                    (MerchantDeliveryMethodsTable.type eq type.name)
+            }
+            .singleOrNull()
+            ?.toMerchantDeliveryMethod()
+    }
+
+    private fun ResultRow.toMerchantDeliveryMethod(): MerchantDeliveryMethod =
+        MerchantDeliveryMethod(
+            merchantId = this[MerchantDeliveryMethodsTable.merchantId],
+            type = DeliveryMethodType.valueOf(this[MerchantDeliveryMethodsTable.type]),
+            enabled = this[MerchantDeliveryMethodsTable.enabled],
+            requiredFieldsJson = this[MerchantDeliveryMethodsTable.requiredFieldsJson]
+        )
+}
+
 class OrderPaymentDetailsRepositoryExposed(private val tx: DatabaseTx) : OrderPaymentDetailsRepository {
     override suspend fun getByOrder(orderId: String): OrderPaymentDetails? = tx.tx {
         OrderPaymentDetailsTable
@@ -1073,6 +1116,85 @@ class OrderAttachmentsRepositoryExposed(private val tx: DatabaseTx) : OrderAttac
             mime = this[OrderAttachmentsTable.mime],
             size = this[OrderAttachmentsTable.size],
             createdAt = this[OrderAttachmentsTable.createdAt]
+        )
+}
+
+class OrderDeliveryRepositoryExposed(private val tx: DatabaseTx) : OrderDeliveryRepository {
+    override suspend fun getByOrder(orderId: String): OrderDelivery? = tx.tx {
+        OrderDeliveryTable
+            .selectAll()
+            .where { OrderDeliveryTable.orderId eq orderId }
+            .singleOrNull()
+            ?.toOrderDelivery()
+    }
+
+    override suspend fun upsert(delivery: OrderDelivery) {
+        tx.tx {
+            val updated = OrderDeliveryTable.update({ OrderDeliveryTable.orderId eq delivery.orderId }) {
+                it[type] = delivery.type.name
+                it[fieldsJson] = delivery.fieldsJson
+                it[updatedAt] = CurrentTimestamp()
+            }
+            if (updated == 0) {
+                OrderDeliveryTable.insert {
+                    it[orderId] = delivery.orderId
+                    it[type] = delivery.type.name
+                    it[fieldsJson] = delivery.fieldsJson
+                    it[createdAt] = delivery.createdAt
+                    it[updatedAt] = delivery.updatedAt
+                }
+            }
+        }
+    }
+
+    private fun ResultRow.toOrderDelivery(): OrderDelivery =
+        OrderDelivery(
+            orderId = this[OrderDeliveryTable.orderId],
+            type = DeliveryMethodType.valueOf(this[OrderDeliveryTable.type]),
+            fieldsJson = this[OrderDeliveryTable.fieldsJson],
+            createdAt = this[OrderDeliveryTable.createdAt],
+            updatedAt = this[OrderDeliveryTable.updatedAt]
+        )
+}
+
+class BuyerDeliveryProfileRepositoryExposed(private val tx: DatabaseTx) : BuyerDeliveryProfileRepository {
+    override suspend fun get(merchantId: String, buyerUserId: Long): BuyerDeliveryProfile? = tx.tx {
+        BuyerDeliveryProfileTable
+            .selectAll()
+            .where {
+                (BuyerDeliveryProfileTable.merchantId eq merchantId) and
+                    (BuyerDeliveryProfileTable.buyerUserId eq buyerUserId)
+            }
+            .singleOrNull()
+            ?.toProfile()
+    }
+
+    override suspend fun upsert(profile: BuyerDeliveryProfile) {
+        tx.tx {
+            val updated = BuyerDeliveryProfileTable.update({
+                (BuyerDeliveryProfileTable.merchantId eq profile.merchantId) and
+                    (BuyerDeliveryProfileTable.buyerUserId eq profile.buyerUserId)
+            }) {
+                it[fieldsJson] = profile.fieldsJson
+                it[updatedAt] = CurrentTimestamp()
+            }
+            if (updated == 0) {
+                BuyerDeliveryProfileTable.insert {
+                    it[merchantId] = profile.merchantId
+                    it[buyerUserId] = profile.buyerUserId
+                    it[fieldsJson] = profile.fieldsJson
+                    it[updatedAt] = profile.updatedAt
+                }
+            }
+        }
+    }
+
+    private fun ResultRow.toProfile(): BuyerDeliveryProfile =
+        BuyerDeliveryProfile(
+            merchantId = this[BuyerDeliveryProfileTable.merchantId],
+            buyerUserId = this[BuyerDeliveryProfileTable.buyerUserId],
+            fieldsJson = this[BuyerDeliveryProfileTable.fieldsJson],
+            updatedAt = this[BuyerDeliveryProfileTable.updatedAt]
         )
 }
 

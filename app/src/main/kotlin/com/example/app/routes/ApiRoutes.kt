@@ -2,6 +2,7 @@ package com.example.app.routes
 
 import com.example.app.config.AppConfig
 import com.example.app.services.CartService
+import com.example.app.services.DeliveryService
 import com.example.app.services.LinkResolveRateLimiter
 import com.example.app.services.LinkResolveService
 import com.example.app.services.ManualPaymentsService
@@ -10,6 +11,7 @@ import com.example.app.services.OrderCheckoutService
 import com.example.app.services.PaymentsService
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemsRepository
+import com.example.db.OrderDeliveryRepository
 import com.example.db.OrderLinesRepository
 import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrdersRepository
@@ -33,6 +35,7 @@ fun Application.installApiRoutes() {
     val historyRepo by inject<OrderStatusHistoryRepository>()
     val paymentsService by inject<PaymentsService>()
     val manualPaymentsService by inject<ManualPaymentsService>()
+    val deliveryService by inject<DeliveryService>()
     val offersService by inject<OffersService>()
     val cfg by inject<AppConfig>()
     val initDataVerifier by inject<TelegramInitDataVerifier>()
@@ -41,6 +44,7 @@ fun Application.installApiRoutes() {
     val linkResolveRateLimiter by inject<LinkResolveRateLimiter>()
     val cartService by inject<CartService>()
     val orderCheckoutService by inject<OrderCheckoutService>()
+    val orderDeliveryRepository by inject<OrderDeliveryRepository>()
 
     val orderDeps = OrderRoutesDeps(
         itemsRepository = itemsRepo,
@@ -49,7 +53,9 @@ fun Application.installApiRoutes() {
         historyRepository = historyRepo,
         paymentsService = paymentsService,
         orderCheckoutService = orderCheckoutService,
-        manualPaymentsService = manualPaymentsService
+        manualPaymentsService = manualPaymentsService,
+        orderDeliveryRepository = orderDeliveryRepository,
+        deliveryService = deliveryService
     )
 
     routing {
@@ -58,6 +64,7 @@ fun Application.installApiRoutes() {
             registerItemRoutes(itemsRepo, mediaRepo, variantsRepo, pricesRepo, cfg)
             registerOfferRoutes(offersService)
             registerOrdersRoutes(orderDeps)
+            registerBuyerDeliveryRoutes(deliveryService)
             registerWatchlistRoutes(itemsRepo, variantsRepo, watchlistRepo, cfg)
             registerLinkRoutes(linkResolveService, linkResolveRateLimiter)
             registerCartRoutes(cartService, cfg)

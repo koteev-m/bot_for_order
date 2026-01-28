@@ -4,6 +4,7 @@ import com.example.app.config.AppConfig
 import com.example.app.services.CartRedisStore
 import com.example.app.services.CartRedisStoreRedisson
 import com.example.app.services.CartService
+import com.example.app.services.DeliveryService
 import com.example.app.services.InventoryService
 import com.example.app.services.LinkContextService
 import com.example.app.services.LinkResolveRateLimiter
@@ -75,6 +76,7 @@ fun appModule(config: AppConfig, meterRegistry: MeterRegistry?) = module {
             get()
         )
     }
+    single { DeliveryService(config, get(), get(), get(), get()) }
 
     single<PriceDropNotifier> { PriceDropNotifierImpl(config, get(), get()) }
     single<RestockNotifier> { RestockNotifierImpl(config, get(), get(), get()) }

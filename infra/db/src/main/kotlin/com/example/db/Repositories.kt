@@ -19,6 +19,7 @@ import com.example.domain.OrderPaymentDetails
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
 import com.example.domain.MerchantPaymentMethod
+import com.example.domain.MerchantDeliveryMethod
 import com.example.domain.Post
 import com.example.domain.PricesDisplay
 import com.example.domain.Storefront
@@ -26,6 +27,9 @@ import com.example.domain.Variant
 import com.example.domain.PaymentClaimStatus
 import com.example.domain.PaymentMethodType
 import com.example.domain.OrderAttachmentKind
+import com.example.domain.OrderDelivery
+import com.example.domain.BuyerDeliveryProfile
+import com.example.domain.DeliveryMethodType
 import java.time.Instant
 
 interface MerchantsRepository {
@@ -135,6 +139,11 @@ interface MerchantPaymentMethodsRepository {
     suspend fun getMethod(merchantId: String, type: PaymentMethodType): MerchantPaymentMethod?
 }
 
+interface MerchantDeliveryMethodsRepository {
+    suspend fun getEnabledMethod(merchantId: String, type: DeliveryMethodType): MerchantDeliveryMethod?
+    suspend fun getMethod(merchantId: String, type: DeliveryMethodType): MerchantDeliveryMethod?
+}
+
 interface OrderPaymentDetailsRepository {
     suspend fun getByOrder(orderId: String): OrderPaymentDetails?
     suspend fun upsert(details: OrderPaymentDetails)
@@ -151,6 +160,16 @@ interface OrderAttachmentsRepository {
     suspend fun getById(id: Long): OrderAttachment?
     suspend fun listByOrder(orderId: String): List<OrderAttachment>
     suspend fun listByOrderAndKind(orderId: String, kind: OrderAttachmentKind): List<OrderAttachment>
+}
+
+interface OrderDeliveryRepository {
+    suspend fun getByOrder(orderId: String): OrderDelivery?
+    suspend fun upsert(delivery: OrderDelivery)
+}
+
+interface BuyerDeliveryProfileRepository {
+    suspend fun get(merchantId: String, buyerUserId: Long): BuyerDeliveryProfile?
+    suspend fun upsert(profile: BuyerDeliveryProfile)
 }
 
 data class CartItemWithCart(

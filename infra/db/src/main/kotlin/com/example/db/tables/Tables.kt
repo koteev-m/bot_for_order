@@ -171,6 +171,19 @@ object MerchantPaymentMethodsTable : Table("merchant_payment_method") {
     override val primaryKey = PrimaryKey(merchantId, type)
 }
 
+object MerchantDeliveryMethodsTable : Table("merchant_delivery_method") {
+    val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.CASCADE)
+    val type = varchar("type", 32)
+    val enabled = bool("enabled")
+    val requiredFieldsJson = text("required_fields_json")
+
+    init {
+        index(false, merchantId, enabled)
+    }
+
+    override val primaryKey = PrimaryKey(merchantId, type)
+}
+
 object OrderPaymentDetailsTable : Table("order_payment_details") {
     val orderId = reference("order_id", OrdersTable.id, onDelete = ReferenceOption.CASCADE)
     val providedByAdminId = long("provided_by_admin_id")
@@ -213,6 +226,19 @@ object OrderAttachmentsTable : Table("order_attachment") {
     }
 }
 
+object OrderDeliveryTable : Table("order_delivery") {
+    val orderId = reference("order_id", OrdersTable.id, onDelete = ReferenceOption.CASCADE)
+    val type = varchar("type", 32)
+    val fieldsJson = text("fields_json")
+    val createdAt = timestamp("created_at")
+    val updatedAt = timestamp("updated_at")
+    override val primaryKey = PrimaryKey(orderId)
+
+    init {
+        index(false, orderId)
+    }
+}
+
 object OrderLinesTable : Table("order_line") {
     val orderId = reference("order_id", OrdersTable.id, onDelete = ReferenceOption.CASCADE)
     val listingId = reference("listing_id", ItemsTable.id, onDelete = ReferenceOption.RESTRICT)
@@ -242,6 +268,19 @@ object CartsTable : Table("cart") {
     init {
         index(true, merchantId, buyerUserId)
     }
+}
+
+object BuyerDeliveryProfileTable : Table("buyer_delivery_profile") {
+    val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.CASCADE)
+    val buyerUserId = long("buyer_user_id")
+    val fieldsJson = text("fields_json")
+    val updatedAt = timestamp("updated_at")
+
+    init {
+        index(false, merchantId, buyerUserId)
+    }
+
+    override val primaryKey = PrimaryKey(merchantId, buyerUserId)
 }
 
 object CartItemsTable : Table("cart_item") {

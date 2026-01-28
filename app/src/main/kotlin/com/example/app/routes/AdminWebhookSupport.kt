@@ -4,11 +4,17 @@ import com.example.app.services.InventoryService
 import com.example.app.services.ItemsService
 import com.example.app.services.OffersService
 import com.example.app.services.OrderStatusService
+import com.example.app.services.DeliveryFieldsCodec
 import com.example.bots.TelegramClients
+import com.example.db.OrderDeliveryRepository
+import com.example.db.OrdersRepository
 import com.example.domain.OrderStatus
 import com.pengrad.telegrambot.model.LinkPreviewOptions
 import com.pengrad.telegrambot.model.request.ParseMode
 import com.pengrad.telegrambot.request.SendMessage
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 internal fun splitCommand(text: String): Pair<String, String> {
     val spaceIndex = text.indexOf(' ')
@@ -26,6 +32,8 @@ internal const val COUNTER_COMMAND = "/counter"
 internal const val COUNTER_USAGE = "/counter <OFFER_ID> <amountMinor>"
 internal const val STOCK_COMMAND = "/stock"
 internal const val STOCK_USAGE = "/stock <VARIANT_ID> <STOCK>"
+internal const val ORDER_COMMAND = "/order"
+internal const val ORDER_USAGE = "/order <ORDER_ID>"
 
 internal fun parseNewArgs(args: String): Pair<String, String> {
     if (args.isBlank()) return "Untitled" to "No description"
@@ -53,6 +61,7 @@ internal val HELP_REPLY = """
     В канале используется URL-кнопка (Direct Link Mini App ?startapp=).
     <b>/counter &lt;OFFER_ID&gt; &lt;amount&gt;</b> — отправить контр-офер покупателю
     <b>/stock &lt;VARIANT_ID&gt; &lt;STOCK&gt;</b> — установить остаток варианта
+    <b>/order &lt;ORDER_ID&gt;</b> — карточка заказа
 """.trimIndent()
 
 internal fun buildDraftCreatedReply(id: String): String = buildString {
@@ -194,6 +203,55 @@ internal suspend fun handleStockCommand(
         }
         reply("⚠️ $reason")
     }
+}
+
+internal suspend fun handleOrderCommand(
+    args: String,
+    ordersRepository: OrdersRepository,
+    orderDeliveryRepository: OrderDeliveryRepository,
+    reply: (String) -> Unit
+) {
+    val orderId = args.trim().takeIf { it.isNotBlank() }
+    if (orderId == null) {
+        reply("⚠️ $ORDER_USAGE")
+        return
+    }
+    val order = ordersRepository.get(orderId)
+    if (order == null) {
+        reply("⚠️ Заказ не найден.")
+        return
+    }
+    val delivery = orderDeliveryRepository.getByOrder(orderId)
+    val deliveryLines = delivery?.let {
+        val fields = DeliveryFieldsCodec.decodeFields(it.fieldsJson)
+        buildDeliverySummary(fields)
+    }
+    val base = buildString {
+        appendLine("🧾 Заказ <code>${order.id}</code>")
+        appendLine("Статус: <b>${order.status.name}</b>")
+        appendLine("Сумма: ${order.amountMinor} ${order.currency}")
+        appendLine("Покупатель: <code>${order.userId}</code>")
+    }
+    val text = if (deliveryLines.isNullOrEmpty()) base else base + "\n" + deliveryLines.joinToString("\n")
+    reply(text.trim())
+}
+
+private fun buildDeliverySummary(fields: JsonObject): List<String> {
+    val lines = mutableListOf<String>()
+    lines.add("🚚 Доставка: CDEK ПВЗ (manual)")
+    listOf("pvzCode" to "Код ПВЗ", "pvzAddress" to "Адрес ПВЗ", "city" to "Город").forEach { (key, label) ->
+        val value = fields[key].asNonBlankString()
+        if (value != null) {
+            lines.add("$label: $value")
+        }
+    }
+    return lines
+}
+
+private fun JsonElement?.asNonBlankString(): String? {
+    val primitive = this as? JsonPrimitive
+    val value = primitive?.content?.trim()
+    return value?.takeIf { it.isNotEmpty() }
 }
 
 private fun parseStatusArgs(args: String): StatusCommandArgs {

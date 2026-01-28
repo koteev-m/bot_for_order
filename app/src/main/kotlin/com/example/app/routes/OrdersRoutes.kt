@@ -2,6 +2,9 @@ package com.example.app.routes
 
 import com.example.app.api.OrderCard
 import com.example.app.api.OrderCreateResponse
+import com.example.app.api.OrderDeliveryRequest
+import com.example.app.api.OrderDeliveryResponse
+import com.example.app.api.OrderDeliverySummary
 import com.example.app.api.OrderHistoryEntry
 import com.example.app.api.OrdersPage
 import com.example.app.api.OrderLineDto
@@ -11,11 +14,14 @@ import com.example.app.api.PaymentInstructionsResponse
 import com.example.app.api.PaymentSelectRequest
 import com.example.app.api.PaymentSelectResponse
 import com.example.app.security.requireUserId
+import com.example.app.services.DeliveryService
+import com.example.app.services.DeliveryFieldsCodec
 import com.example.app.services.OrderCheckoutService
 import com.example.app.services.ManualPaymentsService
 import com.example.app.services.PaymentClaimAttachment
 import com.example.app.services.PaymentsService
 import com.example.db.ItemsRepository
+import com.example.db.OrderDeliveryRepository
 import com.example.db.OrderLinesRepository
 import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrdersRepository
@@ -47,7 +53,9 @@ data class OrderRoutesDeps(
     val historyRepository: OrderStatusHistoryRepository,
     val paymentsService: PaymentsService,
     val orderCheckoutService: OrderCheckoutService,
-    val manualPaymentsService: ManualPaymentsService
+    val manualPaymentsService: ManualPaymentsService,
+    val orderDeliveryRepository: OrderDeliveryRepository,
+    val deliveryService: DeliveryService
 )
 
 private data class OrderCreationDeps(
@@ -62,7 +70,13 @@ fun Route.registerOrdersRoutes(
         handleCreateOrder(call, deps)
     }
     get("/orders/me") {
-        handleOrdersMe(call, routesDeps.ordersRepository, routesDeps.orderLinesRepository, routesDeps.historyRepository)
+        handleOrdersMe(
+            call,
+            routesDeps.ordersRepository,
+            routesDeps.orderLinesRepository,
+            routesDeps.historyRepository,
+            routesDeps.orderDeliveryRepository
+        )
     }
     post("/orders/{id}/payment/select") {
         handleSelectPayment(call, routesDeps.manualPaymentsService)
@@ -72,6 +86,9 @@ fun Route.registerOrdersRoutes(
     }
     post("/orders/{id}/payment/claim") {
         handlePaymentClaim(call, routesDeps.manualPaymentsService)
+    }
+    post("/orders/{id}/delivery") {
+        handleOrderDelivery(call, routesDeps.deliveryService)
     }
 }
 
@@ -204,7 +221,8 @@ private suspend fun handleOrdersMe(
     call: ApplicationCall,
     ordersRepo: OrdersRepository,
     orderLinesRepo: OrderLinesRepository,
-    historyRepo: OrderStatusHistoryRepository
+    historyRepo: OrderStatusHistoryRepository,
+    orderDeliveryRepository: OrderDeliveryRepository
 ) {
     val userId = call.requireUserId()
     val orders = ordersRepo.listByUser(userId)
@@ -221,6 +239,12 @@ private suspend fun handleOrdersMe(
             }
         val lines = linesByOrder[order.id].orEmpty()
         val legacyLine = lines.singleOrNull()
+        val delivery = orderDeliveryRepository.getByOrder(order.id)?.let { stored ->
+            OrderDeliverySummary(
+                type = stored.type.name,
+                fields = DeliveryFieldsCodec.decodeFields(stored.fieldsJson)
+            )
+        }
         OrderCard(
             orderId = order.id,
             itemId = order.itemId ?: legacyLine?.listingId,
@@ -242,8 +266,27 @@ private suspend fun handleOrdersMe(
                     sourcePostMessageId = line.sourcePostMessageId
                 )
             },
-            history = history
+            history = history,
+            delivery = delivery
         )
     }
     call.respond(OrdersPage(items = cards))
+}
+
+private suspend fun handleOrderDelivery(
+    call: ApplicationCall,
+    deliveryService: DeliveryService
+) {
+    val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
+    val userId = call.requireUserId()
+    val request = call.receive<OrderDeliveryRequest>()
+    val delivery = deliveryService.setOrderDelivery(orderId, userId, request.fields)
+    call.respond(
+        OrderDeliveryResponse(
+            type = delivery.type.name,
+            fields = DeliveryFieldsCodec.decodeFields(delivery.fieldsJson),
+            createdAt = delivery.createdAt.toString(),
+            updatedAt = delivery.updatedAt.toString()
+        )
+    )
 }
