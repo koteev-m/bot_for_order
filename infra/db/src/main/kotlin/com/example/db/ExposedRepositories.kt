@@ -1130,32 +1130,25 @@ class OrderDeliveryRepositoryExposed(private val tx: DatabaseTx) : OrderDelivery
 
     override suspend fun upsert(delivery: OrderDelivery) {
         tx.tx {
-            val updated = OrderDeliveryTable.update({ OrderDeliveryTable.orderId eq delivery.orderId }) {
-                it[type] = delivery.type.name
-                it[fieldsJson] = delivery.fieldsJson
-                it[updatedAt] = CurrentTimestamp()
-            }
-            if (updated == 0) {
-                try {
-                    OrderDeliveryTable.insert {
-                        it[orderId] = delivery.orderId
-                        it[type] = delivery.type.name
-                        it[fieldsJson] = delivery.fieldsJson
-                        it[createdAt] = delivery.createdAt
-                        it[updatedAt] = delivery.updatedAt
-                    }
-                } catch (e: ExposedSQLException) {
-                    if (e.sqlState == "23505") {
-                        OrderDeliveryTable.update({ OrderDeliveryTable.orderId eq delivery.orderId }) {
-                            it[type] = delivery.type.name
-                            it[fieldsJson] = delivery.fieldsJson
-                            it[updatedAt] = CurrentTimestamp()
-                        }
-                        return@tx
-                    }
-                    throw e
-                }
-            }
+            val sql = """
+                INSERT INTO order_delivery (order_id, type, fields_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (order_id)
+                DO UPDATE SET
+                    type = EXCLUDED.type,
+                    fields_json = EXCLUDED.fields_json,
+                    updated_at = NOW()
+            """.trimIndent()
+            exec(
+                sql,
+                listOf(
+                    OrderDeliveryTable.orderId.columnType to delivery.orderId,
+                    OrderDeliveryTable.type.columnType to delivery.type.name,
+                    OrderDeliveryTable.fieldsJson.columnType to delivery.fieldsJson,
+                    OrderDeliveryTable.createdAt.columnType to delivery.createdAt,
+                    OrderDeliveryTable.updatedAt.columnType to delivery.updatedAt
+                )
+            )
         }
     }
 
@@ -1183,35 +1176,23 @@ class BuyerDeliveryProfileRepositoryExposed(private val tx: DatabaseTx) : BuyerD
 
     override suspend fun upsert(profile: BuyerDeliveryProfile) {
         tx.tx {
-            val updated = BuyerDeliveryProfileTable.update({
-                (BuyerDeliveryProfileTable.merchantId eq profile.merchantId) and
-                    (BuyerDeliveryProfileTable.buyerUserId eq profile.buyerUserId)
-            }) {
-                it[fieldsJson] = profile.fieldsJson
-                it[updatedAt] = CurrentTimestamp()
-            }
-            if (updated == 0) {
-                try {
-                    BuyerDeliveryProfileTable.insert {
-                        it[merchantId] = profile.merchantId
-                        it[buyerUserId] = profile.buyerUserId
-                        it[fieldsJson] = profile.fieldsJson
-                        it[updatedAt] = profile.updatedAt
-                    }
-                } catch (e: ExposedSQLException) {
-                    if (e.sqlState == "23505") {
-                        BuyerDeliveryProfileTable.update({
-                            (BuyerDeliveryProfileTable.merchantId eq profile.merchantId) and
-                                (BuyerDeliveryProfileTable.buyerUserId eq profile.buyerUserId)
-                        }) {
-                            it[fieldsJson] = profile.fieldsJson
-                            it[updatedAt] = CurrentTimestamp()
-                        }
-                        return@tx
-                    }
-                    throw e
-                }
-            }
+            val sql = """
+                INSERT INTO buyer_delivery_profile (merchant_id, buyer_user_id, fields_json, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (merchant_id, buyer_user_id)
+                DO UPDATE SET
+                    fields_json = EXCLUDED.fields_json,
+                    updated_at = NOW()
+            """.trimIndent()
+            exec(
+                sql,
+                listOf(
+                    BuyerDeliveryProfileTable.merchantId.columnType to profile.merchantId,
+                    BuyerDeliveryProfileTable.buyerUserId.columnType to profile.buyerUserId,
+                    BuyerDeliveryProfileTable.fieldsJson.columnType to profile.fieldsJson,
+                    BuyerDeliveryProfileTable.updatedAt.columnType to profile.updatedAt
+                )
+            )
         }
     }
 
