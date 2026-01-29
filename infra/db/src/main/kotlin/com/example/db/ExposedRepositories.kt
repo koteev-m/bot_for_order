@@ -1136,12 +1136,24 @@ class OrderDeliveryRepositoryExposed(private val tx: DatabaseTx) : OrderDelivery
                 it[updatedAt] = CurrentTimestamp()
             }
             if (updated == 0) {
-                OrderDeliveryTable.insert {
-                    it[orderId] = delivery.orderId
-                    it[type] = delivery.type.name
-                    it[fieldsJson] = delivery.fieldsJson
-                    it[createdAt] = delivery.createdAt
-                    it[updatedAt] = delivery.updatedAt
+                try {
+                    OrderDeliveryTable.insert {
+                        it[orderId] = delivery.orderId
+                        it[type] = delivery.type.name
+                        it[fieldsJson] = delivery.fieldsJson
+                        it[createdAt] = delivery.createdAt
+                        it[updatedAt] = delivery.updatedAt
+                    }
+                } catch (e: ExposedSQLException) {
+                    if (e.sqlState == "23505") {
+                        OrderDeliveryTable.update({ OrderDeliveryTable.orderId eq delivery.orderId }) {
+                            it[type] = delivery.type.name
+                            it[fieldsJson] = delivery.fieldsJson
+                            it[updatedAt] = CurrentTimestamp()
+                        }
+                        return@tx
+                    }
+                    throw e
                 }
             }
         }
@@ -1179,11 +1191,25 @@ class BuyerDeliveryProfileRepositoryExposed(private val tx: DatabaseTx) : BuyerD
                 it[updatedAt] = CurrentTimestamp()
             }
             if (updated == 0) {
-                BuyerDeliveryProfileTable.insert {
-                    it[merchantId] = profile.merchantId
-                    it[buyerUserId] = profile.buyerUserId
-                    it[fieldsJson] = profile.fieldsJson
-                    it[updatedAt] = profile.updatedAt
+                try {
+                    BuyerDeliveryProfileTable.insert {
+                        it[merchantId] = profile.merchantId
+                        it[buyerUserId] = profile.buyerUserId
+                        it[fieldsJson] = profile.fieldsJson
+                        it[updatedAt] = profile.updatedAt
+                    }
+                } catch (e: ExposedSQLException) {
+                    if (e.sqlState == "23505") {
+                        BuyerDeliveryProfileTable.update({
+                            (BuyerDeliveryProfileTable.merchantId eq profile.merchantId) and
+                                (BuyerDeliveryProfileTable.buyerUserId eq profile.buyerUserId)
+                        }) {
+                            it[fieldsJson] = profile.fieldsJson
+                            it[updatedAt] = CurrentTimestamp()
+                        }
+                        return@tx
+                    }
+                    throw e
                 }
             }
         }
