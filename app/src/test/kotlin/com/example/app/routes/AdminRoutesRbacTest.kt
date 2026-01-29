@@ -11,6 +11,9 @@ import com.example.app.api.installApiErrors
 import com.example.app.baseTestConfig
 import com.example.app.security.TelegramInitDataVerifier
 import com.example.app.testutil.InMemoryAdminUsersRepository
+import com.example.app.testutil.InMemoryAuditLogRepository
+import com.example.app.testutil.InMemoryIdempotencyRepository
+import com.example.app.services.IdempotencyService
 import com.example.app.services.ManualPaymentsService
 import com.example.app.services.OrderStatusService
 import com.example.app.services.PaymentDetailsCrypto
@@ -23,7 +26,9 @@ import com.example.domain.OrderStatus
 import com.example.domain.PaymentMethodType
 import com.example.domain.Storefront
 import com.example.db.AdminUsersRepository
+import com.example.db.AuditLogRepository
 import com.example.db.ChannelBindingsRepository
+import com.example.db.IdempotencyRepository
 import com.example.db.MerchantDeliveryMethodsRepository
 import com.example.db.MerchantPaymentMethodsRepository
 import com.example.db.OrderAttachmentsRepository
@@ -386,6 +391,9 @@ private class TestAdminDeps {
     val postService = mockk<PostService>()
     val paymentDetailsCrypto = PaymentDetailsCrypto(config.manualPayments.detailsEncryptionKey)
     val initDataVerifier = TelegramInitDataVerifier(config.telegram.shopToken, config.telegramInitData.maxAgeSeconds)
+    val auditLogRepository = InMemoryAuditLogRepository()
+    val idempotencyRepository = InMemoryIdempotencyRepository()
+    val idempotencyService = IdempotencyService(idempotencyRepository)
 
     fun module() = module {
         single { config }
@@ -404,6 +412,9 @@ private class TestAdminDeps {
         single { orderStatusService }
         single { postService }
         single { paymentDetailsCrypto }
+        single<AuditLogRepository> { auditLogRepository }
+        single<IdempotencyRepository> { idempotencyRepository }
+        single { idempotencyService }
     }
 
     fun stubOrderActions() {

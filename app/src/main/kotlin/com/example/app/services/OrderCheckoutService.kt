@@ -5,6 +5,7 @@ import com.example.app.config.AppConfig
 import com.example.db.CartsRepository
 import com.example.db.CartItemsRepository
 import com.example.db.DatabaseTx
+import com.example.db.EventLogRepository
 import com.example.db.MerchantsRepository
 import com.example.db.OrderLinesRepository
 import com.example.db.OrdersRepository
@@ -16,6 +17,7 @@ import com.example.db.tables.OrdersTable
 import com.example.domain.Order
 import com.example.domain.OrderLine
 import com.example.domain.OrderStatus
+import com.example.domain.EventLogEntry
 import com.example.domain.hold.LockManager
 import com.example.domain.hold.OrderHoldRequest
 import com.example.domain.hold.OrderHoldService
@@ -42,6 +44,7 @@ class OrderCheckoutService(
     private val variantsRepository: VariantsRepository,
     private val ordersRepository: OrdersRepository,
     private val orderLinesRepository: OrderLinesRepository,
+    private val eventLogRepository: EventLogRepository,
     private val orderHoldService: OrderHoldService,
     private val lockManager: LockManager,
     private val orderDedupStore: OrderDedupStore
@@ -197,6 +200,21 @@ class OrderCheckoutService(
             }.onFailure { error ->
                 log.warn("order_dedup_set_failed orderId={} reason={}", orderId, error.message)
             }
+            val line = lines.firstOrNull()
+            eventLogRepository.insert(
+                EventLogEntry(
+                    ts = Instant.now(),
+                    eventType = "order_created",
+                    buyerUserId = order.userId,
+                    merchantId = order.merchantId,
+                    storefrontId = line?.sourceStorefrontId,
+                    channelId = line?.sourceChannelId,
+                    postMessageId = line?.sourcePostMessageId,
+                    listingId = line?.listingId,
+                    variantId = line?.variantId,
+                    metadataJson = null
+                )
+            )
             OrderWithLines(order, lines)
         }
     }

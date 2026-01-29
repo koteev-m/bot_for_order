@@ -6,6 +6,7 @@ data class AppConfig(
     val merchants: MerchantsConfig,
     val linkContext: LinkContextConfig,
     val linkResolveRateLimit: LinkResolveRateLimitConfig,
+    val userActionRateLimit: UserActionRateLimitConfig,
     val cart: CartConfig,
     val db: DbConfig,
     val redis: RedisConfig,
@@ -23,6 +24,8 @@ data class AppConfig(
 data class TelegramConfig(
     val adminToken: String,
     val shopToken: String,
+    val adminWebhookSecret: String,
+    val shopWebhookSecret: String,
     val adminIds: Set<Long>,
     val channelId: Long,
     val buyerMiniAppShortName: String
@@ -43,6 +46,15 @@ data class LinkContextConfig(
 data class LinkResolveRateLimitConfig(
     val max: Int,
     val windowSeconds: Int
+)
+
+data class UserActionRateLimitConfig(
+    val resolveMax: Int,
+    val resolveWindowSeconds: Int,
+    val addMax: Int,
+    val addWindowSeconds: Int,
+    val claimMax: Int,
+    val claimWindowSeconds: Int
 )
 
 data class CartConfig(

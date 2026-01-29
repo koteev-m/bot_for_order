@@ -72,6 +72,9 @@ fun Application.installShopWebhook() {
 
     routing {
         post("/tg/shop") {
+            if (!verifyTelegramWebhookSecret(call, deps.config.telegram.shopWebhookSecret)) {
+                return@post
+            }
             val body = call.receiveText()
             handleShopUpdate(call, body, deps)
         }
@@ -160,6 +163,15 @@ private suspend fun handleShopUpdate(call: ApplicationCall, body: String, deps: 
     }
 
     call.respond(HttpStatusCode.OK)
+}
+
+private suspend fun verifyTelegramWebhookSecret(call: ApplicationCall, expected: String): Boolean {
+    val provided = call.request.headers["X-Telegram-Bot-Api-Secret-Token"]
+    if (provided.isNullOrBlank() || provided != expected) {
+        call.respond(HttpStatusCode.Unauthorized)
+        return false
+    }
+    return true
 }
 
 private suspend fun handleStart(chatId: Long, args: String, deps: ShopWebhookDeps) {

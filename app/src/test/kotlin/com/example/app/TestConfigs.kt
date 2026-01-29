@@ -18,6 +18,7 @@ import com.example.app.config.ServerConfig
 import com.example.app.config.StorageConfig
 import com.example.app.config.TelegramConfig
 import com.example.app.config.TelegramInitDataConfig
+import com.example.app.config.UserActionRateLimitConfig
 
 internal fun baseTestConfig(
     metrics: MetricsConfig = MetricsConfig(
@@ -33,6 +34,8 @@ internal fun baseTestConfig(
     telegram = TelegramConfig(
         adminToken = "token",
         shopToken = "token",
+        adminWebhookSecret = "admin-secret",
+        shopWebhookSecret = "shop-secret",
         adminIds = emptySet(),
         channelId = 0L,
         buyerMiniAppShortName = "buyer"
@@ -41,6 +44,14 @@ internal fun baseTestConfig(
     merchants = MerchantsConfig(defaultMerchantId = "default"),
     linkContext = LinkContextConfig(tokenSecret = "test-secret"),
     linkResolveRateLimit = LinkResolveRateLimitConfig(max = 10, windowSeconds = 10),
+    userActionRateLimit = UserActionRateLimitConfig(
+        resolveMax = 30,
+        resolveWindowSeconds = 10,
+        addMax = 20,
+        addWindowSeconds = 10,
+        claimMax = 5,
+        claimWindowSeconds = 60
+    ),
     cart = CartConfig(undoTtlSec = 300, addDedupWindowSec = 5),
     db = DbConfig(
         url = "jdbc:postgresql://localhost:5432/db",

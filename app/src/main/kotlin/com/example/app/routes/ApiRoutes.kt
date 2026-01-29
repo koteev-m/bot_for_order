@@ -3,12 +3,12 @@ package com.example.app.routes
 import com.example.app.config.AppConfig
 import com.example.app.services.CartService
 import com.example.app.services.DeliveryService
-import com.example.app.services.LinkResolveRateLimiter
 import com.example.app.services.LinkResolveService
 import com.example.app.services.ManualPaymentsService
 import com.example.app.services.OffersService
 import com.example.app.services.OrderCheckoutService
 import com.example.app.services.PaymentsService
+import com.example.app.services.UserActionRateLimiter
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemsRepository
 import com.example.db.OrderDeliveryRepository
@@ -20,6 +20,8 @@ import com.example.db.VariantsRepository
 import com.example.app.security.installInitDataAuth
 import com.example.app.security.TelegramInitDataVerifier
 import com.example.domain.watchlist.WatchlistRepository
+import com.example.db.EventLogRepository
+import com.example.app.services.IdempotencyService
 import io.ktor.server.application.Application
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
@@ -41,12 +43,15 @@ fun Application.installApiRoutes() {
     val initDataVerifier by inject<TelegramInitDataVerifier>()
     val watchlistRepo by inject<WatchlistRepository>()
     val linkResolveService by inject<LinkResolveService>()
-    val linkResolveRateLimiter by inject<LinkResolveRateLimiter>()
+    val userActionRateLimiter by inject<UserActionRateLimiter>()
     val cartService by inject<CartService>()
     val orderCheckoutService by inject<OrderCheckoutService>()
     val orderDeliveryRepository by inject<OrderDeliveryRepository>()
+    val idempotencyService by inject<IdempotencyService>()
+    val eventLogRepository by inject<EventLogRepository>()
 
     val orderDeps = OrderRoutesDeps(
+        merchantId = cfg.merchants.defaultMerchantId,
         itemsRepository = itemsRepo,
         ordersRepository = ordersRepo,
         orderLinesRepository = orderLinesRepo,
@@ -55,7 +60,9 @@ fun Application.installApiRoutes() {
         orderCheckoutService = orderCheckoutService,
         manualPaymentsService = manualPaymentsService,
         orderDeliveryRepository = orderDeliveryRepository,
-        deliveryService = deliveryService
+        deliveryService = deliveryService,
+        idempotencyService = idempotencyService,
+        userActionRateLimiter = userActionRateLimiter
     )
 
     routing {
@@ -66,8 +73,9 @@ fun Application.installApiRoutes() {
             registerOrdersRoutes(orderDeps)
             registerBuyerDeliveryRoutes(deliveryService)
             registerWatchlistRoutes(itemsRepo, variantsRepo, watchlistRepo, cfg)
-            registerLinkRoutes(linkResolveService, linkResolveRateLimiter)
-            registerCartRoutes(cartService, cfg)
+            registerLinkRoutes(linkResolveService, userActionRateLimiter)
+            registerCartRoutes(cartService, cfg, userActionRateLimiter)
+            registerAnalyticsRoutes(eventLogRepository, cfg)
         }
     }
 }

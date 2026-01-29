@@ -5,6 +5,7 @@ import com.example.app.testutil.FakeManualPaymentsNotifier
 import com.example.app.testutil.InMemoryHoldService
 import com.example.app.testutil.InMemoryOrderHoldService
 import com.example.app.testutil.InMemoryStorage
+import com.example.app.testutil.InMemoryEventLogRepository
 import com.example.app.testutil.NoopLockManager
 import com.example.app.testutil.isDockerAvailable
 import com.example.db.DatabaseFactory
@@ -246,6 +247,7 @@ class ManualPaymentsServiceTest : StringSpec({
             holdService,
             InMemoryHoldService(),
             NoopLockManager(),
+            InMemoryEventLogRepository(),
             InMemoryStorage(),
             crypto,
             FakeManualPaymentsNotifier(),
@@ -299,6 +301,7 @@ class ManualPaymentsServiceTest : StringSpec({
             holdService,
             InMemoryHoldService { clock.instant() },
             NoopLockManager(),
+            InMemoryEventLogRepository(),
             InMemoryStorage(),
             crypto,
             FakeManualPaymentsNotifier(),
@@ -350,6 +353,7 @@ class ManualPaymentsServiceTest : StringSpec({
             InMemoryOrderHoldService(),
             InMemoryHoldService(),
             NoopLockManager(),
+            InMemoryEventLogRepository(),
             InMemoryStorage(),
             crypto,
             FakeManualPaymentsNotifier(),
@@ -400,6 +404,7 @@ class ManualPaymentsServiceTest : StringSpec({
             InMemoryOrderHoldService(),
             InMemoryHoldService(),
             NoopLockManager(),
+            InMemoryEventLogRepository(),
             storage,
             crypto,
             FakeManualPaymentsNotifier(),
@@ -460,6 +465,7 @@ class ManualPaymentsServiceTest : StringSpec({
             InMemoryOrderHoldService { clock.instant() },
             InMemoryHoldService { clock.instant() },
             NoopLockManager(),
+            InMemoryEventLogRepository(),
             InMemoryStorage(),
             crypto,
             FakeManualPaymentsNotifier(),
@@ -534,6 +540,7 @@ class ManualPaymentsServiceTest : StringSpec({
             orderHoldService,
             holdService,
             NoopLockManager(),
+            InMemoryEventLogRepository(),
             InMemoryStorage(),
             crypto,
             FakeManualPaymentsNotifier(),
