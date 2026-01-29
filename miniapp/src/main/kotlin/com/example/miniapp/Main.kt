@@ -421,8 +421,10 @@ class MiniApp : Application() {
 
 fun main() {
     val hot = js("import.meta.webpackHot").unsafeCast<Hot?>()
+    val qp = UrlQuery.parse(window.location.search)
+    val isAdmin = qp["admin"] == "1" || qp["mode"] == "admin"
     startApplication(
-        ::MiniApp,
+        if (isAdmin) ::AdminApp else ::MiniApp,
         hot,
         BootstrapModule,
         BootstrapCssModule,

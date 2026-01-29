@@ -1,5 +1,6 @@
 package com.example.db
 
+import com.example.domain.AdminUser
 import com.example.domain.BargainRules
 import com.example.domain.ChannelBinding
 import com.example.domain.Cart
@@ -36,16 +37,24 @@ interface MerchantsRepository {
     suspend fun getById(id: String): Merchant?
 }
 
+interface AdminUsersRepository {
+    suspend fun get(merchantId: String, userId: Long): AdminUser?
+    suspend fun upsert(user: AdminUser)
+    suspend fun listByMerchant(merchantId: String): List<AdminUser>
+}
+
 interface StorefrontsRepository {
     suspend fun create(storefront: Storefront)
     suspend fun getById(id: String): Storefront?
     suspend fun listByMerchant(merchantId: String): List<Storefront>
+    suspend fun upsert(storefront: Storefront)
 }
 
 interface ChannelBindingsRepository {
     suspend fun bind(storefrontId: String, channelId: Long, createdAt: Instant): Long
     suspend fun getByChannel(channelId: Long): ChannelBinding?
     suspend fun listByStorefront(storefrontId: String): List<ChannelBinding>
+    suspend fun upsert(storefrontId: String, channelId: Long, createdAt: Instant): Long
 }
 
 interface LinkContextsRepository {
@@ -112,6 +121,12 @@ interface OrdersRepository {
     suspend fun create(order: Order)
     suspend fun get(id: String): Order?
     suspend fun listByUser(userId: Long): List<Order>
+    suspend fun listByMerchantAndStatus(
+        merchantId: String,
+        statuses: List<OrderStatus>,
+        limit: Int,
+        offset: Long
+    ): List<Order>
     suspend fun setStatus(id: String, status: OrderStatus)
     suspend fun setInvoiceMessage(id: String, invoiceMessageId: Int)
     suspend fun markPaid(id: String, provider: String, providerChargeId: String, telegramPaymentChargeId: String)
@@ -137,11 +152,13 @@ interface OrderStatusHistoryRepository {
 interface MerchantPaymentMethodsRepository {
     suspend fun getEnabledMethod(merchantId: String, type: PaymentMethodType): MerchantPaymentMethod?
     suspend fun getMethod(merchantId: String, type: PaymentMethodType): MerchantPaymentMethod?
+    suspend fun upsert(method: MerchantPaymentMethod)
 }
 
 interface MerchantDeliveryMethodsRepository {
     suspend fun getEnabledMethod(merchantId: String, type: DeliveryMethodType): MerchantDeliveryMethod?
     suspend fun getMethod(merchantId: String, type: DeliveryMethodType): MerchantDeliveryMethod?
+    suspend fun upsert(method: MerchantDeliveryMethod)
 }
 
 interface OrderPaymentDetailsRepository {
@@ -151,6 +168,7 @@ interface OrderPaymentDetailsRepository {
 
 interface OrderPaymentClaimsRepository {
     suspend fun getSubmittedByOrder(orderId: String): OrderPaymentClaim?
+    suspend fun getLatestByOrder(orderId: String): OrderPaymentClaim?
     suspend fun insertClaim(claim: OrderPaymentClaim): Long
     suspend fun setStatus(id: Long, status: PaymentClaimStatus, comment: String?)
 }
@@ -160,11 +178,13 @@ interface OrderAttachmentsRepository {
     suspend fun getById(id: Long): OrderAttachment?
     suspend fun listByOrder(orderId: String): List<OrderAttachment>
     suspend fun listByOrderAndKind(orderId: String, kind: OrderAttachmentKind): List<OrderAttachment>
+    suspend fun listByClaimAndKind(claimId: Long, kind: OrderAttachmentKind): List<OrderAttachment>
 }
 
 interface OrderDeliveryRepository {
     suspend fun getByOrder(orderId: String): OrderDelivery?
     suspend fun upsert(delivery: OrderDelivery)
+    suspend fun listByOrders(orderIds: List<String>): Map<String, OrderDelivery>
 }
 
 interface BuyerDeliveryProfileRepository {

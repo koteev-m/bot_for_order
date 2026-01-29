@@ -9,6 +9,8 @@ import com.example.db.CartsRepository
 import com.example.db.CartsRepositoryExposed
 import com.example.db.CartItemsRepository
 import com.example.db.CartItemsRepositoryExposed
+import com.example.db.AdminUsersRepository
+import com.example.db.AdminUsersRepositoryExposed
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemMediaRepositoryExposed
 import com.example.db.ItemsRepository
@@ -78,6 +80,7 @@ fun dbModule(cfg: AppConfig) = module {
     single<PricesDisplayRepository> { PricesDisplayRepositoryExposed(get()) }
     single<PostsRepository> { PostsRepositoryExposed(get()) }
     single<MerchantsRepository> { MerchantsRepositoryExposed(get()) }
+    single<AdminUsersRepository> { AdminUsersRepositoryExposed(get()) }
     single<StorefrontsRepository> { StorefrontsRepositoryExposed(get()) }
     single<ChannelBindingsRepository> { ChannelBindingsRepositoryExposed(get()) }
     single<LinkContextsRepository> { LinkContextsRepositoryExposed(get()) }
