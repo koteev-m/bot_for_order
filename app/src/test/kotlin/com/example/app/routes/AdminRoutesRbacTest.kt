@@ -6,6 +6,7 @@ import com.example.app.api.AdminPaymentRejectRequest
 import com.example.app.api.AdminPublishRequest
 import com.example.app.api.AdminOrderStatusRequest
 import com.example.app.api.AdminChannelBindingRequest
+import com.example.app.api.AdminStorefrontRequest
 import com.example.app.api.installApiErrors
 import com.example.app.baseTestConfig
 import com.example.app.security.TelegramInitDataVerifier
@@ -16,6 +17,7 @@ import com.example.app.services.PaymentDetailsCrypto
 import com.example.app.services.PostService
 import com.example.domain.AdminRole
 import com.example.domain.AdminUser
+import com.example.domain.ChannelBinding
 import com.example.domain.Order
 import com.example.domain.OrderStatus
 import com.example.domain.PaymentMethodType
@@ -245,6 +247,7 @@ class AdminRoutesRbacTest : StringSpec({
             name = "Main"
         )
         coEvery { deps.storefrontsRepository.getById("sf-1") } returns storefront
+        coEvery { deps.channelBindingsRepository.getByChannel(100L) } returns null
         coEvery { deps.channelBindingsRepository.upsert("sf-1", 100L, any()) } returns 10L
 
         testApplication {
@@ -264,6 +267,79 @@ class AdminRoutesRbacTest : StringSpec({
                 setBody(AdminChannelBindingRequest(storefrontId = "sf-1", channelId = 100L))
             }
             response.status shouldBe HttpStatusCode.OK
+        }
+    }
+
+    "channel bindings takeover is forbidden for another merchant" {
+        val deps = TestAdminDeps()
+        deps.adminUsers.put(adminUser(42L, AdminRole.OWNER, deps.config.merchants.defaultMerchantId))
+        val storefront = Storefront(
+            id = "sf-1",
+            merchantId = deps.config.merchants.defaultMerchantId,
+            name = "Main"
+        )
+        val foreignStorefront = Storefront(
+            id = "sf-other",
+            merchantId = "other-merchant",
+            name = "Foreign"
+        )
+        val existing = ChannelBinding(
+            id = 10L,
+            storefrontId = "sf-other",
+            channelId = 100L,
+            createdAt = Instant.now()
+        )
+        coEvery { deps.storefrontsRepository.getById("sf-1") } returns storefront
+        coEvery { deps.storefrontsRepository.getById("sf-other") } returns foreignStorefront
+        coEvery { deps.channelBindingsRepository.getByChannel(100L) } returns existing
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                val appLog = environment.log
+                install(StatusPages) { installApiErrors(appLog) }
+                install(Koin) { modules(deps.module()) }
+                installAdminApiRoutes()
+            }
+            val client = createClient { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
+            val initData = buildInitData(deps.config.telegram.shopToken, userId = 42L)
+
+            val response = client.post("/api/admin/settings/channel_bindings") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+                setBody(AdminChannelBindingRequest(storefrontId = "sf-1", channelId = 100L))
+            }
+            response.status shouldBe HttpStatusCode.Forbidden
+        }
+    }
+
+    "storefront upsert forbidden for another merchant storefront id" {
+        val deps = TestAdminDeps()
+        deps.adminUsers.put(adminUser(42L, AdminRole.OWNER, deps.config.merchants.defaultMerchantId))
+        val foreignStorefront = Storefront(
+            id = "sf-foreign",
+            merchantId = "other-merchant",
+            name = "Foreign"
+        )
+        coEvery { deps.storefrontsRepository.getById("sf-foreign") } returns foreignStorefront
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                val appLog = environment.log
+                install(StatusPages) { installApiErrors(appLog) }
+                install(Koin) { modules(deps.module()) }
+                installAdminApiRoutes()
+            }
+            val client = createClient { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
+            val initData = buildInitData(deps.config.telegram.shopToken, userId = 42L)
+
+            val response = client.post("/api/admin/settings/storefronts") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+                setBody(AdminStorefrontRequest(id = "sf-foreign", name = "Foreign"))
+            }
+            response.status shouldBe HttpStatusCode.NotFound
         }
     }
 
