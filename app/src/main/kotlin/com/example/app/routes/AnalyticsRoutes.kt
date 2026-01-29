@@ -18,6 +18,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 private const val MAX_EVENT_TYPE_LENGTH = 64
+private const val MAX_FIELD_LENGTH = 64
 private const val MAX_METADATA_BYTES = 8 * 1024
 private val ANALYTICS_JSON = Json { encodeDefaults = false; explicitNulls = false }
 
@@ -41,6 +42,18 @@ private suspend fun handleAnalyticsEvent(
     if (eventType.isEmpty() || eventType.length > MAX_EVENT_TYPE_LENGTH) {
         throw ApiError("invalid_event_type", HttpStatusCode.BadRequest)
     }
+    val storefrontId = request.storefrontId?.trim()
+    if (storefrontId != null && storefrontId.length > MAX_FIELD_LENGTH) {
+        throw ApiError("invalid_storefront_id", HttpStatusCode.BadRequest)
+    }
+    val listingId = request.listingId?.trim()
+    if (listingId != null && listingId.length > MAX_FIELD_LENGTH) {
+        throw ApiError("invalid_listing_id", HttpStatusCode.BadRequest)
+    }
+    val variantId = request.variantId?.trim()
+    if (variantId != null && variantId.length > MAX_FIELD_LENGTH) {
+        throw ApiError("invalid_variant_id", HttpStatusCode.BadRequest)
+    }
     val metadataJson = request.metadata?.let { ANALYTICS_JSON.encodeToString(it) }
     if (metadataJson != null && metadataJson.toByteArray().size > MAX_METADATA_BYTES) {
         throw ApiError("invalid_metadata", HttpStatusCode.BadRequest)
@@ -51,11 +64,11 @@ private suspend fun handleAnalyticsEvent(
         eventType = eventType,
         buyerUserId = userId,
         merchantId = cfg.merchants.defaultMerchantId,
-        storefrontId = request.storefrontId,
+        storefrontId = storefrontId,
         channelId = request.channelId,
         postMessageId = request.postMessageId,
-        listingId = request.listingId,
-        variantId = request.variantId,
+        listingId = listingId,
+        variantId = variantId,
         metadataJson = metadataJson
     )
     eventLogRepository.insert(entry)

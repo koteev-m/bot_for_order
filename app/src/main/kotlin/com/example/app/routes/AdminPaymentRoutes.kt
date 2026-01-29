@@ -632,13 +632,6 @@ fun Application.installAdminApiRoutes() {
                     cfg.merchants.defaultMerchantId
                 )
                 val id = channelBindingsRepository.upsert(req.storefrontId, req.channelId, Instant.now())
-                call.respond(
-                    AdminChannelBindingDto(
-                        id = id,
-                        storefrontId = req.storefrontId,
-                        channelId = req.channelId
-                    )
-                )
                 writeAuditLog(
                     auditLogRepository = auditLogRepository,
                     cfg = cfg,
@@ -651,6 +644,13 @@ fun Application.installAdminApiRoutes() {
                             put("storefront_id", req.storefrontId)
                             put("channel_id", req.channelId)
                         }
+                    )
+                )
+                call.respond(
+                    AdminChannelBindingDto(
+                        id = id,
+                        storefrontId = req.storefrontId,
+                        channelId = req.channelId
                     )
                 )
             }
@@ -665,13 +665,6 @@ fun Application.installAdminApiRoutes() {
                     cfg.merchants.defaultMerchantId
                 )
                 val id = channelBindingsRepository.upsert(req.storefrontId, req.channelId, Instant.now())
-                call.respond(
-                    AdminChannelBindingDto(
-                        id = id,
-                        storefrontId = req.storefrontId,
-                        channelId = req.channelId
-                    )
-                )
                 writeAuditLog(
                     auditLogRepository = auditLogRepository,
                     cfg = cfg,
@@ -684,6 +677,13 @@ fun Application.installAdminApiRoutes() {
                             put("storefront_id", req.storefrontId)
                             put("channel_id", req.channelId)
                         }
+                    )
+                )
+                call.respond(
+                    AdminChannelBindingDto(
+                        id = id,
+                        storefrontId = req.storefrontId,
+                        channelId = req.channelId
                     )
                 )
             }
@@ -834,17 +834,27 @@ private suspend fun writeAuditLog(
 ) {
     val ip = ClientIpResolver.resolve(call, cfg.metrics.trustedProxyAllowlist)
     val userAgent = call.request.headers["User-Agent"]
-    auditLogRepository.insert(
-        com.example.domain.AuditLogEntry(
-            adminUserId = adminUserId,
-            action = action,
-            orderId = orderId,
-            payloadJson = payloadJson,
-            createdAt = Instant.now(),
-            ip = ip,
-            userAgent = userAgent
+    runCatching {
+        auditLogRepository.insert(
+            com.example.domain.AuditLogEntry(
+                adminUserId = adminUserId,
+                action = action,
+                orderId = orderId,
+                payloadJson = payloadJson,
+                createdAt = Instant.now(),
+                ip = ip,
+                userAgent = userAgent
+            )
         )
-    )
+    }.onFailure { error ->
+        call.application.environment.log.warn(
+            "audit_log_insert_failed action={} adminUserId={} orderId={} reason={}",
+            action,
+            adminUserId,
+            orderId,
+            error.message
+        )
+    }
 }
 
 private fun buildPaymentMethodsPayload(req: AdminPaymentMethodsUpdateRequest) = buildJsonObject {
