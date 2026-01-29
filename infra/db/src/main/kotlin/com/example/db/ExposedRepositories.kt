@@ -246,8 +246,9 @@ class ChannelBindingsRepositoryExposed(private val tx: DatabaseTx) : ChannelBind
         val sql = """
             INSERT INTO channel_bindings (storefront_id, channel_id, created_at)
             VALUES (?, ?, ?)
-            ON CONFLICT (storefront_id, channel_id)
+            ON CONFLICT (channel_id)
             DO UPDATE SET
+                storefront_id = EXCLUDED.storefront_id,
                 created_at = EXCLUDED.created_at
         """.trimIndent()
         exec(
@@ -261,8 +262,7 @@ class ChannelBindingsRepositoryExposed(private val tx: DatabaseTx) : ChannelBind
         val existing = ChannelBindingsTable
             .selectAll()
             .where {
-                (ChannelBindingsTable.storefrontId eq storefrontId) and
-                    (ChannelBindingsTable.channelId eq channelId)
+                ChannelBindingsTable.channelId eq channelId
             }
             .single()
         existing[ChannelBindingsTable.id]
