@@ -17,6 +17,23 @@ data class Merchant(
 )
 
 @Serializable
+enum class AdminRole {
+    OWNER,
+    OPERATOR
+}
+
+@Serializable
+data class AdminUser(
+    val merchantId: String,
+    val userId: Long,
+    val role: AdminRole,
+    @Serializable(with = InstantIsoSerializer::class)
+    val createdAt: Instant,
+    @Serializable(with = InstantIsoSerializer::class)
+    val updatedAt: Instant
+)
+
+@Serializable
 data class Storefront(
     val id: String,
     val merchantId: String,

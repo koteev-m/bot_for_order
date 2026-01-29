@@ -87,6 +87,12 @@ data class OrderCreateResponse(
 )
 
 @Serializable
+data class PaymentSelectResponse(
+    val orderId: String,
+    val status: String
+)
+
+@Serializable
 data class WatchlistSubscribeRequest(
     val itemId: String,
     val trigger: String = "price_drop",
@@ -97,4 +103,181 @@ data class WatchlistSubscribeRequest(
 @Serializable
 data class SimpleResponse(
     val ok: Boolean = true
+)
+
+@Serializable
+data class AdminMeResponse(
+    val userId: Long,
+    val role: String,
+    val merchantId: String
+)
+
+@Serializable
+data class AdminOrdersPage(
+    val items: List<AdminOrderSummary>
+)
+
+@Serializable
+data class AdminOrderSummary(
+    val orderId: String,
+    val status: String,
+    val amountMinor: Long,
+    val currency: String,
+    val updatedAt: String,
+    val buyerId: Long,
+    val paymentMethodType: String? = null,
+    val delivery: OrderDeliverySummary? = null
+)
+
+@Serializable
+data class OrderDeliverySummary(
+    val type: String,
+    val fields: Map<String, String>
+)
+
+@Serializable
+data class AdminOrderCardResponse(
+    val orderId: String,
+    val status: String,
+    val amountMinor: Long,
+    val currency: String,
+    val buyerId: Long,
+    val itemId: String? = null,
+    val variantId: String? = null,
+    val qty: Int? = null,
+    val createdAt: String,
+    val updatedAt: String,
+    val lines: List<OrderLineDto> = emptyList(),
+    val delivery: OrderDeliverySummary? = null,
+    val payment: AdminPaymentInfo? = null
+)
+
+@Serializable
+data class OrderLineDto(
+    val listingId: String,
+    val variantId: String? = null,
+    val qty: Int,
+    val priceSnapshotMinor: Long,
+    val currency: String,
+    val sourceStorefrontId: String? = null,
+    val sourceChannelId: Long? = null,
+    val sourcePostMessageId: Int? = null
+)
+
+@Serializable
+data class AdminPaymentInfo(
+    val methodType: String? = null,
+    val claim: AdminPaymentClaim? = null,
+    val attachments: List<AdminPaymentAttachment> = emptyList()
+)
+
+@Serializable
+data class AdminPaymentClaim(
+    val id: Long,
+    val txid: String? = null,
+    val comment: String? = null,
+    val status: String,
+    val createdAt: String
+)
+
+@Serializable
+data class AdminPaymentAttachment(
+    val id: Long,
+    val presignedUrl: String,
+    val mime: String,
+    val size: Long
+)
+
+@Serializable
+data class AdminOrderStatusRequest(
+    val status: String,
+    val comment: String? = null,
+    val trackingCode: String? = null
+)
+
+@Serializable
+data class AdminPaymentDetailsRequest(
+    val text: String
+)
+
+@Serializable
+data class AdminPaymentRejectRequest(
+    val reason: String
+)
+
+@Serializable
+data class AdminPaymentMethodDto(
+    val type: String,
+    val mode: String,
+    val enabled: Boolean,
+    val details: String? = null
+)
+
+@Serializable
+data class AdminPaymentMethodsUpdateRequest(
+    val methods: List<AdminPaymentMethodUpdate>
+)
+
+@Serializable
+data class AdminPaymentMethodUpdate(
+    val type: String,
+    val mode: String,
+    val enabled: Boolean,
+    val details: String? = null
+)
+
+@Serializable
+data class AdminDeliveryMethodDto(
+    val type: String,
+    val enabled: Boolean,
+    val requiredFields: List<String>
+)
+
+@Serializable
+data class AdminDeliveryMethodUpdateRequest(
+    val enabled: Boolean,
+    val requiredFields: List<String> = emptyList()
+)
+
+@Serializable
+data class AdminStorefrontDto(
+    val id: String,
+    val name: String
+)
+
+@Serializable
+data class AdminStorefrontRequest(
+    val id: String,
+    val name: String
+)
+
+@Serializable
+data class AdminChannelBindingDto(
+    val id: Long,
+    val storefrontId: String,
+    val channelId: Long
+)
+
+@Serializable
+data class AdminChannelBindingRequest(
+    val storefrontId: String,
+    val channelId: Long
+)
+
+@Serializable
+data class AdminPublishRequest(
+    val itemId: String,
+    val channelIds: List<Long>
+)
+
+@Serializable
+data class AdminPublishResponse(
+    val results: List<AdminPublishResult>
+)
+
+@Serializable
+data class AdminPublishResult(
+    val channelId: Long,
+    val ok: Boolean,
+    val error: String? = null
 )

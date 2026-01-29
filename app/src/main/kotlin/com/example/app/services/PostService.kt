@@ -44,6 +44,12 @@ class PostService(
     private val log = LoggerFactory.getLogger(PostService::class.java)
     private val cachedShopUsername = AtomicReference<String?>()
 
+    data class PublishResult(
+        val channelId: Long,
+        val ok: Boolean,
+        val error: String? = null
+    )
+
     private suspend fun resolveShopBotUsername(): String {
         cachedShopUsername.get()?.let { return it }
         val response = clients.shopBot.execute(GetMe())
@@ -59,12 +65,35 @@ class PostService(
      */
     @Suppress("SpreadOperator")
     suspend fun postItemAlbumToChannel(itemId: String): List<Int> {
+        val channelId = config.telegram.channelId
+        return postItemAlbumToChannel(itemId, channelId)
+    }
+
+    suspend fun postItemAlbumToChannels(itemId: String, channelIds: List<Long>): List<PublishResult> {
+        if (channelIds.isEmpty()) return emptyList()
+        return channelIds.distinct().map { channelId ->
+            runCatching {
+                postItemAlbumToChannel(itemId, channelId)
+                PublishResult(channelId = channelId, ok = true)
+            }.getOrElse { error ->
+                log.warn(
+                    "publish failed itemId={} channelId={} error={}",
+                    itemId,
+                    channelId,
+                    error.message
+                )
+                PublishResult(channelId = channelId, ok = false, error = error.message ?: "publish_failed")
+            }
+        }
+    }
+
+    @Suppress("SpreadOperator")
+    private suspend fun postItemAlbumToChannel(itemId: String, channelId: Long): List<Int> {
         val item = itemsRepository.getById(itemId)
             ?: error("Item not found: $itemId")
         require(item.status != ItemStatus.sold) { "Item is sold" }
 
         val media = itemMediaRepository.listByItem(itemId)
-        val channelId = config.telegram.channelId
         val messageIds = when (media.size) {
             in 2..10 -> sendMediaGroup(channelId, item.title, item.description, media)
             1 -> sendSingleMedia(channelId, item.title, item.description, media.first())

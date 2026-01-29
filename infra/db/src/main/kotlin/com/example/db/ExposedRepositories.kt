@@ -1,5 +1,6 @@
 package com.example.db
 
+import com.example.db.tables.AdminUsersTable
 import com.example.db.tables.ChannelBindingsTable
 import com.example.db.tables.CartsTable
 import com.example.db.tables.CartItemsTable
@@ -24,6 +25,8 @@ import com.example.db.tables.VariantsTable
 import com.example.db.tables.WatchlistTable
 import com.example.db.tables.BuyerDeliveryProfileTable
 import com.example.domain.BargainRules
+import com.example.domain.AdminRole
+import com.example.domain.AdminUser
 import com.example.domain.ChannelBinding
 import com.example.domain.Cart
 import com.example.domain.CartItem
@@ -111,6 +114,55 @@ class MerchantsRepositoryExposed(private val tx: DatabaseTx) : MerchantsReposito
         )
 }
 
+class AdminUsersRepositoryExposed(private val tx: DatabaseTx) : AdminUsersRepository {
+    override suspend fun get(merchantId: String, userId: Long): AdminUser? = tx.tx {
+        AdminUsersTable
+            .selectAll()
+            .where { (AdminUsersTable.merchantId eq merchantId) and (AdminUsersTable.userId eq userId) }
+            .singleOrNull()
+            ?.toAdminUser()
+    }
+
+    override suspend fun upsert(user: AdminUser) {
+        tx.tx {
+            val sql = """
+                INSERT INTO admin_user (merchant_id, user_id, role, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (merchant_id, user_id)
+                DO UPDATE SET
+                    role = EXCLUDED.role,
+                    updated_at = NOW()
+            """.trimIndent()
+            exec(
+                sql,
+                listOf(
+                    AdminUsersTable.merchantId.columnType to user.merchantId,
+                    AdminUsersTable.userId.columnType to user.userId,
+                    AdminUsersTable.role.columnType to user.role.name,
+                    AdminUsersTable.createdAt.columnType to user.createdAt,
+                    AdminUsersTable.updatedAt.columnType to user.updatedAt
+                )
+            )
+        }
+    }
+
+    override suspend fun listByMerchant(merchantId: String): List<AdminUser> = tx.tx {
+        AdminUsersTable
+            .selectAll()
+            .where { AdminUsersTable.merchantId eq merchantId }
+            .map { it.toAdminUser() }
+    }
+
+    private fun ResultRow.toAdminUser(): AdminUser =
+        AdminUser(
+            merchantId = this[AdminUsersTable.merchantId],
+            userId = this[AdminUsersTable.userId],
+            role = AdminRole.valueOf(this[AdminUsersTable.role]),
+            createdAt = this[AdminUsersTable.createdAt],
+            updatedAt = this[AdminUsersTable.updatedAt]
+        )
+}
+
 class StorefrontsRepositoryExposed(private val tx: DatabaseTx) : StorefrontsRepository {
     override suspend fun create(storefront: Storefront) {
         tx.tx {
@@ -136,6 +188,26 @@ class StorefrontsRepositoryExposed(private val tx: DatabaseTx) : StorefrontsRepo
             .selectAll()
             .where { StorefrontsTable.merchantId eq merchantId }
             .map { it.toStorefront() }
+    }
+
+    override suspend fun upsert(storefront: Storefront) {
+        tx.tx {
+            val sql = """
+                INSERT INTO storefronts (id, merchant_id, name, created_at)
+                VALUES (?, ?, ?, NOW())
+                ON CONFLICT (id)
+                DO UPDATE SET
+                    name = EXCLUDED.name
+            """.trimIndent()
+            exec(
+                sql,
+                listOf(
+                    StorefrontsTable.id.columnType to storefront.id,
+                    StorefrontsTable.merchantId.columnType to storefront.merchantId,
+                    StorefrontsTable.name.columnType to storefront.name
+                )
+            )
+        }
     }
 
     private fun ResultRow.toStorefront(): Storefront =
@@ -168,6 +240,32 @@ class ChannelBindingsRepositoryExposed(private val tx: DatabaseTx) : ChannelBind
             .selectAll()
             .where { ChannelBindingsTable.storefrontId eq storefrontId }
             .map { it.toChannelBinding() }
+    }
+
+    override suspend fun upsert(storefrontId: String, channelId: Long, createdAt: Instant): Long = tx.tx {
+        val sql = """
+            INSERT INTO channel_bindings (storefront_id, channel_id, created_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT (storefront_id, channel_id)
+            DO UPDATE SET
+                created_at = EXCLUDED.created_at
+        """.trimIndent()
+        exec(
+            sql,
+            listOf(
+                ChannelBindingsTable.storefrontId.columnType to storefrontId,
+                ChannelBindingsTable.channelId.columnType to channelId,
+                ChannelBindingsTable.createdAt.columnType to createdAt
+            )
+        )
+        val existing = ChannelBindingsTable
+            .selectAll()
+            .where {
+                (ChannelBindingsTable.storefrontId eq storefrontId) and
+                    (ChannelBindingsTable.channelId eq channelId)
+            }
+            .single()
+        existing[ChannelBindingsTable.id]
     }
 
     private fun ResultRow.toChannelBinding(): ChannelBinding =
@@ -712,6 +810,47 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
             }
     }
 
+    override suspend fun listByMerchantAndStatus(
+        merchantId: String,
+        statuses: List<OrderStatus>,
+        limit: Int,
+        offset: Long
+    ): List<Order> = tx.tx {
+        OrdersTable
+            .selectAll()
+            .where {
+                (OrdersTable.merchantId eq merchantId) and
+                    (OrdersTable.status inList statuses.map { it.name })
+            }
+            .orderBy(OrdersTable.updatedAt to SortOrder.DESC)
+            .limit(limit, offset)
+            .map {
+                Order(
+                    id = it[OrdersTable.id],
+                    merchantId = it[OrdersTable.merchantId],
+                    userId = it[OrdersTable.userId],
+                    itemId = it[OrdersTable.itemId],
+                    variantId = it[OrdersTable.variantId],
+                    qty = it[OrdersTable.qty],
+                    currency = it[OrdersTable.currency],
+                    amountMinor = it[OrdersTable.amountMinor],
+                    deliveryOption = it[OrdersTable.deliveryOption],
+                    addressJson = it[OrdersTable.addressJson],
+                    provider = it[OrdersTable.provider],
+                    providerChargeId = it[OrdersTable.providerChargeId],
+                    telegramPaymentChargeId = it[OrdersTable.telegramPaymentChargeId],
+                    invoiceMessageId = it[OrdersTable.invoiceMessageId],
+                    status = OrderStatus.valueOf(it[OrdersTable.status]),
+                    createdAt = it[OrdersTable.createdAt],
+                    updatedAt = it[OrdersTable.updatedAt],
+                    paymentClaimedAt = it[OrdersTable.paymentClaimedAt],
+                    paymentDecidedAt = it[OrdersTable.paymentDecidedAt],
+                    paymentMethodType = it[OrdersTable.paymentMethodType]?.let(PaymentMethodType::valueOf),
+                    paymentMethodSelectedAt = it[OrdersTable.paymentMethodSelectedAt]
+                )
+            }
+    }
+
     override suspend fun setStatus(id: String, status: OrderStatus) {
         tx.tx {
             OrdersTable.update({ OrdersTable.id eq id }) {
@@ -943,6 +1082,30 @@ class MerchantPaymentMethodsRepositoryExposed(private val tx: DatabaseTx) : Merc
             ?.toMerchantPaymentMethod()
     }
 
+    override suspend fun upsert(method: MerchantPaymentMethod) {
+        tx.tx {
+            val sql = """
+                INSERT INTO merchant_payment_method (merchant_id, type, mode, details_encrypted, enabled)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (merchant_id, type)
+                DO UPDATE SET
+                    mode = EXCLUDED.mode,
+                    details_encrypted = EXCLUDED.details_encrypted,
+                    enabled = EXCLUDED.enabled
+            """.trimIndent()
+            exec(
+                sql,
+                listOf(
+                    MerchantPaymentMethodsTable.merchantId.columnType to method.merchantId,
+                    MerchantPaymentMethodsTable.type.columnType to method.type.name,
+                    MerchantPaymentMethodsTable.mode.columnType to method.mode.name,
+                    MerchantPaymentMethodsTable.detailsEncrypted.columnType to method.detailsEncrypted,
+                    MerchantPaymentMethodsTable.enabled.columnType to method.enabled
+                )
+            )
+        }
+    }
+
     private fun ResultRow.toMerchantPaymentMethod(): MerchantPaymentMethod =
         MerchantPaymentMethod(
             merchantId = this[MerchantPaymentMethodsTable.merchantId],
@@ -978,6 +1141,28 @@ class MerchantDeliveryMethodsRepositoryExposed(private val tx: DatabaseTx) : Mer
             }
             .singleOrNull()
             ?.toMerchantDeliveryMethod()
+    }
+
+    override suspend fun upsert(method: MerchantDeliveryMethod) {
+        tx.tx {
+            val sql = """
+                INSERT INTO merchant_delivery_method (merchant_id, type, enabled, required_fields_json)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (merchant_id, type)
+                DO UPDATE SET
+                    enabled = EXCLUDED.enabled,
+                    required_fields_json = EXCLUDED.required_fields_json
+            """.trimIndent()
+            exec(
+                sql,
+                listOf(
+                    MerchantDeliveryMethodsTable.merchantId.columnType to method.merchantId,
+                    MerchantDeliveryMethodsTable.type.columnType to method.type.name,
+                    MerchantDeliveryMethodsTable.enabled.columnType to method.enabled,
+                    MerchantDeliveryMethodsTable.requiredFieldsJson.columnType to method.requiredFieldsJson
+                )
+            )
+        }
     }
 
     private fun ResultRow.toMerchantDeliveryMethod(): MerchantDeliveryMethod =
@@ -1033,6 +1218,16 @@ class OrderPaymentClaimsRepositoryExposed(private val tx: DatabaseTx) : OrderPay
                 (OrderPaymentClaimsTable.orderId eq orderId) and
                     (OrderPaymentClaimsTable.status eq PaymentClaimStatus.SUBMITTED.name)
             }
+            .singleOrNull()
+            ?.toClaim()
+    }
+
+    override suspend fun getLatestByOrder(orderId: String): OrderPaymentClaim? = tx.tx {
+        OrderPaymentClaimsTable
+            .selectAll()
+            .where { OrderPaymentClaimsTable.orderId eq orderId }
+            .orderBy(OrderPaymentClaimsTable.createdAt to SortOrder.DESC)
+            .limit(1)
             .singleOrNull()
             ?.toClaim()
     }
@@ -1105,6 +1300,13 @@ class OrderAttachmentsRepositoryExposed(private val tx: DatabaseTx) : OrderAttac
             .map { it.toAttachment() }
     }
 
+    override suspend fun listByClaimAndKind(claimId: Long, kind: OrderAttachmentKind): List<OrderAttachment> = tx.tx {
+        OrderAttachmentsTable
+            .selectAll()
+            .where { (OrderAttachmentsTable.claimId eq claimId) and (OrderAttachmentsTable.kind eq kind.name) }
+            .map { it.toAttachment() }
+    }
+
     private fun ResultRow.toAttachment(): OrderAttachment =
         OrderAttachment(
             id = this[OrderAttachmentsTable.id],
@@ -1150,6 +1352,17 @@ class OrderDeliveryRepositoryExposed(private val tx: DatabaseTx) : OrderDelivery
                 )
             )
         }
+    }
+
+    override suspend fun listByOrders(orderIds: List<String>): Map<String, OrderDelivery> = tx.tx {
+        if (orderIds.isEmpty()) return@tx emptyMap()
+        OrderDeliveryTable
+            .selectAll()
+            .where { OrderDeliveryTable.orderId inList orderIds }
+            .associate { row ->
+                val delivery = row.toOrderDelivery()
+                delivery.orderId to delivery
+            }
     }
 
     private fun ResultRow.toOrderDelivery(): OrderDelivery =

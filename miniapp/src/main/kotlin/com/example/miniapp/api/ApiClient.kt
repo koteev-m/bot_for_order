@@ -10,6 +10,7 @@ import io.ktor.client.request.accept
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
@@ -44,4 +45,49 @@ class ApiClient(
 
     suspend fun subscribeWatchlist(req: WatchlistSubscribeRequest): SimpleResponse =
         client.post("$baseUrl/api/watchlist") { setBody(req) }.body()
+
+    suspend fun getAdminMe(): AdminMeResponse =
+        client.get("$baseUrl/api/admin/me").body()
+
+    suspend fun listAdminOrders(bucket: String, limit: Int, offset: Int): AdminOrdersPage =
+        client.get("$baseUrl/api/admin/orders?bucket=$bucket&limit=$limit&offset=$offset").body()
+
+    suspend fun getAdminOrder(orderId: String): AdminOrderCardResponse =
+        client.get("$baseUrl/api/admin/orders/$orderId").body()
+
+    suspend fun confirmPayment(orderId: String): PaymentSelectResponse =
+        client.post("$baseUrl/api/admin/orders/$orderId/payment/confirm").body()
+
+    suspend fun rejectPayment(orderId: String, reason: String): PaymentSelectResponse =
+        client.post("$baseUrl/api/admin/orders/$orderId/payment/reject") { setBody(AdminPaymentRejectRequest(reason)) }.body()
+
+    suspend fun updateOrderStatus(orderId: String, req: AdminOrderStatusRequest): PaymentSelectResponse =
+        client.post("$baseUrl/api/admin/orders/$orderId/status") { setBody(req) }.body()
+
+    suspend fun getPaymentMethods(): List<AdminPaymentMethodDto> =
+        client.get("$baseUrl/api/admin/settings/payment_methods").body()
+
+    suspend fun updatePaymentMethods(req: AdminPaymentMethodsUpdateRequest): SimpleResponse =
+        client.post("$baseUrl/api/admin/settings/payment_methods") { setBody(req) }.body()
+
+    suspend fun getDeliveryMethod(): AdminDeliveryMethodDto =
+        client.get("$baseUrl/api/admin/settings/delivery_method").body()
+
+    suspend fun updateDeliveryMethod(req: AdminDeliveryMethodUpdateRequest): SimpleResponse =
+        client.post("$baseUrl/api/admin/settings/delivery_method") { setBody(req) }.body()
+
+    suspend fun getStorefronts(): List<AdminStorefrontDto> =
+        client.get("$baseUrl/api/admin/settings/storefronts").body()
+
+    suspend fun upsertStorefront(req: AdminStorefrontRequest): AdminStorefrontDto =
+        client.post("$baseUrl/api/admin/settings/storefronts") { setBody(req) }.body()
+
+    suspend fun getChannelBindings(): List<AdminChannelBindingDto> =
+        client.get("$baseUrl/api/admin/settings/channel_bindings").body()
+
+    suspend fun upsertChannelBinding(req: AdminChannelBindingRequest): AdminChannelBindingDto =
+        client.post("$baseUrl/api/admin/settings/channel_bindings") { setBody(req) }.body()
+
+    suspend fun publish(req: AdminPublishRequest): AdminPublishResponse =
+        client.post("$baseUrl/api/admin/publications/publish") { setBody(req) }.body()
 }

@@ -13,6 +13,20 @@ object MerchantsTable : Table("merchants") {
     override val primaryKey = PrimaryKey(id)
 }
 
+object AdminUsersTable : Table("admin_user") {
+    val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.CASCADE)
+    val userId = long("user_id")
+    val role = varchar("role", 16)
+    val createdAt = timestamp("created_at")
+    val updatedAt = timestamp("updated_at")
+    override val primaryKey = PrimaryKey(merchantId, userId)
+
+    init {
+        index(false, merchantId)
+        index(false, role)
+    }
+}
+
 object StorefrontsTable : Table("storefronts") {
     val id = varchar("id", 64)
     val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.CASCADE)
