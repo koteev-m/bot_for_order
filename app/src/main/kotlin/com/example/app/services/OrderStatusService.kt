@@ -61,20 +61,29 @@ class OrderStatusService(
             ts = Instant.now(clock)
         )
         historyRepository.append(entry)
-        eventLogRepository.insert(
-            EventLogEntry(
-                ts = entry.ts,
-                eventType = "status_changed",
-                buyerUserId = order.userId,
-                merchantId = order.merchantId,
-                storefrontId = null,
-                channelId = null,
-                postMessageId = null,
-                listingId = order.itemId,
-                variantId = order.variantId,
-                metadataJson = """{"status":"${newStatus.name}"}"""
+        runCatching {
+            eventLogRepository.insert(
+                EventLogEntry(
+                    ts = entry.ts,
+                    eventType = "status_changed",
+                    buyerUserId = order.userId,
+                    merchantId = order.merchantId,
+                    storefrontId = null,
+                    channelId = null,
+                    postMessageId = null,
+                    listingId = order.itemId,
+                    variantId = order.variantId,
+                    metadataJson = """{"status":"${newStatus.name}"}"""
+                )
             )
-        )
+        }.onFailure { error ->
+            log.warn(
+                "event_log_insert_failed eventType=status_changed orderId={} status={} reason={}",
+                orderId,
+                newStatus,
+                error.message
+            )
+        }
         val fresh = ordersRepository.get(orderId) ?: order.copy(status = newStatus)
         log.info("order status updated orderId={} status={} actorId={}", orderId, newStatus, actorId)
         notifyBuyer(fresh, comment)

@@ -52,7 +52,8 @@ class IdempotencyService(
             throw ApiError("idempotency_in_progress", HttpStatusCode.Conflict)
         }
 
-        val inserted = repository.tryInsert(merchantId, userId, scope, key, requestHash, now)
+        repository.delete(merchantId, userId, scope, key)
+        var inserted = repository.tryInsert(merchantId, userId, scope, key, requestHash, now)
         if (!inserted) {
             val retry = repository.findValid(merchantId, userId, scope, key, cutoff)
             if (retry != null) {
@@ -64,8 +65,13 @@ class IdempotencyService(
                 if (status != null && payload != null) {
                     return IdempotentOutcome.Replay(status = HttpStatusCode.fromValue(status), responseJson = payload)
                 }
+            } else {
+                repository.delete(merchantId, userId, scope, key)
+                inserted = repository.tryInsert(merchantId, userId, scope, key, requestHash, now)
             }
-            throw ApiError("idempotency_in_progress", HttpStatusCode.Conflict)
+            if (!inserted) {
+                throw ApiError("idempotency_in_progress", HttpStatusCode.Conflict)
+            }
         }
 
         return try {

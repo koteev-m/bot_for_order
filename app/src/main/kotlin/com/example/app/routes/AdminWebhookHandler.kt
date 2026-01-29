@@ -380,17 +380,27 @@ private suspend fun writeAuditLog(
 ) {
     val ip = ClientIpResolver.resolve(call, deps.config.metrics.trustedProxyAllowlist)
     val userAgent = call.request.headers["User-Agent"]
-    deps.auditLogRepository.insert(
-        AuditLogEntry(
-            adminUserId = adminUserId,
-            action = action,
-            orderId = orderId,
-            payloadJson = payloadJson,
-            createdAt = java.time.Instant.now(),
-            ip = ip,
-            userAgent = userAgent
+    runCatching {
+        deps.auditLogRepository.insert(
+            AuditLogEntry(
+                adminUserId = adminUserId,
+                action = action,
+                orderId = orderId,
+                payloadJson = payloadJson,
+                createdAt = java.time.Instant.now(),
+                ip = ip,
+                userAgent = userAgent
+            )
         )
-    )
+    }.onFailure { error ->
+        deps.log.warn(
+            "audit_log_insert_failed action={} adminUserId={} orderId={} reason={}",
+            action,
+            adminUserId,
+            orderId,
+            error.message
+        )
+    }
 }
 
 @Suppress("TooGenericExceptionCaught")

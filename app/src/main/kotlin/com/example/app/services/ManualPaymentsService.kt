@@ -39,6 +39,7 @@ import java.time.Instant
 import java.util.UUID
 import kotlin.math.max
 import org.jetbrains.exposed.exceptions.ExposedSQLException
+import org.slf4j.LoggerFactory
 
 data class PaymentInstructions(
     val methodType: PaymentMethodType,
@@ -72,6 +73,8 @@ class ManualPaymentsService(
     private val notifier: ManualPaymentsNotifier,
     private val clock: Clock = Clock.systemUTC()
 ) {
+    private val log = LoggerFactory.getLogger(ManualPaymentsService::class.java)
+
     suspend fun selectPaymentMethod(orderId: String, buyerId: Long, type: PaymentMethodType): Order {
         return lockManager.withLock("order:$orderId:payment_select", LOCK_WAIT_MS, LOCK_LEASE_MS) {
             val order = ordersRepository.get(orderId) ?: throw ApiError("order_not_found", HttpStatusCode.NotFound)
@@ -430,20 +433,29 @@ class ManualPaymentsService(
     }
 
     private suspend fun logStatusChange(order: Order, status: OrderStatus) {
-        eventLogRepository.insert(
-            EventLogEntry(
-                ts = Instant.now(clock),
-                eventType = "status_changed",
-                buyerUserId = order.userId,
-                merchantId = order.merchantId,
-                storefrontId = null,
-                channelId = null,
-                postMessageId = null,
-                listingId = order.itemId,
-                variantId = order.variantId,
-                metadataJson = """{"status":"${status.name}"}"""
+        runCatching {
+            eventLogRepository.insert(
+                EventLogEntry(
+                    ts = Instant.now(clock),
+                    eventType = "status_changed",
+                    buyerUserId = order.userId,
+                    merchantId = order.merchantId,
+                    storefrontId = null,
+                    channelId = null,
+                    postMessageId = null,
+                    listingId = order.itemId,
+                    variantId = order.variantId,
+                    metadataJson = """{"status":"${status.name}"}"""
+                )
             )
-        )
+        }.onFailure { error ->
+            log.warn(
+                "event_log_insert_failed eventType=status_changed orderId={} status={} reason={}",
+                order.id,
+                status,
+                error.message
+            )
+        }
     }
 
     private suspend fun extendHoldsToReviewWindow(order: Order, now: Instant) {

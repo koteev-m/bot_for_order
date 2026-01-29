@@ -22,6 +22,9 @@
 ### Health & build endpoints
 - `/health` and `/build` responses include `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `Cross-Origin-Resource-Policy: same-origin`, `X-Permitted-Cross-Domain-Policies: none`, `Expires: 0`, plus `Pragma: no-cache` to prevent caching and content-type sniffing.
 
+## Telegram webhooks
+- Webhooks are configured outside the app. When calling `setWebhook` for admin/shop bots, pass `secret_token` from `ADMIN_WEBHOOK_SECRET` / `SHOP_WEBHOOK_SECRET` so the server can validate `X-Telegram-Bot-Api-Secret-Token`.
+
 ### JS lock enforcement flags
 - Skip lock check: `-PskipJsLockCheck=true`.
 - Force lock check even outside packaging/publish: `-PforceJsLockCheck=true`.

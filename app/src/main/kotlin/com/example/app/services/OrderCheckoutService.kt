@@ -201,20 +201,24 @@ class OrderCheckoutService(
                 log.warn("order_dedup_set_failed orderId={} reason={}", orderId, error.message)
             }
             val line = lines.firstOrNull()
-            eventLogRepository.insert(
-                EventLogEntry(
-                    ts = Instant.now(),
-                    eventType = "order_created",
-                    buyerUserId = order.userId,
-                    merchantId = order.merchantId,
-                    storefrontId = line?.sourceStorefrontId,
-                    channelId = line?.sourceChannelId,
-                    postMessageId = line?.sourcePostMessageId,
-                    listingId = line?.listingId,
-                    variantId = line?.variantId,
-                    metadataJson = null
+            runCatching {
+                eventLogRepository.insert(
+                    EventLogEntry(
+                        ts = Instant.now(),
+                        eventType = "order_created",
+                        buyerUserId = order.userId,
+                        merchantId = order.merchantId,
+                        storefrontId = line?.sourceStorefrontId,
+                        channelId = line?.sourceChannelId,
+                        postMessageId = line?.sourcePostMessageId,
+                        listingId = line?.listingId,
+                        variantId = line?.variantId,
+                        metadataJson = null
+                    )
                 )
-            )
+            }.onFailure { error ->
+                log.warn("event_log_insert_failed eventType=order_created orderId={} reason={}", orderId, error.message)
+            }
             OrderWithLines(order, lines)
         }
     }
