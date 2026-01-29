@@ -5,6 +5,7 @@ import com.example.app.api.AdminPaymentMethodUpdate
 import com.example.app.api.AdminPaymentRejectRequest
 import com.example.app.api.AdminPublishRequest
 import com.example.app.api.AdminOrderStatusRequest
+import com.example.app.api.AdminChannelBindingRequest
 import com.example.app.api.installApiErrors
 import com.example.app.baseTestConfig
 import com.example.app.security.TelegramInitDataVerifier
@@ -18,6 +19,7 @@ import com.example.domain.AdminUser
 import com.example.domain.Order
 import com.example.domain.OrderStatus
 import com.example.domain.PaymentMethodType
+import com.example.domain.Storefront
 import com.example.db.AdminUsersRepository
 import com.example.db.ChannelBindingsRepository
 import com.example.db.MerchantDeliveryMethodsRepository
@@ -181,6 +183,114 @@ class AdminRoutesRbacTest : StringSpec({
             publishResponse.status shouldBe HttpStatusCode.OK
         }
     }
+
+    "order actions return not found for another merchant" {
+        val deps = TestAdminDeps()
+        deps.adminUsers.put(adminUser(42L, AdminRole.OPERATOR, deps.config.merchants.defaultMerchantId))
+        deps.adminUsers.put(adminUser(43L, AdminRole.OWNER, deps.config.merchants.defaultMerchantId))
+        val now = Instant.now()
+        val foreignOrder = Order(
+            id = "1",
+            merchantId = "other-merchant",
+            userId = 10L,
+            itemId = null,
+            variantId = null,
+            qty = 1,
+            currency = "RUB",
+            amountMinor = 1000,
+            deliveryOption = null,
+            addressJson = null,
+            provider = null,
+            providerChargeId = null,
+            status = OrderStatus.PAYMENT_UNDER_REVIEW,
+            createdAt = now,
+            updatedAt = now,
+            paymentMethodType = PaymentMethodType.MANUAL_CARD
+        )
+        coEvery { deps.ordersRepository.get("1") } returns foreignOrder
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                val appLog = environment.log
+                install(StatusPages) { installApiErrors(appLog) }
+                install(Koin) { modules(deps.module()) }
+                installAdminApiRoutes()
+            }
+            val client = createClient { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
+
+            val operatorInitData = buildInitData(deps.config.telegram.shopToken, userId = 42L)
+            val operatorResponse = client.post("/api/admin/orders/1/payment/confirm") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", operatorInitData)
+            }
+            operatorResponse.status shouldBe HttpStatusCode.NotFound
+
+            val ownerInitData = buildInitData(deps.config.telegram.shopToken, userId = 43L)
+            val ownerResponse = client.post("/api/admin/orders/1/status") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", ownerInitData)
+                setBody(AdminOrderStatusRequest(status = OrderStatus.shipped.name))
+            }
+            ownerResponse.status shouldBe HttpStatusCode.NotFound
+        }
+    }
+
+    "channel bindings upsert with existing channel id returns ok" {
+        val deps = TestAdminDeps()
+        deps.adminUsers.put(adminUser(42L, AdminRole.OWNER, deps.config.merchants.defaultMerchantId))
+        val storefront = Storefront(
+            id = "sf-1",
+            merchantId = deps.config.merchants.defaultMerchantId,
+            name = "Main"
+        )
+        coEvery { deps.storefrontsRepository.getById("sf-1") } returns storefront
+        coEvery { deps.channelBindingsRepository.upsert("sf-1", 100L, any()) } returns 10L
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                val appLog = environment.log
+                install(StatusPages) { installApiErrors(appLog) }
+                install(Koin) { modules(deps.module()) }
+                installAdminApiRoutes()
+            }
+            val client = createClient { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
+            val initData = buildInitData(deps.config.telegram.shopToken, userId = 42L)
+
+            val response = client.post("/api/admin/settings/channel_bindings") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+                setBody(AdminChannelBindingRequest(storefrontId = "sf-1", channelId = 100L))
+            }
+            response.status shouldBe HttpStatusCode.OK
+        }
+    }
+
+    "invalid status returns bad request" {
+        val deps = TestAdminDeps()
+        deps.adminUsers.put(adminUser(42L, AdminRole.OPERATOR, deps.config.merchants.defaultMerchantId))
+        deps.stubOrderActions()
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                val appLog = environment.log
+                install(StatusPages) { installApiErrors(appLog) }
+                install(Koin) { modules(deps.module()) }
+                installAdminApiRoutes()
+            }
+            val client = createClient { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
+            val initData = buildInitData(deps.config.telegram.shopToken, userId = 42L)
+
+            val response = client.post("/api/admin/orders/1/status") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+                setBody(AdminOrderStatusRequest(status = "NOT_A_STATUS"))
+            }
+            response.status shouldBe HttpStatusCode.BadRequest
+        }
+    }
 })
 
 private class TestAdminDeps {
@@ -240,6 +350,7 @@ private class TestAdminDeps {
             updatedAt = now,
             paymentMethodType = PaymentMethodType.MANUAL_CARD
         )
+        coEvery { ordersRepository.get("1") } returns order
         coEvery { manualPaymentsService.confirmPayment("1", any()) } returns order.copy(status = OrderStatus.PAID_CONFIRMED)
         coEvery { manualPaymentsService.rejectPayment("1", any(), any()) } returns order.copy(status = OrderStatus.AWAITING_PAYMENT)
         coEvery { orderStatusService.changeStatus("1", any(), any(), any()) } returns

@@ -47,6 +47,7 @@ import com.example.db.OrderPaymentClaimsRepository
 import com.example.db.OrdersRepository
 import com.example.db.StorefrontsRepository
 import com.example.domain.AdminRole
+import com.example.domain.Order
 import com.example.domain.DeliveryMethodType
 import com.example.domain.MerchantDeliveryMethod
 import com.example.domain.MerchantPaymentMethod
@@ -212,6 +213,7 @@ fun Application.installAdminApiRoutes() {
             post("/orders/{id}/payment/details") {
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
                 val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
                 val req = call.receive<AdminPaymentDetailsRequest>()
                 val order = manualPaymentsService.setPaymentDetails(orderId, admin.userId, req.text)
                 call.respond(PaymentSelectResponse(orderId = order.id, status = order.status.name))
@@ -219,12 +221,14 @@ fun Application.installAdminApiRoutes() {
             post("/orders/{id}/payment/confirm") {
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
                 val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
                 val order = manualPaymentsService.confirmPayment(orderId, admin.userId)
                 call.respond(PaymentSelectResponse(orderId = order.id, status = order.status.name))
             }
             post("/orders/{id}/payment/reject") {
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
                 val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
                 val req = call.receive<AdminPaymentRejectRequest>()
                 val order = manualPaymentsService.rejectPayment(orderId, admin.userId, req.reason)
                 call.respond(PaymentSelectResponse(orderId = order.id, status = order.status.name))
@@ -233,7 +237,10 @@ fun Application.installAdminApiRoutes() {
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
                 val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
                 val req = call.receive<AdminOrderStatusRequest>()
-                val status = OrderStatus.valueOf(req.status)
+                ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
+                val status = runCatching { OrderStatus.valueOf(req.status) }.getOrElse {
+                    throw ApiError("invalid_status", HttpStatusCode.BadRequest)
+                }
                 val comment = buildStatusComment(status, req.comment, req.trackingCode)
                 val result = orderStatusService.changeStatus(orderId, status, admin.userId, comment)
                 call.respond(PaymentSelectResponse(orderId = result.order.id, status = result.order.status.name))
@@ -243,20 +250,25 @@ fun Application.installAdminApiRoutes() {
                 call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
                 val attachmentId = call.parameters["attachmentId"]?.toLongOrNull()
                     ?: throw IllegalArgumentException("attachment id missing")
+                ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
                 val ttl = Duration.ofSeconds(cfg.storage.presignTtlSeconds)
                 val url = manualPaymentsService.presignAttachmentUrl(orderId, attachmentId, ttl)
                 call.respond(AttachmentUrlResponse(url = url))
             }
 
             get("/settings/payment_methods") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val methods = PaymentMethodType.values().map { type ->
                     val stored = paymentMethodsRepository.getMethod(merchantId, type)
                     val mode = stored?.mode ?: PaymentMethodMode.MANUAL_SEND
                     val enabled = stored?.enabled ?: false
-                    val details = stored?.detailsEncrypted?.let { payload ->
-                        runCatching { paymentDetailsCrypto.decrypt(payload) }.getOrNull()
+                    val details = if (admin.role == AdminRole.OWNER) {
+                        stored?.detailsEncrypted?.let { payload ->
+                            runCatching { paymentDetailsCrypto.decrypt(payload) }.getOrNull()
+                        }
+                    } else {
+                        null
                     }
                     AdminPaymentMethodDto(
                         type = type.name,
@@ -304,6 +316,7 @@ fun Application.installAdminApiRoutes() {
                 call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val req = call.receive<AdminDeliveryMethodUpdateRequest>()
+                validateRequiredFields(req.requiredFields)
                 val method = MerchantDeliveryMethod(
                     merchantId = merchantId,
                     type = DeliveryMethodType.CDEK_PICKUP_MANUAL,
@@ -317,6 +330,7 @@ fun Application.installAdminApiRoutes() {
                 call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val req = call.receive<AdminDeliveryMethodUpdateRequest>()
+                validateRequiredFields(req.requiredFields)
                 val method = MerchantDeliveryMethod(
                     merchantId = merchantId,
                     type = DeliveryMethodType.CDEK_PICKUP_MANUAL,
@@ -370,6 +384,7 @@ fun Application.installAdminApiRoutes() {
             put("/settings/channel_bindings") {
                 call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val req = call.receive<AdminChannelBindingRequest>()
+                ensureStorefrontForMerchant(req.storefrontId, storefrontsRepository, cfg.merchants.defaultMerchantId)
                 val id = channelBindingsRepository.upsert(req.storefrontId, req.channelId, Instant.now())
                 call.respond(
                     AdminChannelBindingDto(
@@ -382,6 +397,7 @@ fun Application.installAdminApiRoutes() {
             post("/settings/channel_bindings") {
                 call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val req = call.receive<AdminChannelBindingRequest>()
+                ensureStorefrontForMerchant(req.storefrontId, storefrontsRepository, cfg.merchants.defaultMerchantId)
                 val id = channelBindingsRepository.upsert(req.storefrontId, req.channelId, Instant.now())
                 call.respond(
                     AdminChannelBindingDto(
@@ -439,8 +455,12 @@ private fun resolvePaymentMethodUpdate(
     update: AdminPaymentMethodUpdate,
     crypto: PaymentDetailsCrypto
 ): MerchantPaymentMethod {
-    val type = PaymentMethodType.valueOf(update.type)
-    val mode = PaymentMethodMode.valueOf(update.mode)
+    val type = runCatching { PaymentMethodType.valueOf(update.type) }.getOrElse {
+        throw ApiError("invalid_payment_method", HttpStatusCode.BadRequest)
+    }
+    val mode = runCatching { PaymentMethodMode.valueOf(update.mode) }.getOrElse {
+        throw ApiError("invalid_payment_mode", HttpStatusCode.BadRequest)
+    }
     val details = update.details?.trim()?.takeIf { it.isNotEmpty() }
     val encrypted = if (mode == PaymentMethodMode.AUTO) {
         if (details == null) {
@@ -459,5 +479,43 @@ private fun resolvePaymentMethodUpdate(
     )
 }
 
+private suspend fun ensureOrderForMerchant(
+    orderId: String,
+    ordersRepository: OrdersRepository,
+    merchantId: String
+): Order {
+    val order = ordersRepository.get(orderId) ?: throw ApiError("order_not_found", HttpStatusCode.NotFound)
+    if (order.merchantId != merchantId) {
+        throw ApiError("order_not_found", HttpStatusCode.NotFound)
+    }
+    return order
+}
+
+private suspend fun ensureStorefrontForMerchant(
+    storefrontId: String,
+    storefrontsRepository: StorefrontsRepository,
+    merchantId: String
+) {
+    val storefront = storefrontsRepository.getById(storefrontId)
+        ?: throw ApiError("storefront_not_found", HttpStatusCode.NotFound)
+    if (storefront.merchantId != merchantId) {
+        throw ApiError("forbidden", HttpStatusCode.Forbidden)
+    }
+}
+
+private fun validateRequiredFields(requiredFields: List<String>) {
+    if (requiredFields.size > MAX_REQUIRED_FIELDS) {
+        throw ApiError("invalid_required_fields", HttpStatusCode.BadRequest)
+    }
+    requiredFields.forEach { field ->
+        val trimmed = field.trim()
+        if (trimmed.isEmpty() || trimmed.length > MAX_REQUIRED_FIELD_LENGTH) {
+            throw ApiError("invalid_required_fields", HttpStatusCode.BadRequest)
+        }
+    }
+}
+
 private const val DEFAULT_LIMIT = 50
 private const val MAX_LIMIT = 200
+private const val MAX_REQUIRED_FIELDS = 20
+private const val MAX_REQUIRED_FIELD_LENGTH = 100
