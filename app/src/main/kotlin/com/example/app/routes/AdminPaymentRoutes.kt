@@ -316,12 +316,13 @@ fun Application.installAdminApiRoutes() {
                 call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val req = call.receive<AdminDeliveryMethodUpdateRequest>()
-                validateRequiredFields(req.requiredFields)
+                val normalized = req.requiredFields.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+                validateRequiredFields(normalized)
                 val method = MerchantDeliveryMethod(
                     merchantId = merchantId,
                     type = DeliveryMethodType.CDEK_PICKUP_MANUAL,
                     enabled = req.enabled,
-                    requiredFieldsJson = json.encodeToString(req.requiredFields)
+                    requiredFieldsJson = json.encodeToString(normalized)
                 )
                 deliveryMethodsRepository.upsert(method)
                 call.respond(SimpleResponse())
@@ -330,12 +331,13 @@ fun Application.installAdminApiRoutes() {
                 call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val req = call.receive<AdminDeliveryMethodUpdateRequest>()
-                validateRequiredFields(req.requiredFields)
+                val normalized = req.requiredFields.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+                validateRequiredFields(normalized)
                 val method = MerchantDeliveryMethod(
                     merchantId = merchantId,
                     type = DeliveryMethodType.CDEK_PICKUP_MANUAL,
                     enabled = req.enabled,
-                    requiredFieldsJson = json.encodeToString(req.requiredFields)
+                    requiredFieldsJson = json.encodeToString(normalized)
                 )
                 deliveryMethodsRepository.upsert(method)
                 call.respond(SimpleResponse())
@@ -353,6 +355,10 @@ fun Application.installAdminApiRoutes() {
                 call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val req = call.receive<AdminStorefrontRequest>()
+                val existing = storefrontsRepository.getById(req.id)
+                if (existing != null && existing.merchantId != merchantId) {
+                    throw ApiError("storefront_not_found", HttpStatusCode.NotFound)
+                }
                 val storefront = Storefront(id = req.id, merchantId = merchantId, name = req.name)
                 storefrontsRepository.upsert(storefront)
                 call.respond(AdminStorefrontDto(id = storefront.id, name = storefront.name))
@@ -361,6 +367,10 @@ fun Application.installAdminApiRoutes() {
                 call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val req = call.receive<AdminStorefrontRequest>()
+                val existing = storefrontsRepository.getById(req.id)
+                if (existing != null && existing.merchantId != merchantId) {
+                    throw ApiError("storefront_not_found", HttpStatusCode.NotFound)
+                }
                 val storefront = Storefront(id = req.id, merchantId = merchantId, name = req.name)
                 storefrontsRepository.upsert(storefront)
                 call.respond(AdminStorefrontDto(id = storefront.id, name = storefront.name))
@@ -385,6 +395,12 @@ fun Application.installAdminApiRoutes() {
                 call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val req = call.receive<AdminChannelBindingRequest>()
                 ensureStorefrontForMerchant(req.storefrontId, storefrontsRepository, cfg.merchants.defaultMerchantId)
+                ensureChannelForMerchant(
+                    req.channelId,
+                    channelBindingsRepository,
+                    storefrontsRepository,
+                    cfg.merchants.defaultMerchantId
+                )
                 val id = channelBindingsRepository.upsert(req.storefrontId, req.channelId, Instant.now())
                 call.respond(
                     AdminChannelBindingDto(
@@ -398,6 +414,12 @@ fun Application.installAdminApiRoutes() {
                 call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val req = call.receive<AdminChannelBindingRequest>()
                 ensureStorefrontForMerchant(req.storefrontId, storefrontsRepository, cfg.merchants.defaultMerchantId)
+                ensureChannelForMerchant(
+                    req.channelId,
+                    channelBindingsRepository,
+                    storefrontsRepository,
+                    cfg.merchants.defaultMerchantId
+                )
                 val id = channelBindingsRepository.upsert(req.storefrontId, req.channelId, Instant.now())
                 call.respond(
                     AdminChannelBindingDto(
@@ -498,6 +520,20 @@ private suspend fun ensureStorefrontForMerchant(
 ) {
     val storefront = storefrontsRepository.getById(storefrontId)
         ?: throw ApiError("storefront_not_found", HttpStatusCode.NotFound)
+    if (storefront.merchantId != merchantId) {
+        throw ApiError("forbidden", HttpStatusCode.Forbidden)
+    }
+}
+
+private suspend fun ensureChannelForMerchant(
+    channelId: Long,
+    channelBindingsRepository: ChannelBindingsRepository,
+    storefrontsRepository: StorefrontsRepository,
+    merchantId: String
+) {
+    val existing = channelBindingsRepository.getByChannel(channelId) ?: return
+    val storefront = storefrontsRepository.getById(existing.storefrontId)
+        ?: throw ApiError("forbidden", HttpStatusCode.Forbidden)
     if (storefront.merchantId != merchantId) {
         throw ApiError("forbidden", HttpStatusCode.Forbidden)
     }
