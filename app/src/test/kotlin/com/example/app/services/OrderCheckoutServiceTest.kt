@@ -5,6 +5,7 @@ import com.example.app.api.ApiError
 import com.example.app.testutil.InMemoryHoldService
 import com.example.app.testutil.InMemoryOrderDedupStore
 import com.example.app.testutil.InMemoryOrderHoldService
+import com.example.app.testutil.InMemoryEventLogRepository
 import com.example.app.testutil.NoopLockManager
 import com.example.app.testutil.isDockerAvailable
 import com.example.db.CartItemsRepositoryExposed
@@ -115,6 +116,7 @@ class OrderCheckoutServiceTest : StringSpec({
             variantsRepository = variantsRepository,
             ordersRepository = ordersRepository,
             orderLinesRepository = orderLinesRepository,
+            eventLogRepository = InMemoryEventLogRepository(),
             orderHoldService = holdService,
             lockManager = NoopLockManager(),
             orderDedupStore = InMemoryOrderDedupStore()
@@ -208,6 +210,7 @@ class OrderCheckoutServiceTest : StringSpec({
             variantsRepository = variantsRepository,
             ordersRepository = ordersRepository,
             orderLinesRepository = orderLinesRepository,
+            eventLogRepository = InMemoryEventLogRepository(),
             orderHoldService = holdService,
             lockManager = NoopLockManager(),
             orderDedupStore = InMemoryOrderDedupStore()

@@ -4,10 +4,12 @@ import com.example.bots.TelegramClients
 import com.example.db.OrderLinesRepository
 import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrdersRepository
+import com.example.db.EventLogRepository
 import com.example.domain.Order
 import com.example.domain.OrderLine
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
+import com.example.domain.EventLogEntry
 import com.example.domain.hold.HoldService
 import com.example.domain.hold.OrderHoldService
 import com.example.domain.hold.OrderHoldRequest
@@ -24,6 +26,7 @@ class OrderStatusService(
     private val clients: TelegramClients,
     private val orderHoldService: OrderHoldService,
     private val holdService: HoldService,
+    private val eventLogRepository: EventLogRepository,
     private val clock: Clock = Clock.systemUTC()
 ) {
 
@@ -58,6 +61,20 @@ class OrderStatusService(
             ts = Instant.now(clock)
         )
         historyRepository.append(entry)
+        eventLogRepository.insert(
+            EventLogEntry(
+                ts = entry.ts,
+                eventType = "status_changed",
+                buyerUserId = order.userId,
+                merchantId = order.merchantId,
+                storefrontId = null,
+                channelId = null,
+                postMessageId = null,
+                listingId = order.itemId,
+                variantId = order.variantId,
+                metadataJson = """{"status":"${newStatus.name}"}"""
+            )
+        )
         val fresh = ordersRepository.get(orderId) ?: order.copy(status = newStatus)
         log.info("order status updated orderId={} status={} actorId={}", orderId, newStatus, actorId)
         notifyBuyer(fresh, comment)

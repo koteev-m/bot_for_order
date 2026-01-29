@@ -126,24 +126,26 @@ internal suspend fun handleStatusCommand(
     actorId: Long,
     service: OrderStatusService,
     reply: (String) -> Unit
-) {
+): OrderStatusService.ChangeResult? {
     val parsed = try {
         parseStatusArgs(args)
     } catch (error: IllegalArgumentException) {
         val message = error.message ?: STATUS_USAGE
         reply("⚠️ $message")
-        return
+        return null
     }
 
     val commentDisplay = parsed.comment ?: "none"
     try {
         val result = service.changeStatus(parsed.orderId, parsed.status, actorId, parsed.comment)
         reply("ОК: order=${result.order.id}, status=${result.order.status.name}, note=$commentDisplay")
+        return result
     } catch (error: IllegalArgumentException) {
         reply("⚠️ ${error.message ?: "Не удалось изменить статус"}")
     } catch (error: IllegalStateException) {
         reply("⚠️ ${error.message ?: "Не удалось изменить статус"}")
     }
+    return null
 }
 
 internal suspend fun handleCounterCommand(

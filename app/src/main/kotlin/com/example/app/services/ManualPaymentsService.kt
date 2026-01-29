@@ -12,6 +12,7 @@ import com.example.db.OrderPaymentDetailsRepository
 import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrdersRepository
 import com.example.db.VariantsRepository
+import com.example.db.EventLogRepository
 import com.example.domain.MerchantPaymentMethod
 import com.example.domain.Order
 import com.example.domain.OrderAttachment
@@ -21,6 +22,7 @@ import com.example.domain.OrderPaymentClaim
 import com.example.domain.OrderPaymentDetails
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
+import com.example.domain.EventLogEntry
 import com.example.domain.PaymentClaimStatus
 import com.example.domain.PaymentMethodMode
 import com.example.domain.PaymentMethodType
@@ -64,6 +66,7 @@ class ManualPaymentsService(
     private val orderHoldService: OrderHoldService,
     private val holdService: HoldService,
     private val lockManager: LockManager,
+    private val eventLogRepository: EventLogRepository,
     private val storage: Storage,
     private val crypto: PaymentDetailsCrypto,
     private val notifier: ManualPaymentsNotifier,
@@ -98,6 +101,7 @@ class ManualPaymentsService(
                 OrderStatusTransitions.requireAllowed(updatedOrder.status, targetStatus)
                 ordersRepository.setStatus(orderId, targetStatus)
                 appendHistory(orderId, targetStatus, "payment_method_selected", buyerId)
+                logStatusChange(updatedOrder, targetStatus)
                 ordersRepository.get(orderId) ?: updatedOrder.copy(status = targetStatus)
             } else {
                 updatedOrder
@@ -164,6 +168,7 @@ class ManualPaymentsService(
             ordersRepository.setPaymentClaimed(orderId, now)
             ordersRepository.setStatus(orderId, OrderStatus.PAYMENT_UNDER_REVIEW)
             appendHistory(orderId, OrderStatus.PAYMENT_UNDER_REVIEW, "payment_claim_submitted", buyerId)
+            logStatusChange(order, OrderStatus.PAYMENT_UNDER_REVIEW)
 
             extendHoldsToReviewWindow(order, now)
 
@@ -195,6 +200,7 @@ class ManualPaymentsService(
             OrderStatusTransitions.requireAllowed(order.status, OrderStatus.AWAITING_PAYMENT)
             ordersRepository.setStatus(orderId, OrderStatus.AWAITING_PAYMENT)
             appendHistory(orderId, OrderStatus.AWAITING_PAYMENT, "payment_details_sent", adminId)
+            logStatusChange(order, OrderStatus.AWAITING_PAYMENT)
         }
         return ordersRepository.get(orderId) ?: order
     }
@@ -221,6 +227,7 @@ class ManualPaymentsService(
                 OrderStatusTransitions.requireAllowed(order.status, OrderStatus.canceled)
                 ordersRepository.setStatus(orderId, OrderStatus.canceled)
                 appendHistory(orderId, OrderStatus.canceled, "stock_mismatch", adminId)
+                logStatusChange(order, OrderStatus.canceled)
                 orderHoldService.release(orderId, buildOrderHoldRequests(order, lines))
                 holdService.deleteReserveByOrder(orderId)
                 throw ApiError("stock_mismatch", HttpStatusCode.Conflict)
@@ -228,6 +235,7 @@ class ManualPaymentsService(
             OrderStatusTransitions.requireAllowed(order.status, OrderStatus.PAID_CONFIRMED)
             ordersRepository.setStatus(orderId, OrderStatus.PAID_CONFIRMED)
             appendHistory(orderId, OrderStatus.PAID_CONFIRMED, "payment_confirmed", adminId)
+            logStatusChange(order, OrderStatus.PAID_CONFIRMED)
             orderHoldService.release(orderId, buildOrderHoldRequests(order, lines))
             holdService.deleteReserveByOrder(orderId)
             claim?.let { paymentClaimsRepository.setStatus(it.id, PaymentClaimStatus.ACCEPTED, it.comment) }
@@ -261,6 +269,7 @@ class ManualPaymentsService(
             if (now.isAfter(claimDeadline)) {
                 ordersRepository.setStatus(orderId, OrderStatus.canceled)
                 appendHistory(orderId, OrderStatus.canceled, "PAYMENT_TIMEOUT", adminId)
+                logStatusChange(order, OrderStatus.canceled)
                 orderHoldService.release(orderId, buildOrderHoldRequests(order, lines))
                 holdService.deleteReserveByOrder(orderId)
                 return@withLock ordersRepository.get(orderId) ?: order.copy(status = OrderStatus.canceled)
@@ -270,6 +279,7 @@ class ManualPaymentsService(
             ordersRepository.clearPaymentClaimedAt(orderId)
             ordersRepository.setStatus(orderId, targetStatus)
             appendHistory(orderId, targetStatus, "payment_rejected:$normalized", adminId)
+            logStatusChange(order, targetStatus)
             val ttlRemaining = max(Duration.between(now, claimDeadline).seconds, 1L)
             orderHoldService.extend(orderId, buildOrderHoldRequests(order, lines), ttlRemaining)
             ordersRepository.get(orderId) ?: order.copy(status = targetStatus)
@@ -415,6 +425,23 @@ class ManualPaymentsService(
                 comment = comment,
                 actorId = actorId,
                 ts = Instant.now(clock)
+            )
+        )
+    }
+
+    private suspend fun logStatusChange(order: Order, status: OrderStatus) {
+        eventLogRepository.insert(
+            EventLogEntry(
+                ts = Instant.now(clock),
+                eventType = "status_changed",
+                buyerUserId = order.userId,
+                merchantId = order.merchantId,
+                storefrontId = null,
+                channelId = null,
+                postMessageId = null,
+                listingId = order.itemId,
+                variantId = order.variantId,
+                metadataJson = """{"status":"${status.name}"}"""
             )
         )
     }

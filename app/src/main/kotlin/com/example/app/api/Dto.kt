@@ -4,6 +4,7 @@ import com.example.domain.LinkAction
 import com.example.domain.LinkButton
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 @Serializable
@@ -365,6 +366,17 @@ data class WatchlistSubscribeRequest(
 @Serializable
 data class SimpleResponse(
     val ok: Boolean = true
+)
+
+@Serializable
+data class AnalyticsEventRequest(
+    val eventType: String,
+    val storefrontId: String? = null,
+    val channelId: Long? = null,
+    val postMessageId: Int? = null,
+    val listingId: String? = null,
+    val variantId: String? = null,
+    val metadata: JsonElement? = null
 )
 
 @Serializable

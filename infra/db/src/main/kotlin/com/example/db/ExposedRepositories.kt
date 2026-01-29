@@ -1,11 +1,14 @@
 package com.example.db
 
 import com.example.db.tables.AdminUsersTable
+import com.example.db.tables.AuditLogTable
 import com.example.db.tables.ChannelBindingsTable
 import com.example.db.tables.CartsTable
 import com.example.db.tables.CartItemsTable
+import com.example.db.tables.EventLogTable
 import com.example.db.tables.ItemMediaTable
 import com.example.db.tables.ItemsTable
+import com.example.db.tables.IdempotencyKeyTable
 import com.example.db.tables.LinkContextsTable
 import com.example.db.tables.MerchantsTable
 import com.example.db.tables.MerchantDeliveryMethodsTable
@@ -27,6 +30,7 @@ import com.example.db.tables.BuyerDeliveryProfileTable
 import com.example.domain.BargainRules
 import com.example.domain.AdminRole
 import com.example.domain.AdminUser
+import com.example.domain.AuditLogEntry
 import com.example.domain.ChannelBinding
 import com.example.domain.Cart
 import com.example.domain.CartItem
@@ -50,6 +54,8 @@ import com.example.domain.OrderPaymentClaim
 import com.example.domain.OrderPaymentDetails
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
+import com.example.domain.EventLogEntry
+import com.example.domain.IdempotencyKeyRecord
 import com.example.domain.BuyerDeliveryProfile
 import com.example.domain.PaymentClaimStatus
 import com.example.domain.PaymentMethodMode
@@ -69,7 +75,6 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.Column
-import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -93,6 +98,7 @@ import org.jetbrains.exposed.sql.javatime.CurrentTimestamp
 import org.jetbrains.exposed.sql.intLiteral
 import org.jetbrains.exposed.sql.statements.InsertStatement
 import org.jetbrains.exposed.exceptions.ExposedSQLException
+import org.jetbrains.exposed.sql.ResultRow
 
 private val json = Json
 
@@ -1704,3 +1710,134 @@ class WatchlistRepositoryExposed(private val tx: DatabaseTx) : WatchlistReposito
 private fun <T> InsertStatement<*>.requireGeneratedId(column: Column<T>): T =
     resultedValues?.singleOrNull()?.get(column)
         ?: error("Failed to obtain generated value for ${column.name}")
+
+class AuditLogRepositoryExposed(private val tx: DatabaseTx) : AuditLogRepository {
+    override suspend fun insert(entry: AuditLogEntry): Long = tx.tx {
+        AuditLogTable.insert {
+            it[adminUserId] = entry.adminUserId
+            it[action] = entry.action
+            it[orderId] = entry.orderId
+            it[payloadJson] = entry.payloadJson
+            it[createdAt] = entry.createdAt
+            it[ip] = entry.ip
+            it[userAgent] = entry.userAgent
+        }.requireGeneratedId(AuditLogTable.id)
+    }
+}
+
+class EventLogRepositoryExposed(private val tx: DatabaseTx) : EventLogRepository {
+    override suspend fun insert(entry: EventLogEntry): Long = tx.tx {
+        EventLogTable.insert {
+            it[ts] = entry.ts
+            it[eventType] = entry.eventType
+            it[buyerUserId] = entry.buyerUserId
+            it[merchantId] = entry.merchantId
+            it[storefrontId] = entry.storefrontId
+            it[channelId] = entry.channelId
+            it[postMessageId] = entry.postMessageId
+            it[listingId] = entry.listingId
+            it[variantId] = entry.variantId
+            it[metadataJson] = entry.metadataJson
+        }.requireGeneratedId(EventLogTable.id)
+    }
+}
+
+class IdempotencyRepositoryExposed(private val tx: DatabaseTx) : IdempotencyRepository {
+    override suspend fun findValid(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        validAfter: Instant
+    ): IdempotencyKeyRecord? = tx.tx {
+        IdempotencyKeyTable
+            .selectAll()
+            .where {
+                (IdempotencyKeyTable.merchantId eq merchantId) and
+                    (IdempotencyKeyTable.userId eq userId) and
+                    (IdempotencyKeyTable.scope eq scope) and
+                    (IdempotencyKeyTable.key eq key) and
+                    (IdempotencyKeyTable.createdAt greaterEq validAfter)
+            }
+            .singleOrNull()
+            ?.toIdempotencyRecord()
+    }
+
+    override suspend fun tryInsert(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        requestHash: String,
+        createdAt: Instant
+    ): Boolean = tx.tx {
+        val sql = """
+            INSERT INTO idempotency_key (merchant_id, user_id, scope, key, request_hash, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (merchant_id, user_id, scope, key)
+            DO NOTHING
+            RETURNING 1
+        """.trimIndent()
+        val inserted = exec(
+            sql,
+            listOf(
+                IdempotencyKeyTable.merchantId.columnType to merchantId,
+                IdempotencyKeyTable.userId.columnType to userId,
+                IdempotencyKeyTable.scope.columnType to scope,
+                IdempotencyKeyTable.key.columnType to key,
+                IdempotencyKeyTable.requestHash.columnType to requestHash,
+                IdempotencyKeyTable.createdAt.columnType to createdAt
+            )
+        ) { rs -> rs.next() }
+        inserted == true
+    }
+
+    override suspend fun updateResponse(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        responseStatus: Int,
+        responseJson: String
+    ) {
+        tx.tx {
+            IdempotencyKeyTable.update({
+                (IdempotencyKeyTable.merchantId eq merchantId) and
+                    (IdempotencyKeyTable.userId eq userId) and
+                    (IdempotencyKeyTable.scope eq scope) and
+                    (IdempotencyKeyTable.key eq key)
+            }) {
+                it[IdempotencyKeyTable.responseStatus] = responseStatus
+                it[IdempotencyKeyTable.responseJson] = responseJson
+            }
+        }
+    }
+
+    override suspend fun delete(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String
+    ) {
+        tx.tx {
+            IdempotencyKeyTable.deleteWhere {
+                (IdempotencyKeyTable.merchantId eq merchantId) and
+                    (IdempotencyKeyTable.userId eq userId) and
+                    (IdempotencyKeyTable.scope eq scope) and
+                    (IdempotencyKeyTable.key eq key)
+            }
+        }
+    }
+
+    private fun ResultRow.toIdempotencyRecord(): IdempotencyKeyRecord =
+        IdempotencyKeyRecord(
+            merchantId = this[IdempotencyKeyTable.merchantId],
+            userId = this[IdempotencyKeyTable.userId],
+            scope = this[IdempotencyKeyTable.scope],
+            key = this[IdempotencyKeyTable.key],
+            requestHash = this[IdempotencyKeyTable.requestHash],
+            responseStatus = this[IdempotencyKeyTable.responseStatus],
+            responseJson = this[IdempotencyKeyTable.responseJson],
+            createdAt = this[IdempotencyKeyTable.createdAt]
+        )
+}

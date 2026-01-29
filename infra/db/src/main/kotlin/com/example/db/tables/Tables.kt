@@ -328,6 +328,60 @@ object OrderStatusHistoryTable : Table("order_status_history") {
     override val primaryKey = PrimaryKey(id)
 }
 
+object AuditLogTable : Table("audit_log") {
+    val id = long("id").autoIncrement()
+    val adminUserId = long("admin_user_id")
+    val action = text("action")
+    val orderId = varchar("order_id", 64).nullable()
+    val payloadJson = text("payload_json")
+    val createdAt = timestamp("created_at")
+    val ip = text("ip").nullable()
+    val userAgent = text("user_agent").nullable()
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index(false, adminUserId, createdAt)
+        index(false, orderId)
+    }
+}
+
+object EventLogTable : Table("event_log") {
+    val id = long("id").autoIncrement()
+    val ts = timestamp("ts")
+    val eventType = text("event_type")
+    val buyerUserId = long("buyer_user_id").nullable()
+    val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.CASCADE)
+    val storefrontId = varchar("storefront_id", 64).nullable()
+    val channelId = long("channel_id").nullable()
+    val postMessageId = integer("post_message_id").nullable()
+    val listingId = varchar("listing_id", 64).nullable()
+    val variantId = varchar("variant_id", 64).nullable()
+    val metadataJson = text("metadata_json").nullable()
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index(false, merchantId, ts)
+        index(false, eventType, ts)
+        index(false, buyerUserId, ts)
+    }
+}
+
+object IdempotencyKeyTable : Table("idempotency_key") {
+    val merchantId = reference("merchant_id", MerchantsTable.id, onDelete = ReferenceOption.CASCADE)
+    val userId = long("user_id")
+    val scope = varchar("scope", 64)
+    val key = varchar("key", 128)
+    val requestHash = char("request_hash", 64)
+    val responseStatus = integer("response_status").nullable()
+    val responseJson = text("response_json").nullable()
+    val createdAt = timestamp("created_at")
+    override val primaryKey = PrimaryKey(merchantId, userId, scope, key)
+
+    init {
+        index(false, merchantId, userId, scope)
+    }
+}
+
 object WatchlistTable : Table("watchlist") {
     val id = long("id").autoIncrement()
     val userId = long("user_id")

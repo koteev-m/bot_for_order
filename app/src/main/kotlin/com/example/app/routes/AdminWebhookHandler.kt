@@ -15,10 +15,13 @@ import com.example.app.services.PostService
 import com.example.app.tg.TgMessage
 import com.example.app.tg.TgUpdate
 import com.example.app.tg.TgCallbackQuery
+import com.example.app.util.ClientIpResolver
 import com.example.bots.TelegramClients
+import com.example.db.AuditLogRepository
 import com.example.db.OrderDeliveryRepository
 import com.example.db.OrdersRepository
 import com.example.db.ItemMediaRepository
+import com.example.domain.AuditLogEntry
 import com.example.domain.ItemMedia
 import com.pengrad.telegrambot.model.request.InputMedia
 import com.pengrad.telegrambot.model.request.InputMediaPhoto
@@ -36,6 +39,9 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.encodeToString
 import org.koin.ktor.ext.inject
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -55,6 +61,7 @@ fun Application.installAdminWebhook() {
     val manualPaymentsService by inject<ManualPaymentsService>()
     val paymentDetailsStateStore by inject<PaymentDetailsStateStore>()
     val paymentRejectReasonStateStore by inject<PaymentRejectReasonStateStore>()
+    val auditLogRepository by inject<AuditLogRepository>()
     val ordersRepository by inject<OrdersRepository>()
     val orderDeliveryRepository by inject<OrderDeliveryRepository>()
 
@@ -69,6 +76,7 @@ fun Application.installAdminWebhook() {
         mediaStateStore = mediaStateStore,
         paymentDetailsStateStore = paymentDetailsStateStore,
         paymentRejectReasonStateStore = paymentRejectReasonStateStore,
+        auditLogRepository = auditLogRepository,
         postService = postService,
         orderStatusService = orderStatusService,
         offersService = offersService,
@@ -80,6 +88,9 @@ fun Application.installAdminWebhook() {
 
     routing {
         post("/tg/admin") {
+            if (!verifyTelegramWebhookSecret(call, deps.config.telegram.adminWebhookSecret)) {
+                return@post
+            }
             val body = call.receiveText()
             handleAdminUpdate(call, body, deps)
         }
@@ -96,6 +107,7 @@ private data class AdminWebhookDeps(
     val mediaStateStore: MediaStateStore,
     val paymentDetailsStateStore: PaymentDetailsStateStore,
     val paymentRejectReasonStateStore: PaymentRejectReasonStateStore,
+    val auditLogRepository: AuditLogRepository,
     val postService: PostService,
     val orderStatusService: OrderStatusService,
     val offersService: OffersService,
@@ -119,7 +131,7 @@ private suspend fun handleAdminUpdate(
 
     val callback = update.callbackQuery
     if (callback != null) {
-        handleAdminCallback(callback, deps)
+        handleAdminCallback(call, callback, deps)
         call.respond(HttpStatusCode.OK)
         return
     }
@@ -147,13 +159,13 @@ private suspend fun handleAdminUpdate(
         val pendingDetailsOrderId = deps.paymentDetailsStateStore.get(fromId)
         val pendingRejectOrderId = deps.paymentRejectReasonStateStore.get(fromId)
         if (pendingRejectOrderId != null && text.isNotBlank() && !text.startsWith("/")) {
-            handlePaymentRejectMessage(chatId, fromId, pendingRejectOrderId, text, deps, reply)
+            handlePaymentRejectMessage(call, chatId, fromId, pendingRejectOrderId, text, deps, reply)
             deps.paymentRejectReasonStateStore.clear(fromId)
         } else if (pendingDetailsOrderId != null && text.isNotBlank() && !text.startsWith("/")) {
-            handlePaymentDetailsMessage(chatId, fromId, pendingDetailsOrderId, text, deps, reply)
+            handlePaymentDetailsMessage(call, chatId, fromId, pendingDetailsOrderId, text, deps, reply)
             deps.paymentDetailsStateStore.clear(fromId)
         } else if (text.startsWith("/")) {
-            handleAdminCommand(chatId, fromId, text, deps, reply)
+            handleAdminCommand(call, chatId, fromId, text, deps, reply)
         } else {
             handleMediaCollection(fromId, chatId, message, deps, reply)
         }
@@ -162,7 +174,16 @@ private suspend fun handleAdminUpdate(
     call.respond(HttpStatusCode.OK)
 }
 
-private suspend fun handleAdminCallback(callback: TgCallbackQuery, deps: AdminWebhookDeps) {
+private suspend fun verifyTelegramWebhookSecret(call: ApplicationCall, expected: String): Boolean {
+    val provided = call.request.headers["X-Telegram-Bot-Api-Secret-Token"]
+    if (provided.isNullOrBlank() || provided != expected) {
+        call.respond(HttpStatusCode.Unauthorized)
+        return false
+    }
+    return true
+}
+
+private suspend fun handleAdminCallback(call: ApplicationCall, callback: TgCallbackQuery, deps: AdminWebhookDeps) {
     val fromId = callback.from.id
     val chatId = callback.message?.chat?.id ?: fromId
     val data = callback.data ?: return
@@ -190,7 +211,19 @@ private suspend fun handleAdminCallback(callback: TgCallbackQuery, deps: AdminWe
             deps.paymentDetailsStateStore.clear(fromId)
             deps.paymentRejectReasonStateStore.clear(fromId)
             runCatching { deps.manualPaymentsService.confirmPayment(orderId, fromId) }
-                .onSuccess { reply("✅ Оплата подтверждена для заказа <code>$orderId</code>.") }
+                .onSuccess {
+                    reply("✅ Оплата подтверждена для заказа <code>$orderId</code>.")
+                    writeAuditLog(
+                        deps,
+                        call,
+                        adminUserId = fromId,
+                        action = "tg_admin_payment_confirm",
+                        orderId = orderId,
+                        payloadJson = deps.json.encodeToString(
+                            buildJsonObject { put("status", it.status.name) }
+                        )
+                    )
+                }
                 .onFailure { reply("⚠️ Не удалось подтвердить оплату.") }
         }
         "reject" -> {
@@ -215,6 +248,7 @@ private suspend fun handleAdminCallback(callback: TgCallbackQuery, deps: AdminWe
 }
 
 private suspend fun handlePaymentDetailsMessage(
+    call: ApplicationCall,
     chatId: Long,
     adminId: Long,
     orderId: String,
@@ -223,7 +257,21 @@ private suspend fun handlePaymentDetailsMessage(
     reply: (String) -> Unit
 ) {
     runCatching { deps.manualPaymentsService.setPaymentDetails(orderId, adminId, text) }
-        .onSuccess { reply("✅ Реквизиты сохранены для заказа <code>$orderId</code>.") }
+        .onSuccess {
+            reply("✅ Реквизиты сохранены для заказа <code>$orderId</code>.")
+            writeAuditLog(
+                deps,
+                call,
+                adminUserId = adminId,
+                action = "tg_admin_payment_details_set",
+                orderId = orderId,
+                payloadJson = deps.json.encodeToString(
+                    buildJsonObject {
+                        put("details_present", true)
+                    }
+                )
+            )
+        }
         .onFailure {
             deps.clients.adminBot.execute(
                 SendMessage(chatId, "⚠️ Не удалось сохранить реквизиты.")
@@ -234,6 +282,7 @@ private suspend fun handlePaymentDetailsMessage(
 }
 
 private suspend fun handlePaymentRejectMessage(
+    call: ApplicationCall,
     chatId: Long,
     adminId: Long,
     orderId: String,
@@ -242,7 +291,19 @@ private suspend fun handlePaymentRejectMessage(
     reply: (String) -> Unit
 ) {
     runCatching { deps.manualPaymentsService.rejectPayment(orderId, adminId, text) }
-        .onSuccess { reply("❌ Оплата отклонена для заказа <code>$orderId</code>.") }
+        .onSuccess {
+            reply("❌ Оплата отклонена для заказа <code>$orderId</code>.")
+            writeAuditLog(
+                deps,
+                call,
+                adminUserId = adminId,
+                action = "tg_admin_payment_reject",
+                orderId = orderId,
+                payloadJson = deps.json.encodeToString(
+                    buildJsonObject { put("reason_present", text.isNotBlank()) }
+                )
+            )
+        }
         .onFailure {
             deps.clients.adminBot.execute(
                 SendMessage(chatId, "⚠️ Не удалось отклонить оплату.")
@@ -253,6 +314,7 @@ private suspend fun handlePaymentRejectMessage(
 }
 
 private suspend fun handleAdminCommand(
+    call: ApplicationCall,
     chatId: Long,
     fromId: Long,
     text: String,
@@ -273,8 +335,34 @@ private suspend fun handleAdminCommand(
         "/media_done" -> handleMediaFinalize(fromId, deps.mediaStateStore, deps.itemMediaRepository, reply)
         "/media_cancel" -> handleMediaCancel(fromId, deps.mediaStateStore, reply)
         "/preview" -> handlePreview(chatId, args, deps.itemMediaRepository, deps.clients, reply)
-        "/post" -> handlePost(args, deps.postService, reply)
-        STATUS_COMMAND -> handleStatusCommand(args, fromId, deps.orderStatusService, reply)
+        "/post" -> {
+            val ok = handlePost(args, deps.postService, reply)
+            if (ok) {
+                writeAuditLog(
+                    deps,
+                    call,
+                    adminUserId = fromId,
+                    action = "tg_admin_publish",
+                    orderId = null,
+                    payloadJson = deps.json.encodeToString(buildJsonObject { put("item_id", args.trim()) })
+                )
+            }
+        }
+        STATUS_COMMAND -> {
+            val result = handleStatusCommand(args, fromId, deps.orderStatusService, reply)
+            if (result?.changed == true) {
+                writeAuditLog(
+                    deps,
+                    call,
+                    adminUserId = fromId,
+                    action = "tg_admin_status_change",
+                    orderId = result.order.id,
+                    payloadJson = deps.json.encodeToString(
+                        buildJsonObject { put("status", result.order.status.name) }
+                    )
+                )
+            }
+        }
         COUNTER_COMMAND -> handleCounterCommand(args, fromId, deps.offersService, reply)
         STOCK_COMMAND -> handleStockCommand(args, deps.inventoryService, reply)
         ORDER_COMMAND -> handleOrderCommand(args, deps.ordersRepository, deps.orderDeliveryRepository, reply)
@@ -282,21 +370,45 @@ private suspend fun handleAdminCommand(
     }
 }
 
+private suspend fun writeAuditLog(
+    deps: AdminWebhookDeps,
+    call: ApplicationCall,
+    adminUserId: Long,
+    action: String,
+    orderId: String?,
+    payloadJson: String
+) {
+    val ip = ClientIpResolver.resolve(call, deps.config.metrics.trustedProxyAllowlist)
+    val userAgent = call.request.headers["User-Agent"]
+    deps.auditLogRepository.insert(
+        AuditLogEntry(
+            adminUserId = adminUserId,
+            action = action,
+            orderId = orderId,
+            payloadJson = payloadJson,
+            createdAt = java.time.Instant.now(),
+            ip = ip,
+            userAgent = userAgent
+        )
+    )
+}
+
 @Suppress("TooGenericExceptionCaught")
 private suspend fun handlePost(
     args: String,
     postService: PostService,
     reply: (String) -> Unit
-) {
+): Boolean {
     val itemId = args.ifBlank { null }
     if (itemId == null) {
         reply("Укажите ID: <code>/post &lt;ITEM_ID&gt;</code>")
-        return
+        return false
     }
 
     try {
         val messageIds = postService.postItemAlbumToChannel(itemId)
         reply("✅ Опубликовано в канал. Сообщений в альбоме: ${messageIds.size}. Первая запись с CTA готова.")
+        return true
     } catch (error: IllegalArgumentException) {
         val reason = error.message ?: "Некорректные данные"
         reply("⚠️ $reason")
@@ -307,6 +419,7 @@ private suspend fun handlePost(
         val reason = error.message ?: "Неизвестная ошибка"
         reply("❌ Не удалось опубликовать: $reason")
     }
+    return false
 }
 
 private fun handleMediaStart(

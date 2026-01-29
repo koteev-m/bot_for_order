@@ -50,6 +50,12 @@ import com.example.db.OrderDeliveryRepository
 import com.example.db.OrderDeliveryRepositoryExposed
 import com.example.db.BuyerDeliveryProfileRepository
 import com.example.db.BuyerDeliveryProfileRepositoryExposed
+import com.example.db.AuditLogRepository
+import com.example.db.AuditLogRepositoryExposed
+import com.example.db.EventLogRepository
+import com.example.db.EventLogRepositoryExposed
+import com.example.db.IdempotencyRepository
+import com.example.db.IdempotencyRepositoryExposed
 import com.example.domain.watchlist.WatchlistRepository
 import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
@@ -98,4 +104,7 @@ fun dbModule(cfg: AppConfig) = module {
     single<WatchlistRepository> { WatchlistRepositoryExposed(get()) }
     single<CartsRepository> { CartsRepositoryExposed(get()) }
     single<CartItemsRepository> { CartItemsRepositoryExposed(get()) }
+    single<AuditLogRepository> { AuditLogRepositoryExposed(get()) }
+    single<EventLogRepository> { EventLogRepositoryExposed(get()) }
+    single<IdempotencyRepository> { IdempotencyRepositoryExposed(get()) }
 }

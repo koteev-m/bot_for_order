@@ -4,8 +4,8 @@ import com.example.app.api.ApiError
 import com.example.app.api.LinkResolveRequest
 import com.example.app.security.requireUserId
 import com.example.app.services.LinkResolveException
-import com.example.app.services.LinkResolveRateLimiter
 import com.example.app.services.LinkResolveService
+import com.example.app.services.UserActionRateLimiter
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receiveNullable
@@ -15,7 +15,7 @@ import io.ktor.server.routing.post
 
 fun Route.registerLinkRoutes(
     linkResolveService: LinkResolveService,
-    rateLimiter: LinkResolveRateLimiter
+    rateLimiter: UserActionRateLimiter
 ) {
     post("/link/resolve") {
         handleLinkResolve(call, linkResolveService, rateLimiter)
@@ -25,7 +25,7 @@ fun Route.registerLinkRoutes(
 private suspend fun handleLinkResolve(
     call: ApplicationCall,
     linkResolveService: LinkResolveService,
-    rateLimiter: LinkResolveRateLimiter
+    rateLimiter: UserActionRateLimiter
 ) {
     val request = call.receiveNullable<LinkResolveRequest>()
         ?: throw ApiError("invalid_request", HttpStatusCode.BadRequest)
@@ -34,7 +34,7 @@ private suspend fun handleLinkResolve(
         throw ApiError("invalid_request", HttpStatusCode.BadRequest)
     }
     val userId = call.requireUserId()
-    if (!rateLimiter.allow(userId, token)) {
+    if (!rateLimiter.allowResolve(userId)) {
         throw ApiError("rate_limited", HttpStatusCode.TooManyRequests)
     }
     val response = try {

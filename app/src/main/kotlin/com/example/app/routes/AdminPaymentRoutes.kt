@@ -33,9 +33,12 @@ import com.example.app.security.TelegramInitDataVerifier
 import com.example.app.security.installInitDataAuth
 import com.example.app.security.requireAdminUser
 import com.example.app.services.DeliveryFieldsCodec
+import com.example.app.services.IdempotencyService
 import com.example.app.services.ManualPaymentsService
 import com.example.app.services.OrderStatusService
 import com.example.app.services.PaymentDetailsCrypto
+import com.example.app.util.ClientIpResolver
+import com.example.db.AuditLogRepository
 import com.example.db.AdminUsersRepository
 import com.example.db.ChannelBindingsRepository
 import com.example.db.MerchantDeliveryMethodsRepository
@@ -62,15 +65,21 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.call
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
+import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.JsonPrimitive
 import org.koin.ktor.ext.inject
 
 fun Application.installAdminApiRoutes() {
@@ -90,8 +99,11 @@ fun Application.installAdminApiRoutes() {
     val channelBindingsRepository by inject<ChannelBindingsRepository>()
     val paymentDetailsCrypto by inject<PaymentDetailsCrypto>()
     val postService by inject<PostService>()
+    val auditLogRepository by inject<AuditLogRepository>()
+    val idempotencyService by inject<IdempotencyService>()
 
     val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    val idempotencyJson = Json { explicitNulls = false; encodeDefaults = false }
 
     routing {
         route("/api/admin") {
@@ -216,14 +228,76 @@ fun Application.installAdminApiRoutes() {
                 ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
                 val req = call.receive<AdminPaymentDetailsRequest>()
                 val order = manualPaymentsService.setPaymentDetails(orderId, admin.userId, req.text)
+                val payload = buildJsonObject {
+                    put("details_present", true)
+                    put("details_hash", sha256Hex(req.text.trim()))
+                }
+                writeAuditLog(
+                    auditLogRepository = auditLogRepository,
+                    cfg = cfg,
+                    call = call,
+                    adminUserId = admin.userId,
+                    action = "admin_payment_details_set",
+                    orderId = orderId,
+                    payloadJson = idempotencyJson.encodeToString(payload)
+                )
                 call.respond(PaymentSelectResponse(orderId = order.id, status = order.status.name))
             }
             post("/orders/{id}/payment/confirm") {
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
                 val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
                 ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
-                val order = manualPaymentsService.confirmPayment(orderId, admin.userId)
-                call.respond(PaymentSelectResponse(orderId = order.id, status = order.status.name))
+                val idempotencyKey = idempotencyService.normalizeKey(call.request.headers["Idempotency-Key"])
+                if (idempotencyKey == null) {
+                    val order = manualPaymentsService.confirmPayment(orderId, admin.userId)
+                    writeAuditLog(
+                        auditLogRepository = auditLogRepository,
+                        cfg = cfg,
+                        call = call,
+                        adminUserId = admin.userId,
+                        action = "admin_payment_confirm",
+                        orderId = orderId,
+                        payloadJson = idempotencyJson.encodeToString(buildJsonObject { put("status", order.status.name) })
+                    )
+                    call.respond(PaymentSelectResponse(orderId = order.id, status = order.status.name))
+                    return@post
+                }
+
+                val requestHash = idempotencyService.hashPayload(
+                    idempotencyJson.encodeToString(buildJsonObject { put("orderId", orderId) })
+                )
+                val outcome = idempotencyService.execute(
+                    merchantId = admin.merchantId,
+                    userId = admin.userId,
+                    scope = IDEMPOTENCY_SCOPE_ADMIN_CONFIRM_PAYMENT,
+                    key = idempotencyKey,
+                    requestHash = requestHash
+                ) {
+                    val order = manualPaymentsService.confirmPayment(orderId, admin.userId)
+                    writeAuditLog(
+                        auditLogRepository = auditLogRepository,
+                        cfg = cfg,
+                        call = call,
+                        adminUserId = admin.userId,
+                        action = "admin_payment_confirm",
+                        orderId = orderId,
+                        payloadJson = idempotencyJson.encodeToString(buildJsonObject { put("status", order.status.name) })
+                    )
+                    val response = PaymentSelectResponse(orderId = order.id, status = order.status.name)
+                    IdempotencyService.IdempotentResponse(
+                        status = HttpStatusCode.OK,
+                        response = response,
+                        responseJson = idempotencyJson.encodeToString(response)
+                    )
+                }
+                when (outcome) {
+                    is IdempotencyService.IdempotentOutcome.Replay -> call.respondText(
+                        outcome.responseJson,
+                        io.ktor.http.ContentType.Application.Json,
+                        outcome.status
+                    )
+                    is IdempotencyService.IdempotentOutcome.Executed -> call.respond(outcome.status, outcome.response)
+                }
             }
             post("/orders/{id}/payment/reject") {
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
@@ -231,6 +305,19 @@ fun Application.installAdminApiRoutes() {
                 ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
                 val req = call.receive<AdminPaymentRejectRequest>()
                 val order = manualPaymentsService.rejectPayment(orderId, admin.userId, req.reason)
+                val payload = buildJsonObject {
+                    put("reason_present", req.reason.isNotBlank())
+                    put("reason_hash", sha256Hex(req.reason.trim()))
+                }
+                writeAuditLog(
+                    auditLogRepository = auditLogRepository,
+                    cfg = cfg,
+                    call = call,
+                    adminUserId = admin.userId,
+                    action = "admin_payment_reject",
+                    orderId = orderId,
+                    payloadJson = idempotencyJson.encodeToString(payload)
+                )
                 call.respond(PaymentSelectResponse(orderId = order.id, status = order.status.name))
             }
             post("/orders/{id}/status") {
@@ -242,8 +329,77 @@ fun Application.installAdminApiRoutes() {
                     throw ApiError("invalid_status", HttpStatusCode.BadRequest)
                 }
                 val comment = buildStatusComment(status, req.comment, req.trackingCode)
-                val result = orderStatusService.changeStatus(orderId, status, admin.userId, comment)
-                call.respond(PaymentSelectResponse(orderId = result.order.id, status = result.order.status.name))
+                val idempotencyKey = idempotencyService.normalizeKey(call.request.headers["Idempotency-Key"])
+                if (idempotencyKey == null) {
+                    val result = orderStatusService.changeStatus(orderId, status, admin.userId, comment)
+                    if (result.changed) {
+                        val payload = buildJsonObject {
+                            put("status", status.name)
+                            put("comment_present", !comment.isNullOrBlank())
+                            put("comment_hash", comment?.let { sha256Hex(it) }.orEmpty())
+                        }
+                        writeAuditLog(
+                            auditLogRepository = auditLogRepository,
+                            cfg = cfg,
+                            call = call,
+                            adminUserId = admin.userId,
+                            action = "admin_status_change",
+                            orderId = orderId,
+                            payloadJson = idempotencyJson.encodeToString(payload)
+                        )
+                    }
+                    call.respond(PaymentSelectResponse(orderId = result.order.id, status = result.order.status.name))
+                    return@post
+                }
+
+                val requestHash = idempotencyService.hashPayload(
+                    idempotencyJson.encodeToString(
+                        buildJsonObject {
+                            put("orderId", orderId)
+                            put("status", status.name)
+                            put("comment", comment.orEmpty())
+                        }
+                    )
+                )
+                val outcome = idempotencyService.execute(
+                    merchantId = admin.merchantId,
+                    userId = admin.userId,
+                    scope = IDEMPOTENCY_SCOPE_ADMIN_STATUS_CHANGE,
+                    key = idempotencyKey,
+                    requestHash = requestHash
+                ) {
+                    val result = orderStatusService.changeStatus(orderId, status, admin.userId, comment)
+                    if (result.changed) {
+                        val payload = buildJsonObject {
+                            put("status", status.name)
+                            put("comment_present", !comment.isNullOrBlank())
+                            put("comment_hash", comment?.let { sha256Hex(it) }.orEmpty())
+                        }
+                        writeAuditLog(
+                            auditLogRepository = auditLogRepository,
+                            cfg = cfg,
+                            call = call,
+                            adminUserId = admin.userId,
+                            action = "admin_status_change",
+                            orderId = orderId,
+                            payloadJson = idempotencyJson.encodeToString(payload)
+                        )
+                    }
+                    val response = PaymentSelectResponse(orderId = result.order.id, status = result.order.status.name)
+                    IdempotencyService.IdempotentResponse(
+                        status = HttpStatusCode.OK,
+                        response = response,
+                        responseJson = idempotencyJson.encodeToString(response)
+                    )
+                }
+                when (outcome) {
+                    is IdempotencyService.IdempotentOutcome.Replay -> call.respondText(
+                        outcome.responseJson,
+                        io.ktor.http.ContentType.Application.Json,
+                        outcome.status
+                    )
+                    is IdempotencyService.IdempotentOutcome.Executed -> call.respond(outcome.status, outcome.response)
+                }
             }
             get("/orders/{id}/attachments/{attachmentId}/url") {
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
@@ -280,23 +436,41 @@ fun Application.installAdminApiRoutes() {
                 call.respond(methods)
             }
             put("/settings/payment_methods") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val req = call.receive<AdminPaymentMethodsUpdateRequest>()
                 req.methods.forEach { update ->
                     val resolved = resolvePaymentMethodUpdate(merchantId, update, paymentDetailsCrypto)
                     paymentMethodsRepository.upsert(resolved)
                 }
+                writeAuditLog(
+                    auditLogRepository = auditLogRepository,
+                    cfg = cfg,
+                    call = call,
+                    adminUserId = admin.userId,
+                    action = "admin_payment_methods_update",
+                    orderId = null,
+                    payloadJson = idempotencyJson.encodeToString(buildPaymentMethodsPayload(req))
+                )
                 call.respond(SimpleResponse())
             }
             post("/settings/payment_methods") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val req = call.receive<AdminPaymentMethodsUpdateRequest>()
                 req.methods.forEach { update ->
                     val resolved = resolvePaymentMethodUpdate(merchantId, update, paymentDetailsCrypto)
                     paymentMethodsRepository.upsert(resolved)
                 }
+                writeAuditLog(
+                    auditLogRepository = auditLogRepository,
+                    cfg = cfg,
+                    call = call,
+                    adminUserId = admin.userId,
+                    action = "admin_payment_methods_update",
+                    orderId = null,
+                    payloadJson = idempotencyJson.encodeToString(buildPaymentMethodsPayload(req))
+                )
                 call.respond(SimpleResponse())
             }
 
@@ -313,7 +487,7 @@ fun Application.installAdminApiRoutes() {
                 call.respond(response)
             }
             put("/settings/delivery_method") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val req = call.receive<AdminDeliveryMethodUpdateRequest>()
                 val normalized = req.requiredFields.map { it.trim() }.filter { it.isNotBlank() }.distinct()
@@ -325,10 +499,24 @@ fun Application.installAdminApiRoutes() {
                     requiredFieldsJson = json.encodeToString(normalized)
                 )
                 deliveryMethodsRepository.upsert(method)
+                writeAuditLog(
+                    auditLogRepository = auditLogRepository,
+                    cfg = cfg,
+                    call = call,
+                    adminUserId = admin.userId,
+                    action = "admin_delivery_method_update",
+                    orderId = null,
+                    payloadJson = idempotencyJson.encodeToString(
+                        buildJsonObject {
+                            put("enabled", req.enabled)
+                            put("required_fields", buildJsonArray { normalized.forEach { add(JsonPrimitive(it)) } })
+                        }
+                    )
+                )
                 call.respond(SimpleResponse())
             }
             post("/settings/delivery_method") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val req = call.receive<AdminDeliveryMethodUpdateRequest>()
                 val normalized = req.requiredFields.map { it.trim() }.filter { it.isNotBlank() }.distinct()
@@ -340,6 +528,20 @@ fun Application.installAdminApiRoutes() {
                     requiredFieldsJson = json.encodeToString(normalized)
                 )
                 deliveryMethodsRepository.upsert(method)
+                writeAuditLog(
+                    auditLogRepository = auditLogRepository,
+                    cfg = cfg,
+                    call = call,
+                    adminUserId = admin.userId,
+                    action = "admin_delivery_method_update",
+                    orderId = null,
+                    payloadJson = idempotencyJson.encodeToString(
+                        buildJsonObject {
+                            put("enabled", req.enabled)
+                            put("required_fields", buildJsonArray { normalized.forEach { add(JsonPrimitive(it)) } })
+                        }
+                    )
+                )
                 call.respond(SimpleResponse())
             }
 
@@ -352,7 +554,7 @@ fun Application.installAdminApiRoutes() {
                 call.respond(storefronts)
             }
             put("/settings/storefronts") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val req = call.receive<AdminStorefrontRequest>()
                 val existing = storefrontsRepository.getById(req.id)
@@ -361,10 +563,24 @@ fun Application.installAdminApiRoutes() {
                 }
                 val storefront = Storefront(id = req.id, merchantId = merchantId, name = req.name)
                 storefrontsRepository.upsert(storefront)
+                writeAuditLog(
+                    auditLogRepository = auditLogRepository,
+                    cfg = cfg,
+                    call = call,
+                    adminUserId = admin.userId,
+                    action = "admin_storefront_upsert",
+                    orderId = null,
+                    payloadJson = idempotencyJson.encodeToString(
+                        buildJsonObject {
+                            put("storefront_id", req.id)
+                            put("name", req.name)
+                        }
+                    )
+                )
                 call.respond(AdminStorefrontDto(id = storefront.id, name = storefront.name))
             }
             post("/settings/storefronts") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val merchantId = cfg.merchants.defaultMerchantId
                 val req = call.receive<AdminStorefrontRequest>()
                 val existing = storefrontsRepository.getById(req.id)
@@ -373,6 +589,20 @@ fun Application.installAdminApiRoutes() {
                 }
                 val storefront = Storefront(id = req.id, merchantId = merchantId, name = req.name)
                 storefrontsRepository.upsert(storefront)
+                writeAuditLog(
+                    auditLogRepository = auditLogRepository,
+                    cfg = cfg,
+                    call = call,
+                    adminUserId = admin.userId,
+                    action = "admin_storefront_upsert",
+                    orderId = null,
+                    payloadJson = idempotencyJson.encodeToString(
+                        buildJsonObject {
+                            put("storefront_id", req.id)
+                            put("name", req.name)
+                        }
+                    )
+                )
                 call.respond(AdminStorefrontDto(id = storefront.id, name = storefront.name))
             }
 
@@ -392,7 +622,7 @@ fun Application.installAdminApiRoutes() {
                 call.respond(bindings)
             }
             put("/settings/channel_bindings") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val req = call.receive<AdminChannelBindingRequest>()
                 ensureStorefrontForMerchant(req.storefrontId, storefrontsRepository, cfg.merchants.defaultMerchantId)
                 ensureChannelForMerchant(
@@ -409,9 +639,23 @@ fun Application.installAdminApiRoutes() {
                         channelId = req.channelId
                     )
                 )
+                writeAuditLog(
+                    auditLogRepository = auditLogRepository,
+                    cfg = cfg,
+                    call = call,
+                    adminUserId = admin.userId,
+                    action = "admin_channel_binding_upsert",
+                    orderId = null,
+                    payloadJson = idempotencyJson.encodeToString(
+                        buildJsonObject {
+                            put("storefront_id", req.storefrontId)
+                            put("channel_id", req.channelId)
+                        }
+                    )
+                )
             }
             post("/settings/channel_bindings") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val req = call.receive<AdminChannelBindingRequest>()
                 ensureStorefrontForMerchant(req.storefrontId, storefrontsRepository, cfg.merchants.defaultMerchantId)
                 ensureChannelForMerchant(
@@ -426,12 +670,26 @@ fun Application.installAdminApiRoutes() {
                         id = id,
                         storefrontId = req.storefrontId,
                         channelId = req.channelId
+                    )
+                )
+                writeAuditLog(
+                    auditLogRepository = auditLogRepository,
+                    cfg = cfg,
+                    call = call,
+                    adminUserId = admin.userId,
+                    action = "admin_channel_binding_upsert",
+                    orderId = null,
+                    payloadJson = idempotencyJson.encodeToString(
+                        buildJsonObject {
+                            put("storefront_id", req.storefrontId)
+                            put("channel_id", req.channelId)
+                        }
                     )
                 )
             }
 
             post("/publications/publish") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OWNER))
                 val req = call.receive<AdminPublishRequest>()
                 val results = postService.postItemAlbumToChannels(req.itemId, req.channelIds).map { result ->
                     AdminPublishResult(
@@ -440,6 +698,20 @@ fun Application.installAdminApiRoutes() {
                         error = result.error
                     )
                 }
+                writeAuditLog(
+                    auditLogRepository = auditLogRepository,
+                    cfg = cfg,
+                    call = call,
+                    adminUserId = admin.userId,
+                    action = "admin_publish",
+                    orderId = null,
+                    payloadJson = idempotencyJson.encodeToString(
+                        buildJsonObject {
+                            put("item_id", req.itemId)
+                            put("channel_ids", buildJsonArray { req.channelIds.forEach { add(JsonPrimitive(it)) } })
+                        }
+                    )
+                )
                 call.respond(AdminPublishResponse(results = results))
             }
         }
@@ -551,7 +823,57 @@ private fun validateRequiredFields(requiredFields: List<String>) {
     }
 }
 
+private suspend fun writeAuditLog(
+    auditLogRepository: AuditLogRepository,
+    cfg: AppConfig,
+    call: io.ktor.server.application.ApplicationCall,
+    adminUserId: Long,
+    action: String,
+    orderId: String?,
+    payloadJson: String
+) {
+    val ip = ClientIpResolver.resolve(call, cfg.metrics.trustedProxyAllowlist)
+    val userAgent = call.request.headers["User-Agent"]
+    auditLogRepository.insert(
+        com.example.domain.AuditLogEntry(
+            adminUserId = adminUserId,
+            action = action,
+            orderId = orderId,
+            payloadJson = payloadJson,
+            createdAt = Instant.now(),
+            ip = ip,
+            userAgent = userAgent
+        )
+    )
+}
+
+private fun buildPaymentMethodsPayload(req: AdminPaymentMethodsUpdateRequest) = buildJsonObject {
+    put(
+        "methods",
+        buildJsonArray {
+            req.methods.forEach { update ->
+                add(
+                    buildJsonObject {
+                        put("type", update.type)
+                        put("mode", update.mode)
+                        put("enabled", update.enabled)
+                        put("details_present", !update.details.isNullOrBlank())
+                    }
+                )
+            }
+        }
+    )
+}
+
+private fun sha256Hex(value: String): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    val bytes = digest.digest(value.toByteArray())
+    return bytes.joinToString("") { "%02x".format(it) }
+}
+
 private const val DEFAULT_LIMIT = 50
 private const val MAX_LIMIT = 200
 private const val MAX_REQUIRED_FIELDS = 20
 private const val MAX_REQUIRED_FIELD_LENGTH = 100
+private const val IDEMPOTENCY_SCOPE_ADMIN_CONFIRM_PAYMENT = "admin_confirm_payment"
+private const val IDEMPOTENCY_SCOPE_ADMIN_STATUS_CHANGE = "admin_status_change"

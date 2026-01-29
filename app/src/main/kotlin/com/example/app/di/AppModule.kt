@@ -21,6 +21,8 @@ import com.example.app.services.RestockAlertService
 import com.example.app.services.RestockNotifierImpl
 import com.example.app.services.StorefrontService
 import com.example.app.services.TelegramManualPaymentsNotifier
+import com.example.app.services.IdempotencyService
+import com.example.app.services.UserActionRateLimiter
 import com.example.app.security.TelegramInitDataVerifier
 import com.example.app.storage.S3Storage
 import com.example.app.storage.Storage
@@ -48,16 +50,19 @@ fun appModule(config: AppConfig, meterRegistry: MeterRegistry?) = module {
     single { LinkContextService(get(), get()) }
     single { LinkResolveService(get(), get(), get()) }
     single { LinkResolveRateLimiter(get(), get(), config.linkResolveRateLimit) }
+    single { UserActionRateLimiter(config.userActionRateLimit) }
     single { StorefrontService(get(), get(), get()) }
     single<CartRedisStore> { CartRedisStoreRedisson(get()) }
     single<OrderDedupStore> { OrderDedupStoreRedisson(get()) }
     single { CartService(config, get(), get(), get(), get(), get(), get(), get(), get()) }
-    single { OrderCheckoutService(config, get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { OrderCheckoutService(config, get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single<Storage> { S3Storage(config.storage) }
     single { PaymentDetailsCrypto(config.manualPayments.detailsEncryptionKey) }
     single<ManualPaymentsNotifier> { TelegramManualPaymentsNotifier(config, get()) }
+    single { IdempotencyService(get()) }
     single {
         ManualPaymentsService(
+            get(),
             get(),
             get(),
             get(),

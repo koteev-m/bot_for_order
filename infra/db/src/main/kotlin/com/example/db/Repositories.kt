@@ -19,6 +19,9 @@ import com.example.domain.OrderPaymentClaim
 import com.example.domain.OrderPaymentDetails
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
+import com.example.domain.AuditLogEntry
+import com.example.domain.EventLogEntry
+import com.example.domain.IdempotencyKeyRecord
 import com.example.domain.MerchantPaymentMethod
 import com.example.domain.MerchantDeliveryMethod
 import com.example.domain.Post
@@ -190,6 +193,49 @@ interface OrderDeliveryRepository {
 interface BuyerDeliveryProfileRepository {
     suspend fun get(merchantId: String, buyerUserId: Long): BuyerDeliveryProfile?
     suspend fun upsert(profile: BuyerDeliveryProfile)
+}
+
+interface AuditLogRepository {
+    suspend fun insert(entry: AuditLogEntry): Long
+}
+
+interface EventLogRepository {
+    suspend fun insert(entry: EventLogEntry): Long
+}
+
+interface IdempotencyRepository {
+    suspend fun findValid(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        validAfter: Instant
+    ): IdempotencyKeyRecord?
+
+    suspend fun tryInsert(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        requestHash: String,
+        createdAt: Instant
+    ): Boolean
+
+    suspend fun updateResponse(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        responseStatus: Int,
+        responseJson: String
+    )
+
+    suspend fun delete(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String
+    )
 }
 
 data class CartItemWithCart(

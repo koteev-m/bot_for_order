@@ -1,0 +1,92 @@
+package com.example.app.testutil
+
+import com.example.db.AuditLogRepository
+import com.example.db.EventLogRepository
+import com.example.db.IdempotencyRepository
+import com.example.domain.AuditLogEntry
+import com.example.domain.EventLogEntry
+import com.example.domain.IdempotencyKeyRecord
+import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
+
+class InMemoryAuditLogRepository : AuditLogRepository {
+    private val storage = mutableListOf<AuditLogEntry>()
+
+    val entries: List<AuditLogEntry>
+        get() = storage.toList()
+
+    override suspend fun insert(entry: AuditLogEntry): Long {
+        storage.add(entry)
+        return storage.size.toLong()
+    }
+}
+
+class InMemoryEventLogRepository : EventLogRepository {
+    private val storage = mutableListOf<EventLogEntry>()
+
+    val entries: List<EventLogEntry>
+        get() = storage.toList()
+
+    override suspend fun insert(entry: EventLogEntry): Long {
+        storage.add(entry)
+        return storage.size.toLong()
+    }
+}
+
+class InMemoryIdempotencyRepository : IdempotencyRepository {
+    private val storage = ConcurrentHashMap<String, IdempotencyKeyRecord>()
+
+    override suspend fun findValid(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        validAfter: Instant
+    ): IdempotencyKeyRecord? {
+        val record = storage[recordKey(merchantId, userId, scope, key)] ?: return null
+        return if (record.createdAt.isBefore(validAfter)) null else record
+    }
+
+    override suspend fun tryInsert(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        requestHash: String,
+        createdAt: Instant
+    ): Boolean {
+        val mapKey = recordKey(merchantId, userId, scope, key)
+        val record = IdempotencyKeyRecord(
+            merchantId = merchantId,
+            userId = userId,
+            scope = scope,
+            key = key,
+            requestHash = requestHash,
+            responseStatus = null,
+            responseJson = null,
+            createdAt = createdAt
+        )
+        return storage.putIfAbsent(mapKey, record) == null
+    }
+
+    override suspend fun updateResponse(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        responseStatus: Int,
+        responseJson: String
+    ) {
+        val mapKey = recordKey(merchantId, userId, scope, key)
+        val existing = storage[mapKey] ?: return
+        storage[mapKey] = existing.copy(responseStatus = responseStatus, responseJson = responseJson)
+    }
+
+    override suspend fun delete(merchantId: String, userId: Long, scope: String, key: String) {
+        storage.remove(recordKey(merchantId, userId, scope, key))
+    }
+
+    private fun recordKey(merchantId: String, userId: Long, scope: String, key: String): String {
+        return "$merchantId:$userId:$scope:$key"
+    }
+}

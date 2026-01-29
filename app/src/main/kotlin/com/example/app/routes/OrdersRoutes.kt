@@ -13,13 +13,16 @@ import com.example.app.api.PaymentClaimResponse
 import com.example.app.api.PaymentInstructionsResponse
 import com.example.app.api.PaymentSelectRequest
 import com.example.app.api.PaymentSelectResponse
+import com.example.app.api.ApiError
 import com.example.app.security.requireUserId
 import com.example.app.services.DeliveryService
 import com.example.app.services.DeliveryFieldsCodec
+import com.example.app.services.IdempotencyService
 import com.example.app.services.OrderCheckoutService
 import com.example.app.services.ManualPaymentsService
 import com.example.app.services.PaymentClaimAttachment
 import com.example.app.services.PaymentsService
+import com.example.app.services.UserActionRateLimiter
 import com.example.db.ItemsRepository
 import com.example.db.OrderDeliveryRepository
 import com.example.db.OrderLinesRepository
@@ -38,15 +41,27 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.request.receiveMultipart
 import io.ktor.server.request.receive
+import io.ktor.server.response.respondText
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.core.readBytes
 import io.ktor.utils.io.readRemaining
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
+import java.security.MessageDigest
 
 private const val ORDER_HISTORY_LIMIT = 3
 private const val MAX_FORM_FIELD_BYTES = 20_000
 private const val MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+private val IDEMPOTENCY_JSON = Json { encodeDefaults = false; explicitNulls = false }
+private const val IDEMPOTENCY_SCOPE_ORDER_CREATE = "order_create"
+private const val IDEMPOTENCY_SCOPE_PAYMENT_CLAIM = "payment_claim"
 
 data class OrderRoutesDeps(
+    val merchantId: String,
     val itemsRepository: ItemsRepository,
     val ordersRepository: OrdersRepository,
     val orderLinesRepository: OrderLinesRepository,
@@ -55,7 +70,9 @@ data class OrderRoutesDeps(
     val orderCheckoutService: OrderCheckoutService,
     val manualPaymentsService: ManualPaymentsService,
     val orderDeliveryRepository: OrderDeliveryRepository,
-    val deliveryService: DeliveryService
+    val deliveryService: DeliveryService,
+    val idempotencyService: IdempotencyService,
+    val userActionRateLimiter: UserActionRateLimiter
 )
 
 private data class OrderCreationDeps(
@@ -85,7 +102,7 @@ fun Route.registerOrdersRoutes(
         handlePaymentInstructions(call, routesDeps.manualPaymentsService)
     }
     post("/orders/{id}/payment/claim") {
-        handlePaymentClaim(call, routesDeps.manualPaymentsService)
+        handlePaymentClaim(call, routesDeps)
     }
     post("/orders/{id}/delivery") {
         handleOrderDelivery(call, routesDeps.deliveryService)
@@ -97,15 +114,53 @@ private suspend fun handleCreateOrder(
     deps: OrderCreationDeps
 ) {
     val userId = call.requireUserId()
-    val result = deps.routesDeps.orderCheckoutService.createFromCart(userId)
-    val order = result.order
-    val lineForTitle = result.lines.firstOrNull()
-    val itemTitle = lineForTitle?.let { line ->
-        deps.routesDeps.itemsRepository.getById(line.listingId)?.title
-    } ?: "Order"
-    deps.routesDeps.paymentsService.createAndSendInvoice(order, itemTitle, photoUrl = null)
+    val idempotencyKey = deps.routesDeps.idempotencyService.normalizeKey(
+        call.request.headers["Idempotency-Key"]
+    )
+    if (idempotencyKey == null) {
+        val result = deps.routesDeps.orderCheckoutService.createFromCart(userId)
+        val order = result.order
+        val lineForTitle = result.lines.firstOrNull()
+        val itemTitle = lineForTitle?.let { line ->
+            deps.routesDeps.itemsRepository.getById(line.listingId)?.title
+        } ?: "Order"
+        deps.routesDeps.paymentsService.createAndSendInvoice(order, itemTitle, photoUrl = null)
 
-    call.respond(HttpStatusCode.Accepted, OrderCreateResponse(orderId = order.id, status = order.status.name))
+        call.respond(HttpStatusCode.Accepted, OrderCreateResponse(orderId = order.id, status = order.status.name))
+        return
+    }
+
+    val requestHash = deps.routesDeps.idempotencyService.hashPayload("{}")
+    val outcome = deps.routesDeps.idempotencyService.execute(
+        merchantId = deps.routesDeps.merchantId,
+        userId = userId,
+        scope = IDEMPOTENCY_SCOPE_ORDER_CREATE,
+        key = idempotencyKey,
+        requestHash = requestHash
+    ) {
+        val result = deps.routesDeps.orderCheckoutService.createFromCart(userId)
+        val order = result.order
+        val lineForTitle = result.lines.firstOrNull()
+        val itemTitle = lineForTitle?.let { line ->
+            deps.routesDeps.itemsRepository.getById(line.listingId)?.title
+        } ?: "Order"
+        deps.routesDeps.paymentsService.createAndSendInvoice(order, itemTitle, photoUrl = null)
+        val response = OrderCreateResponse(orderId = order.id, status = order.status.name)
+        val responseJson = IDEMPOTENCY_JSON.encodeToString(response)
+        IdempotencyService.IdempotentResponse(
+            status = HttpStatusCode.Accepted,
+            response = response,
+            responseJson = responseJson
+        )
+    }
+    when (outcome) {
+        is IdempotencyService.IdempotentOutcome.Replay -> call.respondText(
+            outcome.responseJson,
+            ContentType.Application.Json,
+            outcome.status
+        )
+        is IdempotencyService.IdempotentOutcome.Executed -> call.respond(outcome.status, outcome.response)
+    }
 }
 
 private suspend fun handleSelectPayment(
@@ -139,19 +194,66 @@ private suspend fun handlePaymentInstructions(
 
 private suspend fun handlePaymentClaim(
     call: ApplicationCall,
-    manualPaymentsService: ManualPaymentsService
+    deps: OrderRoutesDeps
 ) {
     val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
     val userId = call.requireUserId()
     val (payload, attachments) = receiveClaimPayload(call)
-    val claim = manualPaymentsService.submitClaim(
-        orderId = orderId,
-        buyerId = userId,
-        txid = payload.txid,
-        comment = payload.comment,
-        attachments = attachments
+    val idempotencyKey = deps.idempotencyService.normalizeKey(
+        call.request.headers["Idempotency-Key"]
     )
-    call.respond(PaymentClaimResponse(id = claim.id, status = claim.status.name, createdAt = claim.createdAt.toString()))
+    if (idempotencyKey == null) {
+        if (!deps.userActionRateLimiter.allowClaim(userId)) {
+            throw ApiError("rate_limited", HttpStatusCode.TooManyRequests)
+        }
+        val claim = deps.manualPaymentsService.submitClaim(
+            orderId = orderId,
+            buyerId = userId,
+            txid = payload.txid,
+            comment = payload.comment,
+            attachments = attachments
+        )
+        call.respond(
+            PaymentClaimResponse(id = claim.id, status = claim.status.name, createdAt = claim.createdAt.toString())
+        )
+        return
+    }
+
+    val requestHashPayload = buildClaimRequestHashPayload(orderId, payload, attachments)
+    val requestHash = deps.idempotencyService.hashPayload(requestHashPayload)
+    val outcome = deps.idempotencyService.execute(
+        merchantId = deps.merchantId,
+        userId = userId,
+        scope = IDEMPOTENCY_SCOPE_PAYMENT_CLAIM,
+        key = idempotencyKey,
+        requestHash = requestHash
+    ) {
+        if (!deps.userActionRateLimiter.allowClaim(userId)) {
+            throw ApiError("rate_limited", HttpStatusCode.TooManyRequests)
+        }
+        val claim = deps.manualPaymentsService.submitClaim(
+            orderId = orderId,
+            buyerId = userId,
+            txid = payload.txid,
+            comment = payload.comment,
+            attachments = attachments
+        )
+        val response = PaymentClaimResponse(id = claim.id, status = claim.status.name, createdAt = claim.createdAt.toString())
+        val responseJson = IDEMPOTENCY_JSON.encodeToString(response)
+        IdempotencyService.IdempotentResponse(
+            status = HttpStatusCode.OK,
+            response = response,
+            responseJson = responseJson
+        )
+    }
+    when (outcome) {
+        is IdempotencyService.IdempotentOutcome.Replay -> call.respondText(
+            outcome.responseJson,
+            ContentType.Application.Json,
+            outcome.status
+        )
+        is IdempotencyService.IdempotentOutcome.Executed -> call.respond(outcome.status, outcome.response)
+    }
 }
 
 private suspend fun receiveClaimPayload(call: ApplicationCall): Pair<PaymentClaimRequest, List<PaymentClaimAttachment>> {
@@ -208,6 +310,34 @@ private suspend fun receiveClaimMultipart(
     return PaymentClaimRequest(txid = txid, comment = comment) to attachments
 }
 
+private fun buildClaimRequestHashPayload(
+    orderId: String,
+    payload: PaymentClaimRequest,
+    attachments: List<PaymentClaimAttachment>
+): String {
+    val json = buildJsonObject {
+        put("orderId", orderId)
+        put("txid", payload.txid?.trim().orEmpty())
+        put("comment", payload.comment?.trim().orEmpty())
+        put(
+            "attachments",
+            buildJsonArray {
+                attachments.forEach { attachment ->
+                    add(
+                        buildJsonObject {
+                            put("filename", attachment.filename?.trim().orEmpty())
+                            put("contentType", attachment.contentType)
+                            put("size", attachment.bytes.size)
+                            put("sha256", sha256Hex(attachment.bytes))
+                        }
+                    )
+                }
+            }
+        )
+    }
+    return IDEMPOTENCY_JSON.encodeToString(json)
+}
+
 private suspend fun readBytesWithLimit(channel: ByteReadChannel, limit: Int): ByteArray {
     val packet = channel.readRemaining(limit.toLong() + 1)
     val bytes = packet.readBytes()
@@ -215,6 +345,12 @@ private suspend fun readBytesWithLimit(channel: ByteReadChannel, limit: Int): By
         throw com.example.app.api.ApiError("attachment_too_large")
     }
     return bytes
+}
+
+private fun sha256Hex(bytes: ByteArray): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    val hash = digest.digest(bytes)
+    return hash.joinToString("") { "%02x".format(it) }
 }
 
 private suspend fun handleOrdersMe(

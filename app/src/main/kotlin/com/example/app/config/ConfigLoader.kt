@@ -10,6 +10,7 @@ object ConfigLoader {
         merchants = loadMerchantsConfig(),
         linkContext = loadLinkContextConfig(),
         linkResolveRateLimit = loadLinkResolveRateLimitConfig(),
+        userActionRateLimit = loadUserActionRateLimitConfig(),
         cart = loadCartConfig(),
         db = loadDbConfig(),
         redis = loadRedisConfig(),
@@ -27,6 +28,8 @@ object ConfigLoader {
     private fun loadTelegramConfig(): TelegramConfig {
         val adminToken = requireNonBlank("ADMIN_BOT_TOKEN")
         val shopToken = requireNonBlank("SHOP_BOT_TOKEN")
+        val adminWebhookSecret = requireNonBlank("ADMIN_WEBHOOK_SECRET")
+        val shopWebhookSecret = requireNonBlank("SHOP_WEBHOOK_SECRET")
         val adminIds = parseAdminIds(requireNonBlank("ADMIN_IDS"))
         val channelId = parseLongEnv("CHANNEL_ID")
         val buyerMiniAppShortName = System.getenv("BUYER_MINIAPP_SHORT_NAME")
@@ -35,6 +38,8 @@ object ConfigLoader {
         return TelegramConfig(
             adminToken = adminToken,
             shopToken = shopToken,
+            adminWebhookSecret = adminWebhookSecret,
+            shopWebhookSecret = shopWebhookSecret,
             adminIds = adminIds,
             channelId = channelId,
             buyerMiniAppShortName = buyerMiniAppShortName
@@ -61,6 +66,15 @@ object ConfigLoader {
     private fun loadLinkResolveRateLimitConfig(): LinkResolveRateLimitConfig = LinkResolveRateLimitConfig(
         max = parsePositiveIntEnv("LINK_RESOLVE_RL_MAX", defaultValue = 10),
         windowSeconds = parsePositiveIntEnv("LINK_RESOLVE_RL_WINDOW_SEC", defaultValue = 10)
+    )
+
+    private fun loadUserActionRateLimitConfig(): UserActionRateLimitConfig = UserActionRateLimitConfig(
+        resolveMax = parsePositiveIntEnv("USER_RESOLVE_RL_MAX", defaultValue = 30),
+        resolveWindowSeconds = parsePositiveIntEnv("USER_RESOLVE_RL_WINDOW_SEC", defaultValue = 10),
+        addMax = parsePositiveIntEnv("USER_ADD_RL_MAX", defaultValue = 20),
+        addWindowSeconds = parsePositiveIntEnv("USER_ADD_RL_WINDOW_SEC", defaultValue = 10),
+        claimMax = parsePositiveIntEnv("USER_CLAIM_RL_MAX", defaultValue = 5),
+        claimWindowSeconds = parsePositiveIntEnv("USER_CLAIM_RL_WINDOW_SEC", defaultValue = 60)
     )
 
     private fun loadCartConfig(): CartConfig = CartConfig(

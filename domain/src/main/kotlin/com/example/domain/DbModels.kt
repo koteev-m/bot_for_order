@@ -301,6 +301,44 @@ data class BuyerDeliveryProfile(
 )
 
 @Serializable
+data class AuditLogEntry(
+    val adminUserId: Long,
+    val action: String,
+    val orderId: String?,
+    val payloadJson: String,
+    @Serializable(with = InstantIsoSerializer::class)
+    val createdAt: Instant,
+    val ip: String?,
+    val userAgent: String?
+)
+
+@Serializable
+data class EventLogEntry(
+    @Serializable(with = InstantIsoSerializer::class)
+    val ts: Instant,
+    val eventType: String,
+    val buyerUserId: Long?,
+    val merchantId: String,
+    val storefrontId: String?,
+    val channelId: Long?,
+    val postMessageId: Int?,
+    val listingId: String?,
+    val variantId: String?,
+    val metadataJson: String?
+)
+
+data class IdempotencyKeyRecord(
+    val merchantId: String,
+    val userId: Long,
+    val scope: String,
+    val key: String,
+    val requestHash: String,
+    val responseStatus: Int?,
+    val responseJson: String?,
+    val createdAt: Instant
+)
+
+@Serializable
 data class OrderPaymentClaim(
     val id: Long,
     val orderId: String,

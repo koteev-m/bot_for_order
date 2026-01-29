@@ -13,6 +13,7 @@ import com.example.app.security.installInitDataAuth
 import com.example.app.services.CartService
 import com.example.app.services.LinkContextService
 import com.example.app.services.LinkTokenHasher
+import com.example.app.services.UserActionRateLimiter
 import com.example.app.testutil.InMemoryCartItemsRepository
 import com.example.app.testutil.InMemoryCartRedisStore
 import com.example.app.testutil.InMemoryCartsRepository
@@ -68,7 +69,7 @@ class CartRoutesTest : StringSpec({
                 routing {
                     route("/api") {
                         installInitDataAuth(deps.initDataVerifier)
-                        registerCartRoutes(deps.cartService, deps.config)
+                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter)
                     }
                 }
             }
@@ -107,7 +108,7 @@ class CartRoutesTest : StringSpec({
                 routing {
                     route("/api") {
                         installInitDataAuth(deps.initDataVerifier)
-                        registerCartRoutes(deps.cartService, deps.config)
+                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter)
                     }
                 }
             }
@@ -139,7 +140,7 @@ class CartRoutesTest : StringSpec({
                 routing {
                     route("/api") {
                         installInitDataAuth(deps.initDataVerifier)
-                        registerCartRoutes(deps.cartService, deps.config)
+                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter)
                     }
                 }
             }
@@ -192,7 +193,7 @@ class CartRoutesTest : StringSpec({
                 routing {
                     route("/api") {
                         installInitDataAuth(deps.initDataVerifier)
-                        registerCartRoutes(deps.cartService, deps.config)
+                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter)
                     }
                 }
             }
@@ -243,6 +244,7 @@ private class TestCartRoutesDeps {
         tokenHasher = tokenHasher
     )
     val initDataVerifier = TelegramInitDataVerifier(config.telegram.shopToken, config.telegramInitData.maxAgeSeconds)
+    val userActionRateLimiter = UserActionRateLimiter(config.userActionRateLimit)
 
     suspend fun seedBasicItem(token: String) {
         val now = Instant.parse("2024-01-02T00:00:00Z")

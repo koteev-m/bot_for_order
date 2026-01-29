@@ -10,6 +10,7 @@ import com.example.app.config.AppConfig
 import com.example.app.security.requireUserId
 import com.example.app.services.CartAddResult
 import com.example.app.services.CartService
+import com.example.app.services.UserActionRateLimiter
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive
@@ -26,10 +27,11 @@ import kotlinx.serialization.json.longOrNull
 
 fun Route.registerCartRoutes(
     cartService: CartService,
-    cfg: AppConfig
+    cfg: AppConfig,
+    rateLimiter: UserActionRateLimiter
 ) {
     post("/cart/add_by_token") {
-        handleAddByToken(call, cartService)
+        handleAddByToken(call, cartService, rateLimiter)
     }
     post("/cart/update") {
         handleUpdate(call, cartService)
@@ -42,10 +44,17 @@ fun Route.registerCartRoutes(
     }
 }
 
-private suspend fun handleAddByToken(call: ApplicationCall, cartService: CartService) {
+private suspend fun handleAddByToken(
+    call: ApplicationCall,
+    cartService: CartService,
+    rateLimiter: UserActionRateLimiter
+) {
     val buyerUserId = call.requireUserId()
     val req = call.receive<CartAddByTokenRequest>()
     if (req.token.isBlank()) throw ApiError("invalid_request")
+    if (!rateLimiter.allowAdd(buyerUserId)) {
+        throw ApiError("rate_limited", HttpStatusCode.TooManyRequests)
+    }
 
     when (val result = cartService.addByToken(buyerUserId, req.token, req.qty, req.selectedVariantId)) {
         is CartAddResult.Added -> call.respond(
