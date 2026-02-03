@@ -203,12 +203,26 @@ interface EventLogRepository {
     suspend fun insert(entry: EventLogEntry): Long
 }
 
+/**
+ * Idempotency storage for a given (merchantId, userId, scope, key) tuple.
+ *
+ * Time boundary (TTL):
+ * - A record is valid if createdAt >= validAfter (inclusive).
+ * - A record is expired if createdAt < validAfter (strict).
+ *
+ * Concurrency / invariants:
+ * - tryInsert is atomic and must not overwrite an existing record.
+ * - updateResponse must not change requestHash or createdAt.
+ *
+ * In-progress:
+ * - A record may exist with null responseStatus/responseJson to indicate "in progress".
+ *
+ * Boolean semantics:
+ * - Methods returning Boolean return true only if the action actually happened (inserted/deleted).
+ */
 interface IdempotencyRepository {
     /**
-     * Find a stored idempotency key record that is still valid.
-     *
-     * Semantics:
-     * - findValid(..., validAfter) returns only records with createdAt >= validAfter (inclusive).
+     * Returns the record only if createdAt >= validAfter (inclusive).
      */
     suspend fun findValid(
         merchantId: String,
@@ -219,10 +233,7 @@ interface IdempotencyRepository {
     ): IdempotencyKeyRecord?
 
     /**
-     * Try to insert a new idempotency key record.
-     *
-     * Semantics:
-     * - tryInsert is atomic and must not overwrite an existing record.
+     * Atomic insert that must not overwrite; returns true iff inserted.
      */
     suspend fun tryInsert(
         merchantId: String,
@@ -234,10 +245,7 @@ interface IdempotencyRepository {
     ): Boolean
 
     /**
-     * Update response information for an existing idempotency key record.
-     *
-     * Semantics:
-     * - updateResponse must not change requestHash or createdAt.
+     * Updates response fields only; must not change requestHash or createdAt.
      */
     suspend fun updateResponse(
         merchantId: String,
@@ -249,7 +257,7 @@ interface IdempotencyRepository {
     )
 
     /**
-     * Delete an idempotency key record unconditionally.
+     * Deletes unconditionally.
      */
     suspend fun delete(
         merchantId: String,
@@ -259,10 +267,7 @@ interface IdempotencyRepository {
     )
 
     /**
-     * Delete an idempotency key record only if it is expired.
-     *
-     * Semantics:
-     * - deleteIfExpired(..., validAfter) deletes only records with createdAt < validAfter (strict).
+     * Deletes only if createdAt < validAfter (strict); returns true iff deleted.
      */
     suspend fun deleteIfExpired(
         merchantId: String,
