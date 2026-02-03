@@ -236,6 +236,14 @@ interface IdempotencyRepository {
         scope: String,
         key: String
     )
+
+    suspend fun deleteExpired(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        expiredBefore: Instant
+    ): Boolean
 }
 
 data class CartItemWithCart(
