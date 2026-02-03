@@ -207,7 +207,8 @@ interface IdempotencyRepository {
     /**
      * Find a stored idempotency key record that is still valid.
      *
-     * Returns only records with createdAt >= validAfter (inclusive).
+     * Semantics:
+     * - findValid(..., validAfter) returns only records with createdAt >= validAfter (inclusive).
      */
     suspend fun findValid(
         merchantId: String,
@@ -220,7 +221,8 @@ interface IdempotencyRepository {
     /**
      * Try to insert a new idempotency key record.
      *
-     * Must be atomic and must not overwrite an existing record.
+     * Semantics:
+     * - tryInsert is atomic and must not overwrite an existing record.
      */
     suspend fun tryInsert(
         merchantId: String,
@@ -234,7 +236,8 @@ interface IdempotencyRepository {
     /**
      * Update response information for an existing idempotency key record.
      *
-     * Must not change requestHash or createdAt.
+     * Semantics:
+     * - updateResponse must not change requestHash or createdAt.
      */
     suspend fun updateResponse(
         merchantId: String,
@@ -258,7 +261,8 @@ interface IdempotencyRepository {
     /**
      * Delete an idempotency key record only if it is expired.
      *
-     * Deletes only records with createdAt < validAfter (strict).
+     * Semantics:
+     * - deleteIfExpired(..., validAfter) deletes only records with createdAt < validAfter (strict).
      */
     suspend fun deleteIfExpired(
         merchantId: String,
