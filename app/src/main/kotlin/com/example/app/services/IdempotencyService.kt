@@ -38,22 +38,26 @@ class IdempotencyService(
         block: suspend () -> IdempotentResponse<T>
     ): IdempotentOutcome<T> {
         val now = Instant.ofEpochMilli(clock.millis())
-        val cutoff = now.minus(ttl)
-        val existing = repository.findValid(merchantId, userId, scope, key, cutoff)
+        val validAfter = now.minus(ttl)
+        val existing = repository.findValid(merchantId, userId, scope, key, validAfter)
         if (existing != null) {
             return handleExisting(existing, requestHash)
         }
 
         var inserted = repository.tryInsert(merchantId, userId, scope, key, requestHash, now)
         if (!inserted) {
-            val retry = repository.findValid(merchantId, userId, scope, key, cutoff)
+            val retry = repository.findValid(merchantId, userId, scope, key, validAfter)
             if (retry != null) {
                 return handleExisting(retry, requestHash)
             } else {
-                repository.deleteExpired(merchantId, userId, scope, key, cutoff)
+                repository.deleteIfExpired(merchantId, userId, scope, key, validAfter)
                 inserted = repository.tryInsert(merchantId, userId, scope, key, requestHash, now)
             }
             if (!inserted) {
+                val latest = repository.findValid(merchantId, userId, scope, key, validAfter)
+                if (latest != null) {
+                    return handleExisting(latest, requestHash)
+                }
                 throw ApiError("idempotency_in_progress", HttpStatusCode.Conflict)
             }
         }
