@@ -204,6 +204,11 @@ interface EventLogRepository {
 }
 
 interface IdempotencyRepository {
+    /**
+     * Find a stored idempotency key record that is still valid.
+     *
+     * Returns only records with createdAt >= validAfter (inclusive).
+     */
     suspend fun findValid(
         merchantId: String,
         userId: Long,
@@ -212,6 +217,11 @@ interface IdempotencyRepository {
         validAfter: Instant
     ): IdempotencyKeyRecord?
 
+    /**
+     * Try to insert a new idempotency key record.
+     *
+     * Must be atomic and must not overwrite an existing record.
+     */
     suspend fun tryInsert(
         merchantId: String,
         userId: Long,
@@ -221,6 +231,11 @@ interface IdempotencyRepository {
         createdAt: Instant
     ): Boolean
 
+    /**
+     * Update response information for an existing idempotency key record.
+     *
+     * Must not change requestHash or createdAt.
+     */
     suspend fun updateResponse(
         merchantId: String,
         userId: Long,
@@ -230,6 +245,9 @@ interface IdempotencyRepository {
         responseJson: String
     )
 
+    /**
+     * Delete an idempotency key record unconditionally.
+     */
     suspend fun delete(
         merchantId: String,
         userId: Long,
@@ -237,12 +255,17 @@ interface IdempotencyRepository {
         key: String
     )
 
-    suspend fun deleteExpired(
+    /**
+     * Delete an idempotency key record only if it is expired.
+     *
+     * Deletes only records with createdAt < validAfter (strict).
+     */
+    suspend fun deleteIfExpired(
         merchantId: String,
         userId: Long,
         scope: String,
         key: String,
-        expiredBefore: Instant
+        validAfter: Instant
     ): Boolean
 }
 
