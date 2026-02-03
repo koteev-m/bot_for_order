@@ -204,6 +204,9 @@ interface EventLogRepository {
 }
 
 interface IdempotencyRepository {
+    /**
+     * Возвращает запись только если createdAt >= validAfter (inclusive).
+     */
     suspend fun findValid(
         merchantId: String,
         userId: Long,
@@ -212,6 +215,9 @@ interface IdempotencyRepository {
         validAfter: Instant
     ): IdempotencyKeyRecord?
 
+    /**
+     * Атомарно вставляет новую запись, не перезаписывая существующую.
+     */
     suspend fun tryInsert(
         merchantId: String,
         userId: Long,
@@ -221,6 +227,9 @@ interface IdempotencyRepository {
         createdAt: Instant
     ): Boolean
 
+    /**
+     * Обновляет ответ, не изменяя requestHash и createdAt.
+     */
     suspend fun updateResponse(
         merchantId: String,
         userId: Long,
@@ -230,12 +239,26 @@ interface IdempotencyRepository {
         responseJson: String
     )
 
+    /**
+     * Безусловно удаляет запись для ключа.
+     */
     suspend fun delete(
         merchantId: String,
         userId: Long,
         scope: String,
         key: String
     )
+
+    /**
+     * Удаляет запись только если createdAt < validAfter (strict).
+     */
+    suspend fun deleteIfExpired(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        validAfter: Instant
+    ): Boolean
 }
 
 data class CartItemWithCart(

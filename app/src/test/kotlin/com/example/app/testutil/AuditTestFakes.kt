@@ -86,6 +86,22 @@ class InMemoryIdempotencyRepository : IdempotencyRepository {
         storage.remove(recordKey(merchantId, userId, scope, key))
     }
 
+    override suspend fun deleteIfExpired(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        validAfter: Instant
+    ): Boolean {
+        val mapKey = recordKey(merchantId, userId, scope, key)
+        val record = storage[mapKey] ?: return false
+        return if (record.createdAt.isBefore(validAfter)) {
+            storage.remove(mapKey) != null
+        } else {
+            false
+        }
+    }
+
     private fun recordKey(merchantId: String, userId: Long, scope: String, key: String): String {
         return "$merchantId:$userId:$scope:$key"
     }

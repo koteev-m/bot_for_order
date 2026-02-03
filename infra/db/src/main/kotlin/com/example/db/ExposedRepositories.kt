@@ -83,6 +83,7 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.greaterEq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.plus
 import org.jetbrains.exposed.sql.andWhere
@@ -1827,6 +1828,23 @@ class IdempotencyRepositoryExposed(private val tx: DatabaseTx) : IdempotencyRepo
                     (IdempotencyKeyTable.key eq key)
             }
         }
+    }
+
+    override suspend fun deleteIfExpired(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        validAfter: Instant
+    ): Boolean = tx.tx {
+        val deletedCount = IdempotencyKeyTable.deleteWhere {
+            (IdempotencyKeyTable.merchantId eq merchantId) and
+                (IdempotencyKeyTable.userId eq userId) and
+                (IdempotencyKeyTable.scope eq scope) and
+                (IdempotencyKeyTable.key eq key) and
+                (IdempotencyKeyTable.createdAt less validAfter)
+        }
+        deletedCount > 0
     }
 
     private fun ResultRow.toIdempotencyRecord(): IdempotencyKeyRecord =
