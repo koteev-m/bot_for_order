@@ -1829,6 +1829,23 @@ class IdempotencyRepositoryExposed(private val tx: DatabaseTx) : IdempotencyRepo
         }
     }
 
+    override suspend fun deleteExpired(
+        merchantId: String,
+        userId: Long,
+        scope: String,
+        key: String,
+        expiredBefore: Instant
+    ): Boolean = tx.tx {
+        val deletedCount = IdempotencyKeyTable.deleteWhere {
+            (IdempotencyKeyTable.merchantId eq merchantId) and
+                (IdempotencyKeyTable.userId eq userId) and
+                (IdempotencyKeyTable.scope eq scope) and
+                (IdempotencyKeyTable.key eq key) and
+                (IdempotencyKeyTable.createdAt lessEq expiredBefore.minusNanos(1))
+        }
+        deletedCount > 0
+    }
+
     private fun ResultRow.toIdempotencyRecord(): IdempotencyKeyRecord =
         IdempotencyKeyRecord(
             merchantId = this[IdempotencyKeyTable.merchantId],

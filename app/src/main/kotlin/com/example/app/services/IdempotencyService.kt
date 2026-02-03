@@ -41,32 +41,16 @@ class IdempotencyService(
         val cutoff = now.minus(ttl)
         val existing = repository.findValid(merchantId, userId, scope, key, cutoff)
         if (existing != null) {
-            if (existing.requestHash != requestHash) {
-                throw ApiError("idempotency_key_conflict", HttpStatusCode.Conflict)
-            }
-            val status = existing.responseStatus
-            val payload = existing.responseJson
-            if (status != null && payload != null) {
-                return IdempotentOutcome.Replay(status = HttpStatusCode.fromValue(status), responseJson = payload)
-            }
-            throw ApiError("idempotency_in_progress", HttpStatusCode.Conflict)
+            return handleExisting(existing, requestHash)
         }
 
-        repository.delete(merchantId, userId, scope, key)
         var inserted = repository.tryInsert(merchantId, userId, scope, key, requestHash, now)
         if (!inserted) {
             val retry = repository.findValid(merchantId, userId, scope, key, cutoff)
             if (retry != null) {
-                if (retry.requestHash != requestHash) {
-                    throw ApiError("idempotency_key_conflict", HttpStatusCode.Conflict)
-                }
-                val status = retry.responseStatus
-                val payload = retry.responseJson
-                if (status != null && payload != null) {
-                    return IdempotentOutcome.Replay(status = HttpStatusCode.fromValue(status), responseJson = payload)
-                }
+                return handleExisting(retry, requestHash)
             } else {
-                repository.delete(merchantId, userId, scope, key)
+                repository.deleteExpired(merchantId, userId, scope, key, cutoff)
                 inserted = repository.tryInsert(merchantId, userId, scope, key, requestHash, now)
             }
             if (!inserted) {
@@ -97,6 +81,21 @@ class IdempotencyService(
             repository.delete(merchantId, userId, scope, key)
             throw error
         }
+    }
+
+    private fun <T> handleExisting(
+        existing: com.example.domain.IdempotencyKeyRecord,
+        requestHash: String
+    ): IdempotentOutcome<T> {
+        if (existing.requestHash != requestHash) {
+            throw ApiError("idempotency_key_conflict", HttpStatusCode.Conflict)
+        }
+        val status = existing.responseStatus
+        val payload = existing.responseJson
+        if (status != null && payload != null) {
+            return IdempotentOutcome.Replay(status = HttpStatusCode.fromValue(status), responseJson = payload)
+        }
+        throw ApiError("idempotency_in_progress", HttpStatusCode.Conflict)
     }
 
     data class IdempotentResponse<T>(
