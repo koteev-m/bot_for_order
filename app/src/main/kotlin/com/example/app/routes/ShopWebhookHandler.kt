@@ -17,6 +17,7 @@ import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrdersRepository
 import com.example.db.PricesDisplayRepository
 import com.example.db.VariantsRepository
+import com.example.db.TelegramWebhookDedupRepository
 import com.example.domain.OrderStatus
 import com.example.domain.OrderStatusEntry
 import com.example.domain.hold.HoldService
@@ -52,6 +53,7 @@ fun Application.installShopWebhook() {
     val lockManager by inject<LockManager>()
     val orderHoldService by inject<OrderHoldService>()
     val holdService by inject<HoldService>()
+    val webhookDedupRepository by inject<TelegramWebhookDedupRepository>()
 
     val deps = ShopWebhookDeps(
         config = cfg,
@@ -67,6 +69,7 @@ fun Application.installShopWebhook() {
         lockManager = lockManager,
         orderHoldService = orderHoldService,
         holdService = holdService,
+        webhookDedupRepository = webhookDedupRepository,
         json = Json { ignoreUnknownKeys = true }
     )
 
@@ -95,6 +98,7 @@ internal data class ShopWebhookDeps(
     val lockManager: LockManager,
     val orderHoldService: OrderHoldService,
     val holdService: HoldService,
+    val webhookDedupRepository: TelegramWebhookDedupRepository,
     val json: Json
 )
 
@@ -135,6 +139,17 @@ private data class PreCheckoutDecision(
 private suspend fun handleShopUpdate(call: ApplicationCall, body: String, deps: ShopWebhookDeps) {
     val update = runCatching { deps.json.decodeFromString(TgUpdate.serializer(), body) }.getOrNull()
     if (update == null) {
+        call.respond(HttpStatusCode.OK)
+        return
+    }
+
+    val shouldProcess = shouldProcessTelegramUpdate(
+        dedupRepository = deps.webhookDedupRepository,
+        botType = TELEGRAM_BOT_TYPE_SHOP,
+        updateId = update.updateId,
+        logger = shopLog
+    )
+    if (!shouldProcess) {
         call.respond(HttpStatusCode.OK)
         return
     }

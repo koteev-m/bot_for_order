@@ -278,6 +278,15 @@ interface IdempotencyRepository {
     ): Boolean
 }
 
+interface TelegramWebhookDedupRepository {
+    /**
+     * Marks Telegram update as processed.
+     *
+     * @return true only for the first time this (botType, updateId) appears.
+     */
+    suspend fun tryMarkProcessed(botType: String, updateId: Long, createdAt: Instant): Boolean
+}
+
 data class CartItemWithCart(
     val item: CartItem,
     val cart: Cart

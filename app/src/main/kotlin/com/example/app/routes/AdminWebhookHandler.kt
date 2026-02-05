@@ -21,6 +21,7 @@ import com.example.db.AuditLogRepository
 import com.example.db.OrderDeliveryRepository
 import com.example.db.OrdersRepository
 import com.example.db.ItemMediaRepository
+import com.example.db.TelegramWebhookDedupRepository
 import com.example.domain.AuditLogEntry
 import com.example.domain.ItemMedia
 import com.pengrad.telegrambot.model.request.InputMedia
@@ -64,6 +65,7 @@ fun Application.installAdminWebhook() {
     val auditLogRepository by inject<AuditLogRepository>()
     val ordersRepository by inject<OrdersRepository>()
     val orderDeliveryRepository by inject<OrderDeliveryRepository>()
+    val webhookDedupRepository by inject<TelegramWebhookDedupRepository>()
 
     val json = Json { ignoreUnknownKeys = true }
     val deps = AdminWebhookDeps(
@@ -83,7 +85,8 @@ fun Application.installAdminWebhook() {
         inventoryService = inventoryService,
         manualPaymentsService = manualPaymentsService,
         ordersRepository = ordersRepository,
-        orderDeliveryRepository = orderDeliveryRepository
+        orderDeliveryRepository = orderDeliveryRepository,
+        webhookDedupRepository = webhookDedupRepository
     )
 
     routing {
@@ -114,7 +117,8 @@ private data class AdminWebhookDeps(
     val inventoryService: InventoryService,
     val manualPaymentsService: ManualPaymentsService,
     val ordersRepository: OrdersRepository,
-    val orderDeliveryRepository: OrderDeliveryRepository
+    val orderDeliveryRepository: OrderDeliveryRepository,
+    val webhookDedupRepository: TelegramWebhookDedupRepository
 )
 
 private suspend fun handleAdminUpdate(
@@ -128,6 +132,17 @@ private suspend fun handleAdminUpdate(
             call.respond(HttpStatusCode.OK)
             return
         }
+
+    val shouldProcess = shouldProcessTelegramUpdate(
+        dedupRepository = deps.webhookDedupRepository,
+        botType = TELEGRAM_BOT_TYPE_ADMIN,
+        updateId = update.updateId,
+        logger = deps.log
+    )
+    if (!shouldProcess) {
+        call.respond(HttpStatusCode.OK)
+        return
+    }
 
     val callback = update.callbackQuery
     if (callback != null) {

@@ -20,6 +20,7 @@ import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrdersRepository
 import com.example.db.PricesDisplayRepository
 import com.example.db.VariantsRepository
+import com.example.db.TelegramWebhookDedupRepository
 import com.example.domain.hold.HoldService
 import com.example.domain.hold.LockManager
 import com.example.domain.hold.OrderHoldService
@@ -59,6 +60,7 @@ class WebhookAuthTest : StringSpec({
                             single { mockk<OrdersRepository>(relaxed = true) }
                             single { mockk<OrderDeliveryRepository>(relaxed = true) }
                             single { mockk<com.example.db.AuditLogRepository>(relaxed = true) }
+                            single { mockk<TelegramWebhookDedupRepository>(relaxed = true) }
                         }
                     )
                 }
@@ -100,6 +102,7 @@ class WebhookAuthTest : StringSpec({
                             single { mockk<LockManager>(relaxed = true) }
                             single { mockk<OrderHoldService>(relaxed = true) }
                             single { mockk<HoldService>(relaxed = true) }
+                            single { mockk<TelegramWebhookDedupRepository>(relaxed = true) }
                         }
                     )
                 }
