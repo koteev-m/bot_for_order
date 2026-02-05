@@ -21,6 +21,7 @@ import com.example.db.tables.OrderAttachmentsTable
 import com.example.db.tables.OrderDeliveryTable
 import com.example.db.tables.OrderPaymentClaimsTable
 import com.example.db.tables.OrderPaymentDetailsTable
+import com.example.db.tables.OutboxMessageTable
 import com.example.db.tables.PostsTable
 import com.example.db.tables.PricesDisplayTable
 import com.example.db.tables.StorefrontsTable
@@ -50,6 +51,8 @@ import com.example.domain.Order
 import com.example.domain.OrderAttachment
 import com.example.domain.OrderAttachmentKind
 import com.example.domain.OrderDelivery
+import com.example.domain.OutboxMessage
+import com.example.domain.OutboxMessageStatus
 import com.example.domain.OrderLine
 import com.example.domain.OrderPaymentClaim
 import com.example.domain.OrderPaymentDetails
@@ -1859,6 +1862,108 @@ class IdempotencyRepositoryExposed(private val tx: DatabaseTx) : IdempotencyRepo
             responseJson = this[IdempotencyKeyTable.responseJson],
             createdAt = this[IdempotencyKeyTable.createdAt]
         )
+}
+
+
+class OutboxRepositoryExposed(private val tx: DatabaseTx) : OutboxRepository {
+    override suspend fun insert(type: String, payloadJson: String, now: Instant): Long = tx.tx {
+        OutboxMessageTable.insert {
+            it[OutboxMessageTable.type] = type
+            it[OutboxMessageTable.payloadJson] = payloadJson
+            it[status] = OutboxMessageStatus.NEW.name
+            it[attempts] = 0
+            it[nextAttemptAt] = now
+            it[createdAt] = now
+            it[lastError] = null
+        }.requireGeneratedId(OutboxMessageTable.id)
+    }
+
+    override suspend fun fetchDueBatch(limit: Int, now: Instant): List<OutboxMessage> = tx.tx {
+        if (limit <= 0) {
+            return@tx emptyList()
+        }
+        val sql = """
+            WITH due AS (
+                SELECT id
+                FROM outbox_message
+                WHERE status = ?
+                  AND next_attempt_at <= ?
+                ORDER BY next_attempt_at, id
+                FOR UPDATE SKIP LOCKED
+                LIMIT ?
+            )
+            UPDATE outbox_message AS om
+            SET status = ?,
+                attempts = om.attempts + 1
+            FROM due
+            WHERE om.id = due.id
+            RETURNING om.id, om.type, om.payload_json, om.status, om.attempts, om.next_attempt_at, om.created_at, om.last_error
+        """.trimIndent()
+        exec(
+            sql,
+            listOf(
+                OutboxMessageTable.status.columnType to OutboxMessageStatus.NEW.name,
+                OutboxMessageTable.nextAttemptAt.columnType to now,
+                OutboxMessageTable.attempts.columnType to limit,
+                OutboxMessageTable.status.columnType to OutboxMessageStatus.PROCESSING.name
+            )
+        ) { rs ->
+            val messages = mutableListOf<OutboxMessage>()
+            while (rs.next()) {
+                messages += OutboxMessage(
+                    id = rs.getLong("id"),
+                    type = rs.getString("type"),
+                    payloadJson = rs.getString("payload_json"),
+                    status = OutboxMessageStatus.valueOf(rs.getString("status")),
+                    attempts = rs.getInt("attempts"),
+                    nextAttemptAt = rs.getTimestamp("next_attempt_at").toInstant(),
+                    createdAt = rs.getTimestamp("created_at").toInstant(),
+                    lastError = rs.getString("last_error")
+                )
+            }
+            messages
+        } ?: emptyList()
+    }
+
+    override suspend fun markDone(id: Long) {
+        tx.tx {
+            OutboxMessageTable.update({ OutboxMessageTable.id eq id }) {
+                it[status] = OutboxMessageStatus.DONE.name
+                it[lastError] = null
+            }
+        }
+    }
+
+    override suspend fun reschedule(id: Long, attempts: Int, nextAttemptAt: Instant, lastError: String) {
+        tx.tx {
+            OutboxMessageTable.update({ OutboxMessageTable.id eq id }) {
+                it[status] = OutboxMessageStatus.NEW.name
+                it[OutboxMessageTable.attempts] = attempts
+                it[OutboxMessageTable.nextAttemptAt] = nextAttemptAt
+                it[OutboxMessageTable.lastError] = lastError
+            }
+        }
+    }
+
+    override suspend fun markFailed(id: Long, lastError: String) {
+        tx.tx {
+            OutboxMessageTable.update({ OutboxMessageTable.id eq id }) {
+                it[status] = OutboxMessageStatus.FAILED.name
+                it[OutboxMessageTable.lastError] = lastError
+            }
+        }
+    }
+
+    override suspend fun countBacklog(now: Instant): Long = tx.tx {
+        val count = OutboxMessageTable
+            .selectAll()
+            .where {
+                (OutboxMessageTable.status eq OutboxMessageStatus.NEW.name) and
+                    (OutboxMessageTable.nextAttemptAt lessEq now)
+            }
+            .count()
+        count
+    }
 }
 
 class TelegramWebhookDedupRepositoryExposed(private val tx: DatabaseTx) : TelegramWebhookDedupRepository {

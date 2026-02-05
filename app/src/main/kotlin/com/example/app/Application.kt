@@ -24,6 +24,7 @@ import com.example.app.routes.installStaticAppRoutes
 import com.example.app.security.InitDataAuth
 import com.example.app.services.installFxRefresher
 import com.example.app.services.installOffersExpiryJob
+import com.example.app.services.installOutboxWorker
 import com.example.app.services.installReservesSweepJob
 import com.example.app.services.installRestockScannerJob
 import com.example.db.TelegramWebhookDedupRepository
@@ -77,6 +78,7 @@ fun Application.module() {
     installOffersExpiryJob(cfg)
     installReservesSweepJob(cfg)
     installRestockScannerJob(cfg)
+    installOutboxWorker(cfg)
     val telegramWebhookDedupRepository by inject<TelegramWebhookDedupRepository>()
     installTelegramWebhookDedupCleanup(telegramWebhookDedupRepository)
     configureServerPlugins()

@@ -23,6 +23,7 @@ object ConfigLoader {
         metrics = loadMetricsConfig(),
         health = loadHealthConfig(),
         security = loadSecurityConfig(),
+        outbox = loadOutboxConfig(),
     )
 
     private fun loadTelegramConfig(): TelegramConfig {
@@ -205,6 +206,16 @@ object ConfigLoader {
             trustedProxyAllowlist = trustedProxyAllowlist
         )
     }
+
+
+    private fun loadOutboxConfig(): OutboxConfig = OutboxConfig(
+        enabled = parseBooleanEnv("OUTBOX_ENABLED", defaultValue = true),
+        pollIntervalMs = parsePositiveLongEnv("OUTBOX_POLL_INTERVAL_MS", defaultValue = 500),
+        batchSize = parsePositiveIntEnv("OUTBOX_BATCH_SIZE", defaultValue = 50),
+        maxAttempts = parsePositiveIntEnv("OUTBOX_MAX_ATTEMPTS", defaultValue = 10),
+        baseBackoffMs = parsePositiveLongEnv("OUTBOX_BASE_BACKOFF_MS", defaultValue = 500),
+        maxBackoffMs = parsePositiveLongEnv("OUTBOX_MAX_BACKOFF_MS", defaultValue = 60_000)
+    )
 
     private fun loadHealthConfig(): HealthConfig = HealthConfig(
         dbTimeoutMs = parsePositiveLongEnv("HEALTH_DB_TIMEOUT_MS", defaultValue = 500),
