@@ -149,9 +149,16 @@ private suspend fun handleShopUpdate(call: ApplicationCall, body: String, deps: 
         updateId = update.updateId,
         logger = shopLog
     )
-    if (acquireDecision == TelegramWebhookDedupDecision.SKIP) {
-        call.respond(HttpStatusCode.OK)
-        return
+    when (acquireDecision) {
+        TelegramWebhookDedupDecision.ALREADY_PROCESSED -> {
+            call.respond(HttpStatusCode.OK)
+            return
+        }
+        TelegramWebhookDedupDecision.IN_PROGRESS -> {
+            call.respond(HttpStatusCode.Conflict)
+            return
+        }
+        TelegramWebhookDedupDecision.ACQUIRED -> Unit
     }
 
     runCatching {

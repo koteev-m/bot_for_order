@@ -55,7 +55,7 @@ class TelegramWebhookDedupTest : StringSpec({
             updateId = 42L,
             logger = mockk(relaxed = true),
             now = now.plusSeconds(2)
-        ) shouldBe TelegramWebhookDedupDecision.SKIP
+        ) shouldBe TelegramWebhookDedupDecision.ALREADY_PROCESSED
     }
 
     "admin webhook returns 5xx on processing failure and retries same update successfully" {
@@ -118,6 +118,69 @@ class TelegramWebhookDedupTest : StringSpec({
         }
 
         verify(exactly = 2) { adminBot.execute(any<SendMessage>()) }
+    }
+
+    "admin webhook returns conflict for in-progress update and does not execute side-effects" {
+        val cfg = baseTestConfig()
+        val dedupRepository = InMemoryTelegramWebhookDedupRepository().apply {
+            seedProcessing(
+                botType = TELEGRAM_BOT_TYPE_ADMIN,
+                updateId = 7004L,
+                createdAt = Instant.now()
+            )
+        }
+        val adminBot = mockk<InstrumentedTelegramBot>()
+        every { adminBot.execute(any<SendMessage>()) } returns mockk<SendResponse>(relaxed = true)
+        val clients = mockk<TelegramClients>()
+        every { clients.adminBot } returns adminBot
+
+        val payload = """
+            {
+              "update_id": 7004,
+              "message": {
+                "message_id": 1,
+                "date": 1710000000,
+                "text": "ping",
+                "from": {"id": 123456, "first_name": "U"},
+                "chat": {"id": 123456, "type": "private"}
+              }
+            }
+        """.trimIndent()
+
+        testApplication {
+            application {
+                install(Koin) {
+                    modules(
+                        module {
+                            single { cfg }
+                            single { clients }
+                            single { mockk<ItemsService>(relaxed = true) }
+                            single { mockk<ItemMediaRepository>(relaxed = true) }
+                            single { MediaStateStore() }
+                            single { PaymentDetailsStateStore() }
+                            single { PaymentRejectReasonStateStore() }
+                            single { mockk<PostService>(relaxed = true) }
+                            single { mockk<OrderStatusService>(relaxed = true) }
+                            single { mockk<OffersService>(relaxed = true) }
+                            single { mockk<InventoryService>(relaxed = true) }
+                            single { mockk<ManualPaymentsService>(relaxed = true) }
+                            single { mockk<OrdersRepository>(relaxed = true) }
+                            single { mockk<OrderDeliveryRepository>(relaxed = true) }
+                            single { mockk<com.example.db.AuditLogRepository>(relaxed = true) }
+                            single<TelegramWebhookDedupRepository> { dedupRepository }
+                        }
+                    )
+                }
+                installAdminWebhook()
+            }
+
+            client.post("/tg/admin") {
+                header("X-Telegram-Bot-Api-Secret-Token", cfg.telegram.adminWebhookSecret)
+                setBody(payload)
+            }.status shouldBe HttpStatusCode.Conflict
+        }
+
+        verify(exactly = 0) { adminBot.execute(any<SendMessage>()) }
     }
 
     "stale processing lock is reacquired and update is processed" {
