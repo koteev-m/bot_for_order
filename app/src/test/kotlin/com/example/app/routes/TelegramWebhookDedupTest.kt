@@ -24,6 +24,7 @@ import io.kotest.matchers.shouldBe
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.install
 import io.ktor.server.testing.testApplication
@@ -244,5 +245,142 @@ class TelegramWebhookDedupTest : StringSpec({
         }
 
         verify(exactly = 1) { adminBot.execute(any<SendMessage>()) }
+    }
+
+
+    "admin webhook returns retry-after on in-progress update" {
+        val cfg = baseTestConfig()
+        val dedupRepository = InMemoryTelegramWebhookDedupRepository().apply {
+            seedProcessing(
+                botType = TELEGRAM_BOT_TYPE_ADMIN,
+                updateId = 7010L,
+                createdAt = Instant.now()
+            )
+        }
+        val adminBot = mockk<InstrumentedTelegramBot>()
+        every { adminBot.execute(any<SendMessage>()) } returns mockk<SendResponse>(relaxed = true)
+        val clients = mockk<TelegramClients>()
+        every { clients.adminBot } returns adminBot
+
+        val payload = """
+            {
+              "update_id": 7010,
+              "message": {
+                "message_id": 1,
+                "date": 1710000000,
+                "text": "ping",
+                "from": {"id": 123456, "first_name": "U"},
+                "chat": {"id": 123456, "type": "private"}
+              }
+            }
+        """.trimIndent()
+
+        testApplication {
+            application {
+                install(Koin) {
+                    modules(
+                        module {
+                            single { cfg }
+                            single { clients }
+                            single { mockk<ItemsService>(relaxed = true) }
+                            single { mockk<ItemMediaRepository>(relaxed = true) }
+                            single { MediaStateStore() }
+                            single { PaymentDetailsStateStore() }
+                            single { PaymentRejectReasonStateStore() }
+                            single { mockk<PostService>(relaxed = true) }
+                            single { mockk<OrderStatusService>(relaxed = true) }
+                            single { mockk<OffersService>(relaxed = true) }
+                            single { mockk<InventoryService>(relaxed = true) }
+                            single { mockk<ManualPaymentsService>(relaxed = true) }
+                            single { mockk<OrdersRepository>(relaxed = true) }
+                            single { mockk<OrderDeliveryRepository>(relaxed = true) }
+                            single { mockk<com.example.db.AuditLogRepository>(relaxed = true) }
+                            single<TelegramWebhookDedupRepository> { dedupRepository }
+                        }
+                    )
+                }
+                installAdminWebhook()
+            }
+
+            val response = client.post("/tg/admin") {
+                header("X-Telegram-Bot-Api-Secret-Token", cfg.telegram.adminWebhookSecret)
+                setBody(payload)
+            }
+            response.status shouldBe HttpStatusCode.Conflict
+            response.headers[HttpHeaders.RetryAfter] shouldBe "2"
+        }
+    }
+
+    "resolve in-progress status keeps default and allows only whitelist" {
+        resolveTelegramInProgressStatus { null } shouldBe HttpStatusCode.Conflict
+        resolveTelegramInProgressStatus { "429" } shouldBe HttpStatusCode.TooManyRequests
+        resolveTelegramInProgressStatus { "503" } shouldBe HttpStatusCode.ServiceUnavailable
+        resolveTelegramInProgressStatus { "200" } shouldBe HttpStatusCode.Conflict
+        resolveTelegramInProgressStatus { "abc" } shouldBe HttpStatusCode.Conflict
+    }
+
+    "in-memory dedup purge deletes old processed and stale processing only" {
+        val now = Instant.parse("2026-02-01T00:00:00Z")
+        val repository = InMemoryTelegramWebhookDedupRepository().apply {
+            seedProcessed(
+                botType = TELEGRAM_BOT_TYPE_ADMIN,
+                updateId = 8001L,
+                createdAt = now.minusSeconds(6_000),
+                processedAt = now.minusSeconds(5_000)
+            )
+            seedProcessing(
+                botType = TELEGRAM_BOT_TYPE_ADMIN,
+                updateId = 8002L,
+                createdAt = now.minusSeconds(4_000)
+            )
+            seedProcessed(
+                botType = TELEGRAM_BOT_TYPE_SHOP,
+                updateId = 8003L,
+                createdAt = now.minusSeconds(50),
+                processedAt = now.minusSeconds(10)
+            )
+            seedProcessing(
+                botType = TELEGRAM_BOT_TYPE_SHOP,
+                updateId = 8004L,
+                createdAt = now.minusSeconds(100)
+            )
+        }
+
+        repository.purge(
+            processedBefore = now.minusSeconds(1_000),
+            staleProcessingBefore = now.minusSeconds(1_000)
+        ) shouldBe 2
+
+        acquireTelegramUpdateProcessing(
+            dedupRepository = repository,
+            botType = TELEGRAM_BOT_TYPE_ADMIN,
+            updateId = 8001L,
+            logger = mockk(relaxed = true),
+            now = now
+        ) shouldBe TelegramWebhookDedupDecision.ACQUIRED
+
+        acquireTelegramUpdateProcessing(
+            dedupRepository = repository,
+            botType = TELEGRAM_BOT_TYPE_ADMIN,
+            updateId = 8002L,
+            logger = mockk(relaxed = true),
+            now = now
+        ) shouldBe TelegramWebhookDedupDecision.ACQUIRED
+
+        acquireTelegramUpdateProcessing(
+            dedupRepository = repository,
+            botType = TELEGRAM_BOT_TYPE_SHOP,
+            updateId = 8003L,
+            logger = mockk(relaxed = true),
+            now = now
+        ) shouldBe TelegramWebhookDedupDecision.ALREADY_PROCESSED
+
+        acquireTelegramUpdateProcessing(
+            dedupRepository = repository,
+            botType = TELEGRAM_BOT_TYPE_SHOP,
+            updateId = 8004L,
+            logger = mockk(relaxed = true),
+            now = now
+        ) shouldBe TelegramWebhookDedupDecision.IN_PROGRESS
     }
 })

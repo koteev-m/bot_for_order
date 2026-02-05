@@ -11,6 +11,7 @@ import com.example.app.di.fxModule
 import com.example.app.di.offersModule
 import com.example.app.di.paymentsModule
 import com.example.app.di.redisBindingsModule
+import com.example.app.jobs.installTelegramWebhookDedupCleanup
 import com.example.app.observability.registerBuildInfoMeter
 import com.example.app.observability.REQUEST_ID_MDC_KEY
 import com.example.app.observability.USER_ID_MDC_KEY
@@ -25,6 +26,7 @@ import com.example.app.services.installFxRefresher
 import com.example.app.services.installOffersExpiryJob
 import com.example.app.services.installReservesSweepJob
 import com.example.app.services.installRestockScannerJob
+import com.example.db.TelegramWebhookDedupRepository
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import kotlinx.serialization.json.Json
@@ -75,6 +77,8 @@ fun Application.module() {
     installOffersExpiryJob(cfg)
     installReservesSweepJob(cfg)
     installRestockScannerJob(cfg)
+    val telegramWebhookDedupRepository by inject<TelegramWebhookDedupRepository>()
+    installTelegramWebhookDedupCleanup(telegramWebhookDedupRepository)
     configureServerPlugins()
 
     installAdminWebhook()

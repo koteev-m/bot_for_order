@@ -164,7 +164,25 @@ class InMemoryTelegramWebhookDedupRepository : TelegramWebhookDedupRepository {
         }
     }
 
+
+    override suspend fun purge(processedBefore: Instant, staleProcessingBefore: Instant): Int {
+        val keysToDelete = mutableListOf<String>()
+        storage.forEach { (key, entry) ->
+            val removeProcessed = entry.processedAt != null && entry.processedAt < processedBefore
+            val removeStaleProcessing = entry.processedAt == null && entry.createdAt < staleProcessingBefore
+            if (removeProcessed || removeStaleProcessing) {
+                keysToDelete += key
+            }
+        }
+        keysToDelete.forEach { storage.remove(it) }
+        return keysToDelete.size
+    }
+
     fun seedProcessing(botType: String, updateId: Long, createdAt: Instant) {
         storage["$botType:$updateId"] = Entry(createdAt = createdAt, processedAt = null)
+    }
+
+    fun seedProcessed(botType: String, updateId: Long, createdAt: Instant, processedAt: Instant) {
+        storage["$botType:$updateId"] = Entry(createdAt = createdAt, processedAt = processedAt)
     }
 }
