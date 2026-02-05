@@ -9,6 +9,7 @@ import com.example.app.config.LinkContextConfig
 import com.example.app.config.LinkResolveRateLimitConfig
 import com.example.app.config.LoggingConfig
 import com.example.app.config.ManualPaymentsConfig
+import com.example.app.config.OutboxConfig
 import com.example.app.config.MerchantsConfig
 import com.example.app.config.MetricsConfig
 import com.example.app.config.PaymentsConfig
@@ -108,4 +109,12 @@ internal fun baseTestConfig(
     metrics = metrics,
     health = health,
     security = security,
+    outbox = OutboxConfig(
+        enabled = true,
+        pollIntervalMs = 50,
+        batchSize = 10,
+        maxAttempts = 5,
+        baseBackoffMs = 100,
+        maxBackoffMs = 5_000
+    ),
 )

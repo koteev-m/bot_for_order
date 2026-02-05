@@ -382,6 +382,25 @@ object IdempotencyKeyTable : Table("idempotency_key") {
     }
 }
 
+
+object OutboxMessageTable : Table("outbox_message") {
+    val id = long("id").autoIncrement()
+    val type = text("type")
+    val payloadJson = text("payload_json")
+    val status = varchar("status", 16)
+    val attempts = integer("attempts")
+    val nextAttemptAt = timestamp("next_attempt_at")
+    val createdAt = timestamp("created_at")
+    val lastError = text("last_error").nullable()
+
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        index(false, status, nextAttemptAt)
+        index(false, createdAt)
+    }
+}
+
 object TelegramWebhookDedupTable : Table("telegram_webhook_dedup") {
     val botType = varchar("bot_type", 32)
     val updateId = long("update_id")

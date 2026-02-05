@@ -32,6 +32,7 @@ import com.example.domain.PaymentClaimStatus
 import com.example.domain.PaymentMethodType
 import com.example.domain.OrderAttachmentKind
 import com.example.domain.OrderDelivery
+import com.example.domain.OutboxMessage
 import com.example.domain.BuyerDeliveryProfile
 import com.example.domain.DeliveryMethodType
 import java.time.Instant
@@ -291,6 +292,15 @@ interface TelegramWebhookDedupRepository {
     suspend fun releaseProcessing(botType: String, updateId: Long)
 
     suspend fun purge(processedBefore: Instant, staleProcessingBefore: Instant): Int
+}
+
+interface OutboxRepository {
+    suspend fun insert(type: String, payloadJson: String, now: Instant): Long
+    suspend fun fetchDueBatch(limit: Int, now: Instant): List<OutboxMessage>
+    suspend fun markDone(id: Long)
+    suspend fun reschedule(id: Long, attempts: Int, nextAttemptAt: Instant, lastError: String)
+    suspend fun markFailed(id: Long, lastError: String)
+    suspend fun countBacklog(now: Instant): Long
 }
 
 enum class TelegramWebhookDedupAcquireResult {

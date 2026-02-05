@@ -19,6 +19,7 @@ data class AppConfig(
     val metrics: MetricsConfig,
     val health: HealthConfig,
     val security: SecurityConfig,
+    val outbox: OutboxConfig,
 )
 
 data class TelegramConfig(
@@ -157,4 +158,14 @@ data class MetricsConfig(
 data class HealthConfig(
     val dbTimeoutMs: Long,
     val redisTimeoutMs: Long
+)
+
+
+data class OutboxConfig(
+    val enabled: Boolean,
+    val pollIntervalMs: Long,
+    val batchSize: Int,
+    val maxAttempts: Int,
+    val baseBackoffMs: Long,
+    val maxBackoffMs: Long,
 )

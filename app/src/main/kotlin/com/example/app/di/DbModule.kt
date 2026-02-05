@@ -57,6 +57,8 @@ import com.example.db.EventLogRepositoryExposed
 import com.example.db.IdempotencyRepository
 import com.example.db.IdempotencyRepositoryExposed
 import com.example.db.TelegramWebhookDedupRepository
+import com.example.db.OutboxRepository
+import com.example.db.OutboxRepositoryExposed
 import com.example.db.TelegramWebhookDedupRepositoryExposed
 import com.example.domain.watchlist.WatchlistRepository
 import org.flywaydb.core.Flyway
@@ -110,4 +112,5 @@ fun dbModule(cfg: AppConfig) = module {
     single<EventLogRepository> { EventLogRepositoryExposed(get()) }
     single<IdempotencyRepository> { IdempotencyRepositoryExposed(get()) }
     single<TelegramWebhookDedupRepository> { TelegramWebhookDedupRepositoryExposed(get()) }
+    single<OutboxRepository> { OutboxRepositoryExposed(get()) }
 }
