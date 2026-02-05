@@ -133,60 +133,75 @@ private suspend fun handleAdminUpdate(
             return
         }
 
-    val shouldProcess = shouldProcessTelegramUpdate(
+    val acquireDecision = acquireTelegramUpdateProcessing(
         dedupRepository = deps.webhookDedupRepository,
         botType = TELEGRAM_BOT_TYPE_ADMIN,
         updateId = update.updateId,
         logger = deps.log
     )
-    if (!shouldProcess) {
+    if (acquireDecision == TelegramWebhookDedupDecision.SKIP) {
         call.respond(HttpStatusCode.OK)
         return
     }
 
-    val callback = update.callbackQuery
-    if (callback != null) {
-        handleAdminCallback(call, callback, deps)
-        call.respond(HttpStatusCode.OK)
-        return
-    }
-
-    val message = update.message
-    val fromId = message?.from?.id
-    if (message == null || fromId == null) {
-        call.respond(HttpStatusCode.OK)
-        return
-    }
-    val chatId = message.chat.id
-
-    val reply: (String) -> Unit = { html ->
-        deps.clients.adminBot.execute(
-            SendMessage(chatId, html)
-                .parseMode(ParseMode.HTML)
-                .disablePreview()
-        )
-    }
-
-    if (!deps.config.telegram.adminIds.contains(fromId)) {
-        reply("⛔ Команда доступна только администраторам.")
-    } else {
-        val text = message.text?.trim().orEmpty()
-        val pendingDetailsOrderId = deps.paymentDetailsStateStore.get(fromId)
-        val pendingRejectOrderId = deps.paymentRejectReasonStateStore.get(fromId)
-        if (pendingRejectOrderId != null && text.isNotBlank() && !text.startsWith("/")) {
-            handlePaymentRejectMessage(call, chatId, fromId, pendingRejectOrderId, text, deps, reply)
-            deps.paymentRejectReasonStateStore.clear(fromId)
-        } else if (pendingDetailsOrderId != null && text.isNotBlank() && !text.startsWith("/")) {
-            handlePaymentDetailsMessage(call, chatId, fromId, pendingDetailsOrderId, text, deps, reply)
-            deps.paymentDetailsStateStore.clear(fromId)
-        } else if (text.startsWith("/")) {
-            handleAdminCommand(call, chatId, fromId, text, deps, reply)
-        } else {
-            handleMediaCollection(fromId, chatId, message, deps, reply)
+    runCatching {
+        val callback = update.callbackQuery
+        if (callback != null) {
+            handleAdminCallback(call, callback, deps)
+            return@runCatching
         }
-    }
 
-    call.respond(HttpStatusCode.OK)
+        val message = update.message
+        val fromId = message?.from?.id
+        if (message == null || fromId == null) {
+            return@runCatching
+        }
+        val chatId = message.chat.id
+
+        val reply: (String) -> Unit = { html ->
+            deps.clients.adminBot.execute(
+                SendMessage(chatId, html)
+                    .parseMode(ParseMode.HTML)
+                    .disablePreview()
+            )
+        }
+
+        if (!deps.config.telegram.adminIds.contains(fromId)) {
+            reply("⛔ Команда доступна только администраторам.")
+        } else {
+            val text = message.text?.trim().orEmpty()
+            val pendingDetailsOrderId = deps.paymentDetailsStateStore.get(fromId)
+            val pendingRejectOrderId = deps.paymentRejectReasonStateStore.get(fromId)
+            if (pendingRejectOrderId != null && text.isNotBlank() && !text.startsWith("/")) {
+                handlePaymentRejectMessage(call, chatId, fromId, pendingRejectOrderId, text, deps, reply)
+                deps.paymentRejectReasonStateStore.clear(fromId)
+            } else if (pendingDetailsOrderId != null && text.isNotBlank() && !text.startsWith("/")) {
+                handlePaymentDetailsMessage(call, chatId, fromId, pendingDetailsOrderId, text, deps, reply)
+                deps.paymentDetailsStateStore.clear(fromId)
+            } else if (text.startsWith("/")) {
+                handleAdminCommand(call, chatId, fromId, text, deps, reply)
+            } else {
+                handleMediaCollection(fromId, chatId, message, deps, reply)
+            }
+        }
+    }.onSuccess {
+        markTelegramUpdateProcessedBestEffort(
+            dedupRepository = deps.webhookDedupRepository,
+            botType = TELEGRAM_BOT_TYPE_ADMIN,
+            updateId = update.updateId,
+            logger = deps.log
+        )
+        call.respond(HttpStatusCode.OK)
+    }.onFailure { error ->
+        releaseTelegramUpdateProcessingBestEffort(
+            dedupRepository = deps.webhookDedupRepository,
+            botType = TELEGRAM_BOT_TYPE_ADMIN,
+            updateId = update.updateId,
+            logger = deps.log
+        )
+        deps.log.error("tg_admin_webhook_processing_failed updateId={}", update.updateId, error)
+        throw error
+    }
 }
 
 private suspend fun verifyTelegramWebhookSecret(call: ApplicationCall, expected: String): Boolean {

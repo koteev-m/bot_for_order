@@ -1862,22 +1862,92 @@ class IdempotencyRepositoryExposed(private val tx: DatabaseTx) : IdempotencyRepo
 }
 
 class TelegramWebhookDedupRepositoryExposed(private val tx: DatabaseTx) : TelegramWebhookDedupRepository {
-    override suspend fun tryMarkProcessed(botType: String, updateId: Long, createdAt: Instant): Boolean = tx.tx {
-        val sql = """
-            INSERT INTO telegram_webhook_dedup (bot_type, update_id, created_at)
-            VALUES (?, ?, ?)
+    override suspend fun tryAcquire(
+        botType: String,
+        updateId: Long,
+        now: Instant,
+        staleBefore: Instant
+    ): TelegramWebhookDedupAcquireResult = tx.tx {
+        val insertSql = """
+            INSERT INTO telegram_webhook_dedup (bot_type, update_id, created_at, processed_at)
+            VALUES (?, ?, ?, NULL)
             ON CONFLICT (bot_type, update_id)
             DO NOTHING
             RETURNING 1
         """.trimIndent()
         val inserted = exec(
-            sql,
+            insertSql,
             listOf(
                 TelegramWebhookDedupTable.botType.columnType to botType,
                 TelegramWebhookDedupTable.updateId.columnType to updateId,
-                TelegramWebhookDedupTable.createdAt.columnType to createdAt
+                TelegramWebhookDedupTable.createdAt.columnType to now
             )
         ) { rs -> rs.next() }
-        inserted == true
+        if (inserted == true) {
+            return@tx TelegramWebhookDedupAcquireResult.ACQUIRED
+        }
+
+        val reacquireSql = """
+            UPDATE telegram_webhook_dedup
+            SET created_at = ?, processed_at = NULL
+            WHERE bot_type = ?
+              AND update_id = ?
+              AND processed_at IS NULL
+              AND created_at < ?
+            RETURNING 1
+        """.trimIndent()
+        val reacquired = exec(
+            reacquireSql,
+            listOf(
+                TelegramWebhookDedupTable.createdAt.columnType to now,
+                TelegramWebhookDedupTable.botType.columnType to botType,
+                TelegramWebhookDedupTable.updateId.columnType to updateId,
+                TelegramWebhookDedupTable.createdAt.columnType to staleBefore
+            )
+        ) { rs -> rs.next() }
+        if (reacquired == true) {
+            return@tx TelegramWebhookDedupAcquireResult.ACQUIRED
+        }
+
+        val stateSql = """
+            SELECT processed_at
+            FROM telegram_webhook_dedup
+            WHERE bot_type = ? AND update_id = ?
+        """.trimIndent()
+        val processed = exec(
+            stateSql,
+            listOf(
+                TelegramWebhookDedupTable.botType.columnType to botType,
+                TelegramWebhookDedupTable.updateId.columnType to updateId
+            )
+        ) { rs -> if (rs.next()) rs.getTimestamp("processed_at") != null else null }
+
+        when (processed) {
+            true -> TelegramWebhookDedupAcquireResult.ALREADY_PROCESSED
+            false -> TelegramWebhookDedupAcquireResult.IN_PROGRESS
+            null -> TelegramWebhookDedupAcquireResult.IN_PROGRESS
+        }
+    }
+
+    override suspend fun markProcessed(botType: String, updateId: Long, processedAt: Instant) {
+        tx.tx {
+            TelegramWebhookDedupTable.update({
+                (TelegramWebhookDedupTable.botType eq botType) and
+                    (TelegramWebhookDedupTable.updateId eq updateId) and
+                    TelegramWebhookDedupTable.processedAt.isNull()
+            }) {
+                it[TelegramWebhookDedupTable.processedAt] = processedAt
+            }
+        }
+    }
+
+    override suspend fun releaseProcessing(botType: String, updateId: Long) {
+        tx.tx {
+            TelegramWebhookDedupTable.deleteWhere {
+                (TelegramWebhookDedupTable.botType eq botType) and
+                    (TelegramWebhookDedupTable.updateId eq updateId) and
+                    TelegramWebhookDedupTable.processedAt.isNull()
+            }
+        }
     }
 }

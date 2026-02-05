@@ -3,6 +3,7 @@ package com.example.app.testutil
 import com.example.db.AuditLogRepository
 import com.example.db.EventLogRepository
 import com.example.db.IdempotencyRepository
+import com.example.db.TelegramWebhookDedupAcquireResult
 import com.example.db.TelegramWebhookDedupRepository
 import com.example.domain.AuditLogEntry
 import com.example.domain.EventLogEntry
@@ -109,10 +110,61 @@ class InMemoryIdempotencyRepository : IdempotencyRepository {
 }
 
 class InMemoryTelegramWebhookDedupRepository : TelegramWebhookDedupRepository {
-    private val storage = ConcurrentHashMap<String, Instant>()
+    private data class Entry(
+        val createdAt: Instant,
+        val processedAt: Instant?
+    )
 
-    override suspend fun tryMarkProcessed(botType: String, updateId: Long, createdAt: Instant): Boolean {
+    private val storage = ConcurrentHashMap<String, Entry>()
+
+    override suspend fun tryAcquire(
+        botType: String,
+        updateId: Long,
+        now: Instant,
+        staleBefore: Instant
+    ): TelegramWebhookDedupAcquireResult {
         val key = "$botType:$updateId"
-        return storage.putIfAbsent(key, createdAt) == null
+        while (true) {
+            val existing = storage[key]
+            if (existing == null) {
+                val inserted = storage.putIfAbsent(key, Entry(createdAt = now, processedAt = null))
+                if (inserted == null) {
+                    return TelegramWebhookDedupAcquireResult.ACQUIRED
+                }
+                continue
+            }
+
+            if (existing.processedAt != null) {
+                return TelegramWebhookDedupAcquireResult.ALREADY_PROCESSED
+            }
+
+            if (existing.createdAt < staleBefore) {
+                val replaced = storage.replace(key, existing, Entry(createdAt = now, processedAt = null))
+                if (replaced) {
+                    return TelegramWebhookDedupAcquireResult.ACQUIRED
+                }
+                continue
+            }
+
+            return TelegramWebhookDedupAcquireResult.IN_PROGRESS
+        }
+    }
+
+    override suspend fun markProcessed(botType: String, updateId: Long, processedAt: Instant) {
+        val key = "$botType:$updateId"
+        storage.computeIfPresent(key) { _, entry ->
+            if (entry.processedAt == null) entry.copy(processedAt = processedAt) else entry
+        }
+    }
+
+    override suspend fun releaseProcessing(botType: String, updateId: Long) {
+        val key = "$botType:$updateId"
+        storage.computeIfPresent(key) { _, entry ->
+            if (entry.processedAt == null) null else entry
+        }
+    }
+
+    fun seedProcessing(botType: String, updateId: Long, createdAt: Instant) {
+        storage["$botType:$updateId"] = Entry(createdAt = createdAt, processedAt = null)
     }
 }

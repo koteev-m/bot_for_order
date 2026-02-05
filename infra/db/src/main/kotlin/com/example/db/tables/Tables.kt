@@ -386,11 +386,13 @@ object TelegramWebhookDedupTable : Table("telegram_webhook_dedup") {
     val botType = varchar("bot_type", 32)
     val updateId = long("update_id")
     val createdAt = timestamp("created_at")
+    val processedAt = timestamp("processed_at").nullable()
 
     override val primaryKey = PrimaryKey(botType, updateId)
 
     init {
         index(false, createdAt)
+        index(false, processedAt, createdAt)
     }
 }
 
