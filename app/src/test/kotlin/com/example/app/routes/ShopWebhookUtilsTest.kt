@@ -9,6 +9,7 @@ import com.example.db.OrderStatusHistoryRepository
 import com.example.db.OrdersRepository
 import com.example.db.PricesDisplayRepository
 import com.example.db.VariantsRepository
+import com.example.db.TelegramWebhookDedupRepository
 import com.example.domain.Order
 import com.example.domain.OrderStatus
 import com.example.domain.Variant
@@ -81,6 +82,7 @@ private fun buildDeps(variantsRepository: VariantsRepository): ShopWebhookDeps =
     lockManager = mockk<LockManager>(relaxed = true),
     orderHoldService = mockk<OrderHoldService>(relaxed = true),
     holdService = mockk<HoldService>(relaxed = true),
+    webhookDedupRepository = mockk<TelegramWebhookDedupRepository>(relaxed = true),
     json = Json { ignoreUnknownKeys = true }
 )
 

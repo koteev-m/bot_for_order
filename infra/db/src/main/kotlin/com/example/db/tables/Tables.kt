@@ -382,6 +382,18 @@ object IdempotencyKeyTable : Table("idempotency_key") {
     }
 }
 
+object TelegramWebhookDedupTable : Table("telegram_webhook_dedup") {
+    val botType = varchar("bot_type", 32)
+    val updateId = long("update_id")
+    val createdAt = timestamp("created_at")
+
+    override val primaryKey = PrimaryKey(botType, updateId)
+
+    init {
+        index(false, createdAt)
+    }
+}
+
 object WatchlistTable : Table("watchlist") {
     val id = long("id").autoIncrement()
     val userId = long("user_id")

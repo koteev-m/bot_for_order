@@ -24,6 +24,7 @@ import com.example.db.tables.OrderPaymentDetailsTable
 import com.example.db.tables.PostsTable
 import com.example.db.tables.PricesDisplayTable
 import com.example.db.tables.StorefrontsTable
+import com.example.db.tables.TelegramWebhookDedupTable
 import com.example.db.tables.VariantsTable
 import com.example.db.tables.WatchlistTable
 import com.example.db.tables.BuyerDeliveryProfileTable
@@ -1858,4 +1859,25 @@ class IdempotencyRepositoryExposed(private val tx: DatabaseTx) : IdempotencyRepo
             responseJson = this[IdempotencyKeyTable.responseJson],
             createdAt = this[IdempotencyKeyTable.createdAt]
         )
+}
+
+class TelegramWebhookDedupRepositoryExposed(private val tx: DatabaseTx) : TelegramWebhookDedupRepository {
+    override suspend fun tryMarkProcessed(botType: String, updateId: Long, createdAt: Instant): Boolean = tx.tx {
+        val sql = """
+            INSERT INTO telegram_webhook_dedup (bot_type, update_id, created_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT (bot_type, update_id)
+            DO NOTHING
+            RETURNING 1
+        """.trimIndent()
+        val inserted = exec(
+            sql,
+            listOf(
+                TelegramWebhookDedupTable.botType.columnType to botType,
+                TelegramWebhookDedupTable.updateId.columnType to updateId,
+                TelegramWebhookDedupTable.createdAt.columnType to createdAt
+            )
+        ) { rs -> rs.next() }
+        inserted == true
+    }
 }

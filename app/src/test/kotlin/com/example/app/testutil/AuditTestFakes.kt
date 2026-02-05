@@ -3,6 +3,7 @@ package com.example.app.testutil
 import com.example.db.AuditLogRepository
 import com.example.db.EventLogRepository
 import com.example.db.IdempotencyRepository
+import com.example.db.TelegramWebhookDedupRepository
 import com.example.domain.AuditLogEntry
 import com.example.domain.EventLogEntry
 import com.example.domain.IdempotencyKeyRecord
@@ -104,5 +105,14 @@ class InMemoryIdempotencyRepository : IdempotencyRepository {
 
     private fun recordKey(merchantId: String, userId: Long, scope: String, key: String): String {
         return "$merchantId:$userId:$scope:$key"
+    }
+}
+
+class InMemoryTelegramWebhookDedupRepository : TelegramWebhookDedupRepository {
+    private val storage = ConcurrentHashMap<String, Instant>()
+
+    override suspend fun tryMarkProcessed(botType: String, updateId: Long, createdAt: Instant): Boolean {
+        val key = "$botType:$updateId"
+        return storage.putIfAbsent(key, createdAt) == null
     }
 }
