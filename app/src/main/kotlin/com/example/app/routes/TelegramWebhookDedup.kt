@@ -12,7 +12,8 @@ private val TELEGRAM_WEBHOOK_PROCESSING_TTL: Duration = Duration.ofMinutes(10)
 
 enum class TelegramWebhookDedupDecision {
     ACQUIRED,
-    SKIP
+    ALREADY_PROCESSED,
+    IN_PROGRESS
 }
 
 internal suspend fun acquireTelegramUpdateProcessing(
@@ -35,11 +36,11 @@ internal suspend fun acquireTelegramUpdateProcessing(
         TelegramWebhookDedupAcquireResult.ACQUIRED -> TelegramWebhookDedupDecision.ACQUIRED
         TelegramWebhookDedupAcquireResult.ALREADY_PROCESSED -> {
             logger.warn("tg_webhook_duplicate_dropped bot={} updateId={}", botType, updateId)
-            TelegramWebhookDedupDecision.SKIP
+            TelegramWebhookDedupDecision.ALREADY_PROCESSED
         }
         TelegramWebhookDedupAcquireResult.IN_PROGRESS -> {
-            logger.warn("tg_webhook_in_progress_dropped bot={} updateId={}", botType, updateId)
-            TelegramWebhookDedupDecision.SKIP
+            logger.debug("tg_webhook_in_progress bot={} updateId={}", botType, updateId)
+            TelegramWebhookDedupDecision.IN_PROGRESS
         }
     }
 }
