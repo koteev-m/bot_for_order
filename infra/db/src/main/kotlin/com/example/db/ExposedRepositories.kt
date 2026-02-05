@@ -1950,4 +1950,13 @@ class TelegramWebhookDedupRepositoryExposed(private val tx: DatabaseTx) : Telegr
             }
         }
     }
+
+    override suspend fun purge(processedBefore: Instant, staleProcessingBefore: Instant): Int = tx.tx {
+        TelegramWebhookDedupTable.deleteWhere {
+            ((TelegramWebhookDedupTable.processedAt.isNotNull()) and
+                (TelegramWebhookDedupTable.processedAt less processedBefore)) or
+                ((TelegramWebhookDedupTable.processedAt.isNull()) and
+                    (TelegramWebhookDedupTable.createdAt less staleProcessingBefore))
+        }
+    }
 }

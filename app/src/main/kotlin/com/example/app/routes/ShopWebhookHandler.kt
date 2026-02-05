@@ -155,7 +155,7 @@ private suspend fun handleShopUpdate(call: ApplicationCall, body: String, deps: 
             return
         }
         TelegramWebhookDedupDecision.IN_PROGRESS -> {
-            call.respond(HttpStatusCode.Conflict)
+            call.respondTelegramInProgress()
             return
         }
         TelegramWebhookDedupDecision.ACQUIRED -> Unit

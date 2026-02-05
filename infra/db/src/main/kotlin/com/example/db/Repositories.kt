@@ -289,6 +289,8 @@ interface TelegramWebhookDedupRepository {
     suspend fun markProcessed(botType: String, updateId: Long, processedAt: Instant)
 
     suspend fun releaseProcessing(botType: String, updateId: Long)
+
+    suspend fun purge(processedBefore: Instant, staleProcessingBefore: Instant): Int
 }
 
 enum class TelegramWebhookDedupAcquireResult {
