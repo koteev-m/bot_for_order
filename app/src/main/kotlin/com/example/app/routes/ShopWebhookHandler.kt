@@ -143,41 +143,57 @@ private suspend fun handleShopUpdate(call: ApplicationCall, body: String, deps: 
         return
     }
 
-    val shouldProcess = shouldProcessTelegramUpdate(
+    val acquireDecision = acquireTelegramUpdateProcessing(
         dedupRepository = deps.webhookDedupRepository,
         botType = TELEGRAM_BOT_TYPE_SHOP,
         updateId = update.updateId,
         logger = shopLog
     )
-    if (!shouldProcess) {
+    if (acquireDecision == TelegramWebhookDedupDecision.SKIP) {
         call.respond(HttpStatusCode.OK)
         return
     }
 
-    val message = update.message
-    val text = message?.text?.trim().orEmpty()
-    when {
-        update.shippingQuery != null -> handleShippingQuery(update.shippingQuery, deps)
-        update.preCheckoutQuery != null -> handlePreCheckoutQuery(update.preCheckoutQuery, deps)
-        message?.successfulPayment != null -> handleSuccessfulPayment(message, message.successfulPayment, deps)
-        message == null || !text.startsWith("/") -> {
-            call.respond(HttpStatusCode.OK)
-            return
-        }
-        else -> {
-            val chatId = message.chat.id
-            val (command, args) = splitCommand(text)
-            when (command) {
-                "/start" -> handleStart(chatId, args, deps)
-                "/open" -> handleOpen(chatId, args, deps)
-                else -> {
-                    // ignore
+    runCatching {
+        val message = update.message
+        val text = message?.text?.trim().orEmpty()
+        when {
+            update.shippingQuery != null -> handleShippingQuery(update.shippingQuery, deps)
+            update.preCheckoutQuery != null -> handlePreCheckoutQuery(update.preCheckoutQuery, deps)
+            message?.successfulPayment != null -> handleSuccessfulPayment(message, message.successfulPayment, deps)
+            message == null || !text.startsWith("/") -> {
+                return@runCatching
+            }
+            else -> {
+                val chatId = message.chat.id
+                val (command, args) = splitCommand(text)
+                when (command) {
+                    "/start" -> handleStart(chatId, args, deps)
+                    "/open" -> handleOpen(chatId, args, deps)
+                    else -> {
+                        // ignore
+                    }
                 }
             }
         }
+    }.onSuccess {
+        markTelegramUpdateProcessedBestEffort(
+            dedupRepository = deps.webhookDedupRepository,
+            botType = TELEGRAM_BOT_TYPE_SHOP,
+            updateId = update.updateId,
+            logger = shopLog
+        )
+        call.respond(HttpStatusCode.OK)
+    }.onFailure { error ->
+        releaseTelegramUpdateProcessingBestEffort(
+            dedupRepository = deps.webhookDedupRepository,
+            botType = TELEGRAM_BOT_TYPE_SHOP,
+            updateId = update.updateId,
+            logger = shopLog
+        )
+        shopLog.error("tg_shop_webhook_processing_failed updateId={}", update.updateId, error)
+        throw error
     }
-
-    call.respond(HttpStatusCode.OK)
 }
 
 private suspend fun verifyTelegramWebhookSecret(call: ApplicationCall, expected: String): Boolean {

@@ -279,12 +279,22 @@ interface IdempotencyRepository {
 }
 
 interface TelegramWebhookDedupRepository {
-    /**
-     * Marks Telegram update as processed.
-     *
-     * @return true only for the first time this (botType, updateId) appears.
-     */
-    suspend fun tryMarkProcessed(botType: String, updateId: Long, createdAt: Instant): Boolean
+    suspend fun tryAcquire(
+        botType: String,
+        updateId: Long,
+        now: Instant,
+        staleBefore: Instant
+    ): TelegramWebhookDedupAcquireResult
+
+    suspend fun markProcessed(botType: String, updateId: Long, processedAt: Instant)
+
+    suspend fun releaseProcessing(botType: String, updateId: Long)
+}
+
+enum class TelegramWebhookDedupAcquireResult {
+    ACQUIRED,
+    ALREADY_PROCESSED,
+    IN_PROGRESS
 }
 
 data class CartItemWithCart(
