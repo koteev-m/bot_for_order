@@ -296,7 +296,7 @@ interface TelegramWebhookDedupRepository {
 
 interface OutboxRepository {
     suspend fun insert(type: String, payloadJson: String, now: Instant): Long
-    suspend fun fetchDueBatch(limit: Int, now: Instant): List<OutboxMessage>
+    suspend fun fetchDueBatch(limit: Int, now: Instant, processingLeaseUntil: Instant): List<OutboxMessage>
     suspend fun markDone(id: Long)
     suspend fun reschedule(id: Long, attempts: Int, nextAttemptAt: Instant, lastError: String)
     suspend fun markFailed(id: Long, lastError: String)

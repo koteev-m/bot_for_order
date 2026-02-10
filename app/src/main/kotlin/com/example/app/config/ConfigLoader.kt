@@ -214,7 +214,8 @@ object ConfigLoader {
         batchSize = parsePositiveIntEnv("OUTBOX_BATCH_SIZE", defaultValue = 50),
         maxAttempts = parsePositiveIntEnv("OUTBOX_MAX_ATTEMPTS", defaultValue = 10),
         baseBackoffMs = parsePositiveLongEnv("OUTBOX_BASE_BACKOFF_MS", defaultValue = 500),
-        maxBackoffMs = parsePositiveLongEnv("OUTBOX_MAX_BACKOFF_MS", defaultValue = 60_000)
+        maxBackoffMs = parsePositiveLongEnv("OUTBOX_MAX_BACKOFF_MS", defaultValue = 60_000),
+        processingTtlMs = parsePositiveLongEnv("OUTBOX_PROCESSING_TTL_MS", defaultValue = 600_000)
     )
 
     private fun loadHealthConfig(): HealthConfig = HealthConfig(

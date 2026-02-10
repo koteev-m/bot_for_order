@@ -1878,7 +1878,7 @@ class OutboxRepositoryExposed(private val tx: DatabaseTx) : OutboxRepository {
         }.requireGeneratedId(OutboxMessageTable.id)
     }
 
-    override suspend fun fetchDueBatch(limit: Int, now: Instant): List<OutboxMessage> = tx.tx {
+    override suspend fun fetchDueBatch(limit: Int, now: Instant, processingLeaseUntil: Instant): List<OutboxMessage> = tx.tx {
         if (limit <= 0) {
             return@tx emptyList()
         }
@@ -1886,7 +1886,7 @@ class OutboxRepositoryExposed(private val tx: DatabaseTx) : OutboxRepository {
             WITH due AS (
                 SELECT id
                 FROM outbox_message
-                WHERE status = ?
+                WHERE status IN (?, ?)
                   AND next_attempt_at <= ?
                 ORDER BY next_attempt_at, id
                 FOR UPDATE SKIP LOCKED
@@ -1894,7 +1894,8 @@ class OutboxRepositoryExposed(private val tx: DatabaseTx) : OutboxRepository {
             )
             UPDATE outbox_message AS om
             SET status = ?,
-                attempts = om.attempts + 1
+                attempts = om.attempts + 1,
+                next_attempt_at = ?
             FROM due
             WHERE om.id = due.id
             RETURNING om.id, om.type, om.payload_json, om.status, om.attempts, om.next_attempt_at, om.created_at, om.last_error
@@ -1903,9 +1904,11 @@ class OutboxRepositoryExposed(private val tx: DatabaseTx) : OutboxRepository {
             sql,
             listOf(
                 OutboxMessageTable.status.columnType to OutboxMessageStatus.NEW.name,
+                OutboxMessageTable.status.columnType to OutboxMessageStatus.PROCESSING.name,
                 OutboxMessageTable.nextAttemptAt.columnType to now,
                 OutboxMessageTable.attempts.columnType to limit,
-                OutboxMessageTable.status.columnType to OutboxMessageStatus.PROCESSING.name
+                OutboxMessageTable.status.columnType to OutboxMessageStatus.PROCESSING.name,
+                OutboxMessageTable.nextAttemptAt.columnType to processingLeaseUntil
             )
         ) { rs ->
             val messages = mutableListOf<OutboxMessage>()

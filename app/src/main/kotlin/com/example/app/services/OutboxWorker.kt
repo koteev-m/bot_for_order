@@ -8,6 +8,7 @@ import io.ktor.server.application.ApplicationStopped
 import io.micrometer.core.instrument.MeterRegistry
 import java.util.concurrent.atomic.AtomicLong
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import kotlin.math.min
 import kotlin.random.Random
@@ -71,7 +72,8 @@ class OutboxWorker(
 
     suspend fun runOnce() {
         val now = clock.instant()
-        val due = outboxRepository.fetchDueBatch(config.outbox.batchSize, now)
+        val processingLeaseUntil = now.plus(Duration.ofMillis(config.outbox.processingTtlMs))
+        val due = outboxRepository.fetchDueBatch(config.outbox.batchSize, now, processingLeaseUntil)
         if (due.isEmpty()) {
             return
         }
