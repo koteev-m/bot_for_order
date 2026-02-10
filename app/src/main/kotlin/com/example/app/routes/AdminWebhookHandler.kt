@@ -453,8 +453,8 @@ private suspend fun handlePost(
     }
 
     try {
-        val messageIds = postService.postItemAlbumToChannel(itemId)
-        reply("✅ Опубликовано в канал. Сообщений в альбоме: ${messageIds.size}. Первая запись с CTA готова.")
+        postService.postItemAlbumToChannel(itemId)
+        reply("✅ Публикация поставлена в очередь. Пост, CTA и pin будут выполнены воркером outbox.")
         return true
     } catch (error: IllegalArgumentException) {
         val reason = error.message ?: "Некорректные данные"

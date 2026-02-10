@@ -120,6 +120,43 @@ class OutboxWorkerTest {
     }
 
     @Test
+    fun `worker processes telegram outbox type and marks done`(): Unit = runBlocking {
+        val clock = OutboxTestClock(Instant.parse("2024-01-01T00:00:00Z"))
+        val repository = FakeOutboxRepository()
+        val id = repository.insert(TelegramOutboxHandlers.TELEGRAM_EDIT_REPLY_MARKUP, "{\"k\":1}", clock.instant())
+        var handled = false
+        val worker = OutboxWorker(
+            application = mockk<Application>(relaxed = true),
+            outboxRepository = repository,
+            handlerRegistry = OutboxHandlerRegistry(
+                mapOf(
+                    TelegramOutboxHandlers.TELEGRAM_EDIT_REPLY_MARKUP to OutboxHandler {
+                        handled = true
+                    }
+                )
+            ),
+            config = baseTestConfig().copy(
+                outbox = OutboxConfig(
+                    enabled = true,
+                    pollIntervalMs = 10,
+                    batchSize = 10,
+                    maxAttempts = 3,
+                    baseBackoffMs = 100,
+                    maxBackoffMs = 1000,
+                    processingTtlMs = 600_000
+                )
+            ),
+            clock = clock,
+            random = Random(1)
+        )
+
+        worker.runOnce()
+
+        handled shouldBe true
+        repository.message(id).status shouldBe OutboxMessageStatus.DONE
+    }
+
+    @Test
     fun `worker retries with backoff then succeeds`(): Unit = runBlocking {
         val clock = OutboxTestClock(Instant.parse("2024-01-01T00:00:00Z"))
         val repository = FakeOutboxRepository()
