@@ -168,4 +168,5 @@ data class OutboxConfig(
     val maxAttempts: Int,
     val baseBackoffMs: Long,
     val maxBackoffMs: Long,
+    val processingTtlMs: Long,
 )

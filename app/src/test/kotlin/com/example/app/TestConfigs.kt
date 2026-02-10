@@ -115,6 +115,7 @@ internal fun baseTestConfig(
         batchSize = 10,
         maxAttempts = 5,
         baseBackoffMs = 100,
-        maxBackoffMs = 5_000
+        maxBackoffMs = 5_000,
+        processingTtlMs = 600_000
     ),
 )
