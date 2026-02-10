@@ -6,6 +6,7 @@ import com.example.db.OutboxRepository
 import com.example.domain.OutboxMessage
 import com.example.domain.OutboxMessageStatus
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.mockk.mockk
 import io.ktor.server.application.Application
@@ -17,6 +18,38 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 
 class OutboxWorkerTest {
+
+    @Test
+    fun `stale finalize is skipped after reclaim and current attempt can finalize`(): Unit = runBlocking {
+        val clock = OutboxTestClock(Instant.parse("2024-01-01T00:00:00Z"))
+        val repository = FakeOutboxRepository()
+        val id = repository.insert("noop.test", "{\"stale\":true}", clock.instant())
+        repository.forceState(
+            id = id,
+            status = OutboxMessageStatus.PROCESSING,
+            attempts = 1,
+            nextAttemptAt = clock.instant().minusSeconds(1)
+        )
+
+        val reclaimed = repository.fetchDueBatch(
+            limit = 1,
+            now = clock.instant(),
+            processingLeaseUntil = clock.instant().plusSeconds(60)
+        ).single()
+
+        reclaimed.attempts shouldBeGreaterThan 1
+        repository.reschedule(
+            id = id,
+            expectedAttempts = reclaimed.attempts - 1,
+            nextAttemptAt = clock.instant().plusSeconds(120),
+            lastError = "stale"
+        ) shouldBe false
+        repository.message(id).status shouldBe OutboxMessageStatus.PROCESSING
+        repository.message(id).attempts shouldBe reclaimed.attempts
+
+        repository.markDone(id = id, expectedAttempts = reclaimed.attempts) shouldBe true
+        repository.message(id).status shouldBe OutboxMessageStatus.DONE
+    }
 
     @Test
     fun `worker reclaims stale processing message with expired lease`(): Unit = runBlocking {
@@ -175,24 +208,35 @@ private class FakeOutboxRepository : OutboxRepository {
         }
     }
 
-    override suspend fun markDone(id: Long) {
+    override suspend fun markDone(id: Long, expectedAttempts: Int): Boolean {
         val message = checkNotNull(storage[id])
+        if (message.status != OutboxMessageStatus.PROCESSING || message.attempts != expectedAttempts) {
+            return false
+        }
         storage[id] = message.copy(status = OutboxMessageStatus.DONE, lastError = null)
+        return true
     }
 
-    override suspend fun reschedule(id: Long, attempts: Int, nextAttemptAt: Instant, lastError: String) {
+    override suspend fun reschedule(id: Long, expectedAttempts: Int, nextAttemptAt: Instant, lastError: String): Boolean {
         val message = checkNotNull(storage[id])
+        if (message.status != OutboxMessageStatus.PROCESSING || message.attempts != expectedAttempts) {
+            return false
+        }
         storage[id] = message.copy(
             status = OutboxMessageStatus.NEW,
-            attempts = attempts,
             nextAttemptAt = nextAttemptAt,
             lastError = lastError
         )
+        return true
     }
 
-    override suspend fun markFailed(id: Long, lastError: String) {
+    override suspend fun markFailed(id: Long, expectedAttempts: Int, lastError: String): Boolean {
         val message = checkNotNull(storage[id])
+        if (message.status != OutboxMessageStatus.PROCESSING || message.attempts != expectedAttempts) {
+            return false
+        }
         storage[id] = message.copy(status = OutboxMessageStatus.FAILED, lastError = lastError)
+        return true
     }
 
     override suspend fun countBacklog(now: Instant): Long = storage.values
