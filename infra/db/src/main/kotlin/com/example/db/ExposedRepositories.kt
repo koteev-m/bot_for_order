@@ -1928,33 +1928,43 @@ class OutboxRepositoryExposed(private val tx: DatabaseTx) : OutboxRepository {
         } ?: emptyList()
     }
 
-    override suspend fun markDone(id: Long) {
-        tx.tx {
-            OutboxMessageTable.update({ OutboxMessageTable.id eq id }) {
+    override suspend fun markDone(id: Long, expectedAttempts: Int): Boolean = tx.tx {
+        OutboxMessageTable.update({
+            (OutboxMessageTable.id eq id) and
+                (OutboxMessageTable.status eq OutboxMessageStatus.PROCESSING.name) and
+                (OutboxMessageTable.attempts eq expectedAttempts)
+        }) {
                 it[status] = OutboxMessageStatus.DONE.name
                 it[lastError] = null
-            }
-        }
+        } > 0
     }
 
-    override suspend fun reschedule(id: Long, attempts: Int, nextAttemptAt: Instant, lastError: String) {
-        tx.tx {
-            OutboxMessageTable.update({ OutboxMessageTable.id eq id }) {
+    override suspend fun reschedule(
+        id: Long,
+        expectedAttempts: Int,
+        nextAttemptAt: Instant,
+        lastError: String
+    ): Boolean = tx.tx {
+        OutboxMessageTable.update({
+            (OutboxMessageTable.id eq id) and
+                (OutboxMessageTable.status eq OutboxMessageStatus.PROCESSING.name) and
+                (OutboxMessageTable.attempts eq expectedAttempts)
+        }) {
                 it[status] = OutboxMessageStatus.NEW.name
-                it[OutboxMessageTable.attempts] = attempts
                 it[OutboxMessageTable.nextAttemptAt] = nextAttemptAt
                 it[OutboxMessageTable.lastError] = lastError
-            }
-        }
+        } > 0
     }
 
-    override suspend fun markFailed(id: Long, lastError: String) {
-        tx.tx {
-            OutboxMessageTable.update({ OutboxMessageTable.id eq id }) {
+    override suspend fun markFailed(id: Long, expectedAttempts: Int, lastError: String): Boolean = tx.tx {
+        OutboxMessageTable.update({
+            (OutboxMessageTable.id eq id) and
+                (OutboxMessageTable.status eq OutboxMessageStatus.PROCESSING.name) and
+                (OutboxMessageTable.attempts eq expectedAttempts)
+        }) {
                 it[status] = OutboxMessageStatus.FAILED.name
                 it[OutboxMessageTable.lastError] = lastError
-            }
-        }
+        } > 0
     }
 
     override suspend fun countBacklog(now: Instant): Long = tx.tx {

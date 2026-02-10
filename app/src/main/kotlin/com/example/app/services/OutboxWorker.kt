@@ -83,16 +83,38 @@ class OutboxWorker(
         due.forEach { message ->
             val handler = handlerRegistry.find(message.type)
             if (handler == null) {
-                outboxRepository.markFailed(message.id, trimError("no handler for type=${message.type}"))
-                failedCounter?.increment()
-                log.error("outbox_message_failed id={} type={} reason=no_handler", message.id, message.type)
+                val marked = outboxRepository.markFailed(
+                    id = message.id,
+                    expectedAttempts = message.attempts,
+                    lastError = trimError("no handler for type=${message.type}")
+                )
+                if (marked) {
+                    failedCounter?.increment()
+                    log.error("outbox_message_failed id={} type={} reason=no_handler", message.id, message.type)
+                } else {
+                    log.debug(
+                        "outbox_finalize_skipped_stale_attempt id={} type={} expected_attempts={}",
+                        message.id,
+                        message.type,
+                        message.attempts
+                    )
+                }
                 return@forEach
             }
             runCatching {
                 handler.handle(message.payloadJson)
-                outboxRepository.markDone(message.id)
-                doneCounter?.increment()
-                log.info("outbox_message_done id={} type={} attempts={}", message.id, message.type, message.attempts)
+                val marked = outboxRepository.markDone(message.id, message.attempts)
+                if (marked) {
+                    doneCounter?.increment()
+                    log.info("outbox_message_done id={} type={} attempts={}", message.id, message.type, message.attempts)
+                } else {
+                    log.debug(
+                        "outbox_finalize_skipped_stale_attempt id={} type={} expected_attempts={}",
+                        message.id,
+                        message.type,
+                        message.attempts
+                    )
+                }
             }.onFailure { error ->
                 if (error is CancellationException) throw error
                 onFailure(message, error)
@@ -103,32 +125,50 @@ class OutboxWorker(
     private suspend fun onFailure(message: OutboxMessage, error: Throwable) {
         val errorText = trimError(error.message ?: error.javaClass.simpleName)
         if (message.attempts >= config.outbox.maxAttempts) {
-            outboxRepository.markFailed(message.id, errorText)
-            failedCounter?.increment()
-            log.error(
-                "outbox_message_failed id={} type={} attempts={} reason=max_attempts",
-                message.id,
-                message.type,
-                message.attempts
-            )
+            val marked = outboxRepository.markFailed(message.id, message.attempts, errorText)
+            if (marked) {
+                failedCounter?.increment()
+                log.error(
+                    "outbox_message_failed id={} type={} attempts={} reason=max_attempts",
+                    message.id,
+                    message.type,
+                    message.attempts
+                )
+            } else {
+                log.debug(
+                    "outbox_finalize_skipped_stale_attempt id={} type={} expected_attempts={}",
+                    message.id,
+                    message.type,
+                    message.attempts
+                )
+            }
             return
         }
 
         val nextAttemptAt = clock.instant().plusMillis(computeBackoffMs(message.attempts))
-        outboxRepository.reschedule(
+        val rescheduled = outboxRepository.reschedule(
             id = message.id,
-            attempts = message.attempts,
+            expectedAttempts = message.attempts,
             nextAttemptAt = nextAttemptAt,
             lastError = errorText
         )
-        retriedCounter?.increment()
-        log.warn(
-            "outbox_message_retry id={} type={} attempts={} next_attempt_at={}",
-            message.id,
-            message.type,
-            message.attempts,
-            nextAttemptAt
-        )
+        if (rescheduled) {
+            retriedCounter?.increment()
+            log.warn(
+                "outbox_message_retry id={} type={} attempts={} next_attempt_at={}",
+                message.id,
+                message.type,
+                message.attempts,
+                nextAttemptAt
+            )
+        } else {
+            log.debug(
+                "outbox_finalize_skipped_stale_attempt id={} type={} expected_attempts={}",
+                message.id,
+                message.type,
+                message.attempts
+            )
+        }
     }
 
     private fun computeBackoffMs(attempts: Int): Long {
