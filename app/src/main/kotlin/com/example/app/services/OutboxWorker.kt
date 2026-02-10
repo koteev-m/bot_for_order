@@ -188,10 +188,14 @@ class OutboxWorker(
 
 fun Application.installOutboxWorker(cfg: AppConfig) {
     val outboxRepository by inject<OutboxRepository>()
+    val telegramHandlers by inject<TelegramOutboxHandlers>()
     val meterRegistry = runCatching { inject<MeterRegistry>().value }.getOrNull()
     val handlerRegistry = OutboxHandlerRegistry(
         handlers = mapOf(
-            "noop.test" to OutboxHandler { _ -> Unit }
+            "noop.test" to OutboxHandler { _ -> Unit },
+            TelegramOutboxHandlers.TELEGRAM_PUBLISH_ALBUM to OutboxHandler { telegramHandlers.publishAlbum(it) },
+            TelegramOutboxHandlers.TELEGRAM_PIN_MESSAGE to OutboxHandler { telegramHandlers.pinMessage(it) },
+            TelegramOutboxHandlers.TELEGRAM_EDIT_REPLY_MARKUP to OutboxHandler { telegramHandlers.editReplyMarkup(it) }
         )
     )
     OutboxWorker(
