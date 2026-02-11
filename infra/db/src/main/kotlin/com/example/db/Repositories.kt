@@ -132,6 +132,16 @@ interface OrdersRepository {
         offset: Long
     ): List<Order>
     suspend fun setStatus(id: String, status: OrderStatus)
+    suspend fun setStatusWithOutbox(
+        id: String,
+        status: OrderStatus,
+        actorId: Long,
+        comment: String?,
+        statusChangedAt: Instant,
+        outboxType: String,
+        outboxPayloadJson: String,
+        outboxNow: Instant
+    )
     suspend fun setInvoiceMessage(id: String, invoiceMessageId: Int)
     suspend fun markPaid(id: String, provider: String, providerChargeId: String, telegramPaymentChargeId: String)
     suspend fun setPaymentClaimed(orderId: String, claimedAt: Instant): Boolean
