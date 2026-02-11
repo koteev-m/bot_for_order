@@ -53,6 +53,11 @@ data class PaymentClaimAttachment(
     val bytes: ByteArray
 )
 
+private data class NormalizedClaimInput(
+    val txid: String?,
+    val comment: String?
+)
+
 class ManualPaymentsService(
     private val dbTx: DatabaseTx,
     private val ordersRepository: OrdersRepository,
@@ -146,7 +151,6 @@ class ManualPaymentsService(
         comment: String?,
         attachments: List<PaymentClaimAttachment>
     ): OrderPaymentClaim {
-        validateClaimInput(txid, comment, attachments)
         return lockManager.withLock("order:$orderId:payment_claim", LOCK_WAIT_MS, LOCK_LEASE_MS) {
             val order = ordersRepository.get(orderId) ?: throw ApiError("order_not_found", HttpStatusCode.NotFound)
             ensureOwner(order, buyerId)
@@ -154,6 +158,7 @@ class ManualPaymentsService(
                 ?: throw ApiError("payment_method_not_selected", HttpStatusCode.Conflict)
             val method = paymentMethodsRepository.getEnabledMethod(order.merchantId, methodType)
                 ?: throw ApiError("payment_method_unavailable", HttpStatusCode.Conflict)
+            val normalized = validateClaimInput(methodType, txid, comment, attachments)
             if (order.status == OrderStatus.PAYMENT_UNDER_REVIEW) {
                 val existing = paymentClaimsRepository.getSubmittedByOrder(orderId)
                 if (existing != null) return@withLock existing
@@ -167,7 +172,7 @@ class ManualPaymentsService(
             }
 
             val now = Instant.now(clock)
-            val claim = createSubmittedClaim(orderId, methodType, txid, comment, now)
+            val claim = createSubmittedClaim(orderId, methodType, normalized.txid, normalized.comment, now)
             ordersRepository.setPaymentClaimed(orderId, now)
             ordersRepository.setStatus(orderId, OrderStatus.PAYMENT_UNDER_REVIEW)
             appendHistory(orderId, OrderStatus.PAYMENT_UNDER_REVIEW, "payment_claim_submitted", buyerId)
@@ -351,13 +356,32 @@ class ManualPaymentsService(
         return claim.copy(id = id)
     }
 
-    private fun validateClaimInput(txid: String?, comment: String?, attachments: List<PaymentClaimAttachment>) {
-        if (txid != null && txid.length > MAX_TXID_LENGTH) {
-            throw ApiError("invalid_txid")
+    private fun validateClaimInput(
+        methodType: PaymentMethodType,
+        txid: String?,
+        comment: String?,
+        attachments: List<PaymentClaimAttachment>
+    ): NormalizedClaimInput {
+        val normalizedTxid = txid?.trim().orEmpty()
+        val resolvedTxid = if (normalizedTxid.isEmpty()) {
+            if (methodType.isCrypto()) {
+                throw ApiError("txid_required")
+            }
+            null
+        } else {
+            if (normalizedTxid.length > MAX_TXID_LENGTH || !normalizedTxid.isAsciiToken()) {
+                throw ApiError("invalid_txid")
+            }
+            normalizedTxid
         }
-        if (comment != null && comment.length > MAX_COMMENT_LENGTH) {
-            throw ApiError("invalid_comment")
+
+        val normalizedComment = comment?.trim()
+        if (normalizedComment != null) {
+            if (normalizedComment.isEmpty() || normalizedComment.length > MAX_COMMENT_LENGTH || !normalizedComment.isValidComment()) {
+                throw ApiError("invalid_comment")
+            }
         }
+
         if (attachments.size > MAX_ATTACHMENTS) {
             throw ApiError("too_many_attachments")
         }
@@ -370,6 +394,19 @@ class ManualPaymentsService(
                 throw ApiError("attachment_too_large")
             }
         }
+
+        return NormalizedClaimInput(
+            txid = resolvedTxid,
+            comment = normalizedComment
+        )
+    }
+
+    private fun PaymentMethodType.isCrypto(): Boolean = this == PaymentMethodType.MANUAL_CRYPTO
+
+    private fun String.isAsciiToken(): Boolean = all { it.code in 33..126 }
+
+    private fun String.isValidComment(): Boolean = all { char ->
+        char == '\n' || char == '\r' || char == '\t' || !char.isISOControl()
     }
 
     private fun normalizeMimeType(value: String): String {
