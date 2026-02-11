@@ -2,10 +2,11 @@ package com.example.app.services
 
 import com.example.bots.TelegramClients
 import com.example.db.OutboxRepository
-import com.example.domain.OrderStatus
 import com.pengrad.telegrambot.request.SendMessage
 import io.micrometer.core.instrument.MeterRegistry
 import java.time.Instant
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -16,7 +17,7 @@ import org.slf4j.LoggerFactory
 data class BuyerStatusNotificationPayload(
     val orderId: String,
     val buyerUserId: Long,
-    val status: OrderStatus,
+    val status: String,
     val comment: String? = null,
     val locale: String? = null
 )
@@ -56,9 +57,13 @@ class BuyerStatusNotificationOutbox(
     fun payloadJson(payload: BuyerStatusNotificationPayload): String =
         outboxJson.encodeToString(BuyerStatusNotificationPayload.serializer(), payload)
 
-    fun handle(payloadJson: String) {
+    suspend fun handle(payloadJson: String) {
         val payload = outboxJson.decodeFromString(BuyerStatusNotificationPayload.serializer(), payloadJson)
-        val template = STATUS_NOTIFICATIONS[payload.status] ?: return
+        val template = STATUS_NOTIFICATIONS[payload.status]
+        if (template == null) {
+            log.debug("buyer_status_notification_unknown_status status={}", payload.status)
+            return
+        }
         val message = buildString {
             append(template)
             val note = payload.comment?.takeIf { it.isNotBlank() }
@@ -69,7 +74,9 @@ class BuyerStatusNotificationOutbox(
             }
         }
         runCatching {
-            val response = clients.shopBot.execute(SendMessage(payload.buyerUserId, message))
+            val response = withContext(Dispatchers.IO) {
+                clients.shopBot.execute(SendMessage(payload.buyerUserId, message))
+            }
             check(response.isOk) {
                 "code=${response.errorCode()} desc=${response.description()}"
             }
@@ -91,13 +98,13 @@ class BuyerStatusNotificationOutbox(
     companion object {
         const val BUYER_STATUS_NOTIFICATION = "buyer_status_notification"
 
-        private val STATUS_NOTIFICATIONS: Map<OrderStatus, String> = mapOf(
-            OrderStatus.paid to "✅ Оплата получена. Заказ передан на комплектацию.",
-            OrderStatus.PAID_CONFIRMED to "✅ Оплата получена. Заказ передан на комплектацию.",
-            OrderStatus.fulfillment to "📦 Заказ в комплектации.",
-            OrderStatus.shipped to "🚚 Заказ отправлен.",
-            OrderStatus.delivered to "📬 Заказ доставлен. Спасибо за покупку!",
-            OrderStatus.canceled to "❌ Заказ отменён."
+        private val STATUS_NOTIFICATIONS: Map<String, String> = mapOf(
+            "paid" to "✅ Оплата получена. Заказ передан на комплектацию.",
+            "PAID_CONFIRMED" to "✅ Оплата получена. Заказ передан на комплектацию.",
+            "fulfillment" to "📦 Заказ в комплектации.",
+            "shipped" to "🚚 Заказ отправлен.",
+            "delivered" to "📬 Заказ доставлен. Спасибо за покупку!",
+            "canceled" to "❌ Заказ отменён."
         )
     }
 }
