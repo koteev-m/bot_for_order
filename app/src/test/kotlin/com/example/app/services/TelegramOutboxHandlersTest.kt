@@ -31,6 +31,8 @@ import io.mockk.verify
 import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.jupiter.api.Test
 
 class TelegramOutboxHandlersTest {
@@ -39,7 +41,6 @@ class TelegramOutboxHandlersTest {
     fun `publish album retry does not send album twice`() = runBlocking {
         val itemId = "item-1"
         val channelId = -100123L
-        val operationId = "op-fixed"
 
         val itemsRepository = mockk<ItemsRepository>()
         val mediaRepository = mockk<ItemMediaRepository>()
@@ -156,10 +157,10 @@ class TelegramOutboxHandlersTest {
             meterRegistry = null
         )
 
-        val payloadJson = Json.encodeToString(
-            TelegramPublishAlbumPayload.serializer(),
-            TelegramPublishAlbumPayload(itemId = itemId, channelId = channelId, operationId = operationId)
-        )
+        val payloadJson = buildJsonObject {
+            put("itemId", itemId)
+            put("channelId", channelId)
+        }.toString()
 
         runCatching { handlers.publishAlbum(payloadJson) }.exceptionOrNull()?.message shouldBe "enqueue failed"
         handlers.publishAlbum(payloadJson)

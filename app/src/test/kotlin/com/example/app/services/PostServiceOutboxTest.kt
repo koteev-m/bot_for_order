@@ -65,7 +65,7 @@ class PostServiceOutboxTest {
         val payload = Json.decodeFromString(TelegramPublishAlbumPayload.serializer(), capturedPayloads.single())
         payload.itemId shouldBe "item-1"
         payload.channelId shouldBe baseTestConfig().telegram.channelId
-        payload.operationId.isNotBlank() shouldBe true
+        payload.operationId?.isNotBlank() shouldBe true
         outboxId shouldBe 1L
     }
 
