@@ -90,6 +90,8 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.isNotNull
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.less
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.lessEq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inSubQuery
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.plus
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.and
@@ -1753,6 +1755,74 @@ class WatchlistRepositoryExposed(private val tx: DatabaseTx) : WatchlistReposito
 private fun <T> InsertStatement<*>.requireGeneratedId(column: Column<T>): T =
     resultedValues?.singleOrNull()?.get(column)
         ?: error("Failed to obtain generated value for ${column.name}")
+
+class DataRetentionRepositoryExposed(private val tx: DatabaseTx) : DataRetentionRepository {
+    override suspend fun anonymizeAuditLog(before: Instant): Int = tx.tx {
+        AuditLogTable.update({
+            (AuditLogTable.createdAt less before) and
+                (AuditLogTable.ip.isNotNull() or AuditLogTable.userAgent.isNotNull())
+        }) {
+            it[AuditLogTable.ip] = null
+            it[AuditLogTable.userAgent] = null
+        }
+    }
+
+    override suspend fun anonymizeOrderAddressForCompleted(before: Instant, statuses: List<OrderStatus>): Int = tx.tx {
+        if (statuses.isEmpty()) {
+            return@tx 0
+        }
+        OrdersTable.update({
+            (OrdersTable.updatedAt less before) and
+                (OrdersTable.status inList statuses.map { it.name }) and
+                OrdersTable.addressJson.isNotNull()
+        }) {
+            it[OrdersTable.addressJson] = null
+        }
+    }
+
+    override suspend fun anonymizeOrderDeliveryForCompleted(before: Instant, statuses: List<OrderStatus>): Int = tx.tx {
+        if (statuses.isEmpty()) {
+            return@tx 0
+        }
+        val eligibleOrders = OrdersTable
+            .slice(OrdersTable.id)
+            .selectAll()
+            .where {
+                (OrdersTable.updatedAt less before) and
+                    (OrdersTable.status inList statuses.map { it.name })
+            }
+        OrderDeliveryTable.update({
+            (OrderDeliveryTable.orderId inSubQuery eligibleOrders) and
+                (OrderDeliveryTable.fieldsJson neq "{}")
+        }) {
+            it[OrderDeliveryTable.fieldsJson] = "{}"
+            it[OrderDeliveryTable.updatedAt] = CurrentTimestamp()
+        }
+    }
+
+    override suspend fun purgeOutbox(before: Instant): Int = tx.tx {
+        OutboxMessageTable.deleteWhere {
+            (OutboxMessageTable.createdAt less before) and
+                ((OutboxMessageTable.status eq OutboxMessageStatus.DONE.name) or
+                    (OutboxMessageTable.status eq OutboxMessageStatus.FAILED.name))
+        }
+    }
+
+    override suspend fun purgeWebhookDedup(processedBefore: Instant, staleProcessingBefore: Instant): Int = tx.tx {
+        TelegramWebhookDedupTable.deleteWhere {
+            ((TelegramWebhookDedupTable.processedAt.isNotNull()) and
+                (TelegramWebhookDedupTable.processedAt less processedBefore)) or
+                ((TelegramWebhookDedupTable.processedAt.isNull()) and
+                    (TelegramWebhookDedupTable.createdAt less staleProcessingBefore))
+        }
+    }
+
+    override suspend fun purgeIdempotency(before: Instant): Int = tx.tx {
+        IdempotencyKeyTable.deleteWhere {
+            IdempotencyKeyTable.createdAt less before
+        }
+    }
+}
 
 class AuditLogRepositoryExposed(private val tx: DatabaseTx) : AuditLogRepository {
     override suspend fun insert(entry: AuditLogEntry): Long = tx.tx {

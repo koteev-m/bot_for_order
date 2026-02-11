@@ -24,6 +24,7 @@ object ConfigLoader {
         health = loadHealthConfig(),
         security = loadSecurityConfig(),
         outbox = loadOutboxConfig(),
+        retention = loadRetentionConfig(),
     )
 
     private fun loadTelegramConfig(): TelegramConfig {
@@ -218,6 +219,50 @@ object ConfigLoader {
         processingTtlMs = parsePositiveLongEnv("OUTBOX_PROCESSING_TTL_MS", defaultValue = 600_000)
     )
 
+    private fun loadRetentionConfig(): RetentionConfig = RetentionConfig(
+        purgeEnabled = parseBooleanEnv("RETENTION_PURGE_ENABLED", defaultValue = true),
+        intervalHours = parseBoundedPositiveLongEnv(
+            name = "RETENTION_PURGE_INTERVAL_HOURS",
+            defaultValue = 24,
+            min = 1,
+            max = 168
+        ),
+        pii = RetentionPiiConfig(
+            auditLogDays = parseBoundedPositiveLongEnv(
+                name = "RETENTION_AUDIT_LOG_DAYS",
+                defaultValue = 30,
+                min = 1,
+                max = 3650
+            ),
+            orderDeliveryDays = parseBoundedPositiveLongEnv(
+                name = "RETENTION_ORDER_DELIVERY_DAYS",
+                defaultValue = 180,
+                min = 1,
+                max = 3650
+            )
+        ),
+        technical = RetentionTechnicalConfig(
+            outboxDays = parseBoundedPositiveLongEnv(
+                name = "RETENTION_OUTBOX_DAYS",
+                defaultValue = 30,
+                min = 1,
+                max = 3650
+            ),
+            webhookDedupDays = parseBoundedPositiveLongEnv(
+                name = "RETENTION_WEBHOOK_DEDUP_DAYS",
+                defaultValue = 30,
+                min = 1,
+                max = 3650
+            ),
+            idempotencyDays = parseBoundedPositiveLongEnv(
+                name = "RETENTION_IDEMPOTENCY_DAYS",
+                defaultValue = 14,
+                min = 1,
+                max = 3650
+            )
+        )
+    )
+
     private fun loadHealthConfig(): HealthConfig = HealthConfig(
         dbTimeoutMs = parsePositiveLongEnv("HEALTH_DB_TIMEOUT_MS", defaultValue = 500),
         redisTimeoutMs = parsePositiveLongEnv("HEALTH_REDIS_TIMEOUT_MS", defaultValue = 500)
@@ -240,4 +285,10 @@ object ConfigLoader {
     }
 
     private const val DEFAULT_MERCHANT_ID = "default"
+}
+
+private fun parseBoundedPositiveLongEnv(name: String, defaultValue: Long, min: Long, max: Long): Long {
+    val value = parsePositiveLongEnv(name, defaultValue)
+    require(value in min..max) { "Env $name must be in [$min, $max]" }
+    return value
 }

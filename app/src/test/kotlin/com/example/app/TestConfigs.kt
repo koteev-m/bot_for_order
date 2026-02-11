@@ -14,6 +14,9 @@ import com.example.app.config.MerchantsConfig
 import com.example.app.config.MetricsConfig
 import com.example.app.config.PaymentsConfig
 import com.example.app.config.RedisConfig
+import com.example.app.config.RetentionConfig
+import com.example.app.config.RetentionPiiConfig
+import com.example.app.config.RetentionTechnicalConfig
 import com.example.app.config.SecurityConfig
 import com.example.app.config.ServerConfig
 import com.example.app.config.StorageConfig
@@ -118,4 +121,17 @@ internal fun baseTestConfig(
         maxBackoffMs = 5_000,
         processingTtlMs = 600_000
     ),
+    retention = RetentionConfig(
+        purgeEnabled = true,
+        intervalHours = 24,
+        pii = RetentionPiiConfig(
+            auditLogDays = 30,
+            orderDeliveryDays = 180
+        ),
+        technical = RetentionTechnicalConfig(
+            outboxDays = 30,
+            webhookDedupDays = 30,
+            idempotencyDays = 14
+        )
+    )
 )
