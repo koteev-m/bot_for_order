@@ -189,9 +189,19 @@ private suspend fun handleAdminUpdate(
             val pendingDetailsOrderId = deps.paymentDetailsStateStore.get(fromId)
             val pendingRejectOrderId = deps.paymentRejectReasonStateStore.get(fromId)
             if (pendingRejectOrderId != null && text.isNotBlank() && !text.startsWith("/")) {
+                if (!isPaymentActionAllowed(role, "reject")) {
+                    deps.paymentRejectReasonStateStore.clear(fromId)
+                    reply("⛔ Команда недоступна.")
+                    return@runCatching
+                }
                 handlePaymentRejectMessage(call, chatId, fromId, pendingRejectOrderId, text, deps, reply)
                 deps.paymentRejectReasonStateStore.clear(fromId)
             } else if (pendingDetailsOrderId != null && text.isNotBlank() && !text.startsWith("/")) {
+                if (!isPaymentActionAllowed(role, "details")) {
+                    deps.paymentDetailsStateStore.clear(fromId)
+                    reply("⛔ Команда недоступна.")
+                    return@runCatching
+                }
                 handlePaymentDetailsMessage(call, chatId, fromId, pendingDetailsOrderId, text, deps, reply)
                 deps.paymentDetailsStateStore.clear(fromId)
             } else if (text.startsWith("/")) {
