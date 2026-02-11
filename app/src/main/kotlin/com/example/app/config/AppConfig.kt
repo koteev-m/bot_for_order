@@ -20,6 +20,7 @@ data class AppConfig(
     val health: HealthConfig,
     val security: SecurityConfig,
     val outbox: OutboxConfig,
+    val retention: RetentionConfig,
 )
 
 data class TelegramConfig(
@@ -169,4 +170,22 @@ data class OutboxConfig(
     val baseBackoffMs: Long,
     val maxBackoffMs: Long,
     val processingTtlMs: Long,
+)
+
+data class RetentionConfig(
+    val purgeEnabled: Boolean,
+    val intervalHours: Long,
+    val pii: RetentionPiiConfig,
+    val technical: RetentionTechnicalConfig,
+)
+
+data class RetentionPiiConfig(
+    val auditLogDays: Long,
+    val orderDeliveryDays: Long,
+)
+
+data class RetentionTechnicalConfig(
+    val outboxDays: Long,
+    val webhookDedupDays: Long,
+    val idempotencyDays: Long,
 )

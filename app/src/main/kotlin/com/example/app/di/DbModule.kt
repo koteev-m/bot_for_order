@@ -9,6 +9,8 @@ import com.example.db.CartsRepository
 import com.example.db.CartsRepositoryExposed
 import com.example.db.CartItemsRepository
 import com.example.db.CartItemsRepositoryExposed
+import com.example.db.DataRetentionRepository
+import com.example.db.DataRetentionRepositoryExposed
 import com.example.db.AdminUsersRepository
 import com.example.db.AdminUsersRepositoryExposed
 import com.example.db.ItemMediaRepository
@@ -115,5 +117,6 @@ fun dbModule(cfg: AppConfig) = module {
     single<IdempotencyRepository> { IdempotencyRepositoryExposed(get()) }
     single<TelegramWebhookDedupRepository> { TelegramWebhookDedupRepositoryExposed(get()) }
     single<OutboxRepository> { OutboxRepositoryExposed(get()) }
+    single<DataRetentionRepository> { DataRetentionRepositoryExposed(get()) }
     single<TelegramPublishAlbumStateRepository> { TelegramPublishAlbumStateRepositoryExposed(get()) }
 }

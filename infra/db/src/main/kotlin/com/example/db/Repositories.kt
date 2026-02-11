@@ -289,6 +289,16 @@ interface IdempotencyRepository {
     ): Boolean
 }
 
+
+interface DataRetentionRepository {
+    suspend fun anonymizeAuditLog(before: Instant): Int
+    suspend fun anonymizeOrderAddressForCompleted(before: Instant, statuses: List<OrderStatus>): Int
+    suspend fun anonymizeOrderDeliveryForCompleted(before: Instant, statuses: List<OrderStatus>): Int
+    suspend fun purgeOutbox(before: Instant): Int
+    suspend fun purgeWebhookDedup(processedBefore: Instant, staleProcessingBefore: Instant): Int
+    suspend fun purgeIdempotency(before: Instant): Int
+}
+
 interface TelegramWebhookDedupRepository {
     suspend fun tryAcquire(
         botType: String,
