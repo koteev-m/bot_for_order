@@ -401,6 +401,28 @@ object OutboxMessageTable : Table("outbox_message") {
     }
 }
 
+object TelegramPublishAlbumStateTable : Table("telegram_publish_album_state") {
+    val operationId = varchar("operation_id", 64)
+    val itemId = varchar("item_id", 64)
+    val channelId = long("channel_id")
+    val messageIdsJson = text("message_ids_json").nullable()
+    val firstMessageId = integer("first_message_id").nullable()
+    val addToken = text("add_token").nullable()
+    val buyToken = text("buy_token").nullable()
+    val postInserted = bool("post_inserted")
+    val editEnqueued = bool("edit_enqueued")
+    val pinEnqueued = bool("pin_enqueued")
+    val createdAt = timestamp("created_at")
+    val updatedAt = timestamp("updated_at")
+
+    override val primaryKey = PrimaryKey(operationId)
+
+    init {
+        index(false, itemId)
+        index(false, channelId)
+    }
+}
+
 object TelegramWebhookDedupTable : Table("telegram_webhook_dedup") {
     val botType = varchar("bot_type", 32)
     val updateId = long("update_id")

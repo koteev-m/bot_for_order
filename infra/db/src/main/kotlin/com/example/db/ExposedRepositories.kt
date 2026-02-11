@@ -26,6 +26,7 @@ import com.example.db.tables.PostsTable
 import com.example.db.tables.PricesDisplayTable
 import com.example.db.tables.StorefrontsTable
 import com.example.db.tables.TelegramWebhookDedupTable
+import com.example.db.tables.TelegramPublishAlbumStateTable
 import com.example.db.tables.VariantsTable
 import com.example.db.tables.WatchlistTable
 import com.example.db.tables.BuyerDeliveryProfileTable
@@ -1977,6 +1978,115 @@ class OutboxRepositoryExposed(private val tx: DatabaseTx) : OutboxRepository {
             .count()
         count
     }
+}
+
+class TelegramPublishAlbumStateRepositoryExposed(private val tx: DatabaseTx) : TelegramPublishAlbumStateRepository {
+    override suspend fun upsertOperation(operationId: String, itemId: String, channelId: Long, now: Instant) {
+        tx.tx {
+            val sql = """
+                INSERT INTO telegram_publish_album_state (
+                    operation_id,
+                    item_id,
+                    channel_id,
+                    message_ids_json,
+                    first_message_id,
+                    add_token,
+                    buy_token,
+                    post_inserted,
+                    edit_enqueued,
+                    pin_enqueued,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, NULL, NULL, NULL, NULL, FALSE, FALSE, FALSE, ?, ?)
+                ON CONFLICT (operation_id)
+                DO UPDATE SET
+                    item_id = EXCLUDED.item_id,
+                    channel_id = EXCLUDED.channel_id,
+                    updated_at = EXCLUDED.updated_at
+            """.trimIndent()
+            exec(
+                sql,
+                listOf(
+                    TelegramPublishAlbumStateTable.operationId.columnType to operationId,
+                    TelegramPublishAlbumStateTable.itemId.columnType to itemId,
+                    TelegramPublishAlbumStateTable.channelId.columnType to channelId,
+                    TelegramPublishAlbumStateTable.createdAt.columnType to now,
+                    TelegramPublishAlbumStateTable.updatedAt.columnType to now
+                )
+            )
+        }
+    }
+
+    override suspend fun getByOperationId(operationId: String): TelegramPublishAlbumState? = tx.tx {
+        TelegramPublishAlbumStateTable
+            .selectAll()
+            .where { TelegramPublishAlbumStateTable.operationId eq operationId }
+            .singleOrNull()
+            ?.toState()
+    }
+
+    override suspend fun saveMessages(operationId: String, messageIdsJson: String, firstMessageId: Int, now: Instant) {
+        tx.tx {
+            TelegramPublishAlbumStateTable.update({ TelegramPublishAlbumStateTable.operationId eq operationId }) {
+                it[TelegramPublishAlbumStateTable.messageIdsJson] = messageIdsJson
+                it[TelegramPublishAlbumStateTable.firstMessageId] = firstMessageId
+                it[TelegramPublishAlbumStateTable.updatedAt] = now
+            }
+        }
+    }
+
+    override suspend fun saveAddToken(operationId: String, addToken: String, now: Instant) {
+        tx.tx {
+            TelegramPublishAlbumStateTable.update({ TelegramPublishAlbumStateTable.operationId eq operationId }) {
+                it[TelegramPublishAlbumStateTable.addToken] = addToken
+                it[TelegramPublishAlbumStateTable.updatedAt] = now
+            }
+        }
+    }
+
+    override suspend fun saveBuyToken(operationId: String, buyToken: String, now: Instant) {
+        tx.tx {
+            TelegramPublishAlbumStateTable.update({ TelegramPublishAlbumStateTable.operationId eq operationId }) {
+                it[TelegramPublishAlbumStateTable.buyToken] = buyToken
+                it[TelegramPublishAlbumStateTable.updatedAt] = now
+            }
+        }
+    }
+
+    override suspend fun markPostInserted(operationId: String, now: Instant) {
+        markFlag(operationId, now, TelegramPublishAlbumStateTable.postInserted)
+    }
+
+    override suspend fun markEditEnqueued(operationId: String, now: Instant) {
+        markFlag(operationId, now, TelegramPublishAlbumStateTable.editEnqueued)
+    }
+
+    override suspend fun markPinEnqueued(operationId: String, now: Instant) {
+        markFlag(operationId, now, TelegramPublishAlbumStateTable.pinEnqueued)
+    }
+
+    private suspend fun markFlag(operationId: String, now: Instant, column: Column<Boolean>) {
+        tx.tx {
+            TelegramPublishAlbumStateTable.update({ TelegramPublishAlbumStateTable.operationId eq operationId }) {
+                it[column] = true
+                it[TelegramPublishAlbumStateTable.updatedAt] = now
+            }
+        }
+    }
+
+    private fun ResultRow.toState(): TelegramPublishAlbumState = TelegramPublishAlbumState(
+        operationId = this[TelegramPublishAlbumStateTable.operationId],
+        itemId = this[TelegramPublishAlbumStateTable.itemId],
+        channelId = this[TelegramPublishAlbumStateTable.channelId],
+        messageIdsJson = this[TelegramPublishAlbumStateTable.messageIdsJson],
+        firstMessageId = this[TelegramPublishAlbumStateTable.firstMessageId],
+        addToken = this[TelegramPublishAlbumStateTable.addToken],
+        buyToken = this[TelegramPublishAlbumStateTable.buyToken],
+        postInserted = this[TelegramPublishAlbumStateTable.postInserted],
+        editEnqueued = this[TelegramPublishAlbumStateTable.editEnqueued],
+        pinEnqueued = this[TelegramPublishAlbumStateTable.pinEnqueued]
+    )
 }
 
 class TelegramWebhookDedupRepositoryExposed(private val tx: DatabaseTx) : TelegramWebhookDedupRepository {
