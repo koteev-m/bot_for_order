@@ -10,6 +10,7 @@ import com.example.db.StorefrontsRepository
 import com.example.domain.ItemStatus
 import io.micrometer.core.instrument.MeterRegistry
 import java.time.Instant
+import java.util.UUID
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 
@@ -47,7 +48,7 @@ class PostService(
         val error: String? = null
     )
 
-    suspend fun postItemAlbumToChannel(itemId: String): List<Int> {
+    suspend fun postItemAlbumToChannel(itemId: String): Long {
         val channelId = config.telegram.channelId
         return postItemAlbumToChannel(itemId, channelId)
     }
@@ -70,7 +71,7 @@ class PostService(
         }
     }
 
-    private suspend fun postItemAlbumToChannel(itemId: String, channelId: Long): List<Int> {
+    private suspend fun postItemAlbumToChannel(itemId: String, channelId: Long): Long {
         val item = itemsRepository.getById(itemId)
             ?: error("Item not found: $itemId")
         require(item.status != ItemStatus.sold) { "Item is sold" }
@@ -78,9 +79,9 @@ class PostService(
         val media = itemMediaRepository.listByItem(itemId)
         require(media.size in 1..10) { "Item $itemId must have 1..10 media (have ${media.size})" }
 
-        val payload = TelegramPublishAlbumPayload(itemId = itemId, channelId = channelId)
+        val payload = TelegramPublishAlbumPayload(itemId = itemId, channelId = channelId, operationId = UUID.randomUUID().toString())
         val payloadJson = outboxJson.encodeToString(TelegramPublishAlbumPayload.serializer(), payload)
-        runCatching {
+        return runCatching {
             outboxRepository.insert(TELEGRAM_PUBLISH_ALBUM, payloadJson, Instant.now())
         }.onSuccess {
             enqueueDoneCounter?.increment()
@@ -96,8 +97,7 @@ class PostService(
                 error
             )
             throw error
-        }
-        return emptyList()
+        }.getOrThrow()
     }
 
     companion object {

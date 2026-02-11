@@ -59,12 +59,14 @@ class PostServiceOutboxTest {
             meterRegistry = null
         )
 
-        service.postItemAlbumToChannel("item-1")
+        val outboxId = service.postItemAlbumToChannel("item-1")
 
         coVerify(exactly = 1) { outboxRepository.insert(PostService.TELEGRAM_PUBLISH_ALBUM, any(), any()) }
         val payload = Json.decodeFromString(TelegramPublishAlbumPayload.serializer(), capturedPayloads.single())
         payload.itemId shouldBe "item-1"
         payload.channelId shouldBe baseTestConfig().telegram.channelId
+        payload.operationId.isNotBlank() shouldBe true
+        outboxId shouldBe 1L
     }
 
     @Test

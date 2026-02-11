@@ -59,6 +59,8 @@ import com.example.db.IdempotencyRepositoryExposed
 import com.example.db.TelegramWebhookDedupRepository
 import com.example.db.OutboxRepository
 import com.example.db.OutboxRepositoryExposed
+import com.example.db.TelegramPublishAlbumStateRepository
+import com.example.db.TelegramPublishAlbumStateRepositoryExposed
 import com.example.db.TelegramWebhookDedupRepositoryExposed
 import com.example.domain.watchlist.WatchlistRepository
 import org.flywaydb.core.Flyway
@@ -113,4 +115,5 @@ fun dbModule(cfg: AppConfig) = module {
     single<IdempotencyRepository> { IdempotencyRepositoryExposed(get()) }
     single<TelegramWebhookDedupRepository> { TelegramWebhookDedupRepositoryExposed(get()) }
     single<OutboxRepository> { OutboxRepositoryExposed(get()) }
+    single<TelegramPublishAlbumStateRepository> { TelegramPublishAlbumStateRepositoryExposed(get()) }
 }

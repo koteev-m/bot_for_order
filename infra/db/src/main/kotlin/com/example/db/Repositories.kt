@@ -303,6 +303,30 @@ interface OutboxRepository {
     suspend fun countBacklog(now: Instant): Long
 }
 
+data class TelegramPublishAlbumState(
+    val operationId: String,
+    val itemId: String,
+    val channelId: Long,
+    val messageIdsJson: String?,
+    val firstMessageId: Int?,
+    val addToken: String?,
+    val buyToken: String?,
+    val postInserted: Boolean,
+    val editEnqueued: Boolean,
+    val pinEnqueued: Boolean
+)
+
+interface TelegramPublishAlbumStateRepository {
+    suspend fun upsertOperation(operationId: String, itemId: String, channelId: Long, now: Instant)
+    suspend fun getByOperationId(operationId: String): TelegramPublishAlbumState?
+    suspend fun saveMessages(operationId: String, messageIdsJson: String, firstMessageId: Int, now: Instant)
+    suspend fun saveAddToken(operationId: String, addToken: String, now: Instant)
+    suspend fun saveBuyToken(operationId: String, buyToken: String, now: Instant)
+    suspend fun markPostInserted(operationId: String, now: Instant)
+    suspend fun markEditEnqueued(operationId: String, now: Instant)
+    suspend fun markPinEnqueued(operationId: String, now: Instant)
+}
+
 enum class TelegramWebhookDedupAcquireResult {
     ACQUIRED,
     ALREADY_PROCESSED,

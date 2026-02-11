@@ -14,6 +14,7 @@ import com.example.db.ItemsRepository
 import com.example.db.OutboxRepository
 import com.example.db.PostsRepository
 import com.example.db.StorefrontsRepository
+import com.example.db.TelegramPublishAlbumStateRepository
 import io.micrometer.core.instrument.MeterRegistry
 import org.koin.dsl.module
 
@@ -37,6 +38,7 @@ val adminModule = module {
     }
     single {
         TelegramOutboxHandlers(
+            get(),
             get(),
             get(),
             get(),
