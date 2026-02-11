@@ -45,22 +45,39 @@ class OrderStatusService(
         val payload = BuyerStatusNotificationPayload(
             orderId = order.id,
             buyerUserId = order.userId,
-            status = newStatus,
+            status = newStatus.name,
             comment = comment,
             locale = null
         )
         val payloadJson = buyerStatusNotificationOutbox.payloadJson(payload)
 
-        ordersRepository.setStatusWithOutbox(
-            id = orderId,
-            status = newStatus,
-            actorId = actorId,
-            comment = comment,
-            statusChangedAt = now,
-            outboxType = BuyerStatusNotificationOutbox.BUYER_STATUS_NOTIFICATION,
-            outboxPayloadJson = payloadJson,
-            outboxNow = now
-        )
+        try {
+            ordersRepository.setStatusWithOutbox(
+                id = orderId,
+                status = newStatus,
+                actorId = actorId,
+                comment = comment,
+                statusChangedAt = now,
+                outboxType = BuyerStatusNotificationOutbox.BUYER_STATUS_NOTIFICATION,
+                outboxPayloadJson = payloadJson,
+                outboxNow = now
+            )
+            log.info(
+                "buyer_status_notification_enqueue_done orderId={} status={} outboxType={}",
+                orderId,
+                newStatus,
+                BuyerStatusNotificationOutbox.BUYER_STATUS_NOTIFICATION
+            )
+        } catch (error: Exception) {
+            log.warn(
+                "buyer_status_notification_enqueue_failed orderId={} status={} outboxType={} reason={}",
+                orderId,
+                newStatus,
+                BuyerStatusNotificationOutbox.BUYER_STATUS_NOTIFICATION,
+                error.message
+            )
+            throw error
+        }
 
         if (newStatus == OrderStatus.canceled) {
             val lines = orderLinesRepository.listByOrder(orderId)

@@ -95,7 +95,7 @@ class OrderStatusOutboxTest {
                     val payload = Json.decodeFromString(BuyerStatusNotificationPayload.serializer(), payloadJson)
                     payload.orderId shouldBe "order-1"
                     payload.buyerUserId shouldBe 10L
-                    payload.status shouldBe OrderStatus.fulfillment
+                    payload.status shouldBe "fulfillment"
                     payload.comment shouldBe "Передано в комплектацию"
                     payload.locale shouldBe null
                 },
@@ -125,7 +125,7 @@ class OrderStatusOutboxTest {
             BuyerStatusNotificationPayload(
                 orderId = "order-42",
                 buyerUserId = 101L,
-                status = OrderStatus.delivered,
+                status = "delivered",
                 comment = null,
                 locale = null
             )
@@ -157,6 +157,58 @@ class OrderStatusOutboxTest {
 
         repository.message(id).status shouldBe OutboxMessageStatus.DONE
         verify(exactly = 1) { shopBot.execute(any<SendMessage>()) }
+    }
+
+    @Test
+    fun `worker skips unknown buyer status notification without retry`(): Unit = runBlocking {
+        val clock = LocalOutboxTestClock(Instant.parse("2025-01-01T10:00:00Z"))
+        val repository = LocalFakeOutboxRepository()
+        val clients = mockk<TelegramClients>()
+        val shopBot = mockk<InstrumentedTelegramBot>()
+        every { clients.shopBot } returns shopBot
+
+        val outboxHandler = BuyerStatusNotificationOutbox(
+            outboxRepository = repository,
+            clients = clients,
+            meterRegistry = null
+        )
+        val payloadJson = Json.encodeToString(
+            BuyerStatusNotificationPayload.serializer(),
+            BuyerStatusNotificationPayload(
+                orderId = "order-43",
+                buyerUserId = 101L,
+                status = "UNKNOWN_STATUS",
+                comment = null,
+                locale = null
+            )
+        )
+        val id = repository.insert(BuyerStatusNotificationOutbox.BUYER_STATUS_NOTIFICATION, payloadJson, clock.instant())
+
+        val worker = OutboxWorker(
+            application = mockk<Application>(relaxed = true),
+            outboxRepository = repository,
+            handlerRegistry = OutboxHandlerRegistry(
+                mapOf(BuyerStatusNotificationOutbox.BUYER_STATUS_NOTIFICATION to OutboxHandler { outboxHandler.handle(it) })
+            ),
+            config = baseTestConfig().copy(
+                outbox = OutboxConfig(
+                    enabled = true,
+                    pollIntervalMs = 10,
+                    batchSize = 10,
+                    maxAttempts = 3,
+                    baseBackoffMs = 100,
+                    maxBackoffMs = 1000,
+                    processingTtlMs = 600_000
+                )
+            ),
+            clock = clock,
+            random = Random(1)
+        )
+
+        worker.runOnce()
+
+        repository.message(id).status shouldBe OutboxMessageStatus.DONE
+        verify(exactly = 0) { shopBot.execute(any<SendMessage>()) }
     }
 }
 
