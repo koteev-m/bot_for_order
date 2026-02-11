@@ -1,6 +1,7 @@
 package com.example.app.services
 
 import com.example.app.baseTestConfig
+import com.example.app.api.ApiError
 import com.example.app.testutil.FakeManualPaymentsNotifier
 import com.example.app.testutil.InMemoryHoldService
 import com.example.app.testutil.InMemoryOrderHoldService
@@ -310,7 +311,7 @@ class ManualPaymentsServiceTest : StringSpec({
 
         runBlocking {
             service.selectPaymentMethod(order.id, order.userId, method.type)
-            service.submitClaim(order.id, order.userId, txid = null, comment = "check", attachments = emptyList())
+            service.submitClaim(order.id, order.userId, txid = "tx-check", comment = "check", attachments = emptyList())
             clock.advanceSeconds(30)
             val rejected = service.rejectPayment(order.id, adminId = 1L, reason = "no_match")
             rejected.status shouldBe OrderStatus.AWAITING_PAYMENT
@@ -318,6 +319,55 @@ class ManualPaymentsServiceTest : StringSpec({
             holdService.hasActive(order.id, holdRequests) shouldBe true
             clock.advanceSeconds(20)
             holdService.hasActive(order.id, holdRequests) shouldBe false
+        }
+    }
+
+    "crypto claim without txid returns txid_required".config(enabled = dockerAvailable) {
+        Assumptions.assumeTrue(dockerReady, "Docker недоступен или контейнер не стартовал.")
+        val cfg = baseTestConfig()
+        val crypto = PaymentDetailsCrypto(cfg.manualPayments.detailsEncryptionKey)
+        val merchantId = newMerchantId()
+        insertMerchant(merchantId)
+        val variantId = "var-${UUID.randomUUID()}"
+        insertItemAndVariant(merchantId, variantId, stock = 5)
+        val method = MerchantPaymentMethod(
+            merchantId = merchantId,
+            type = PaymentMethodType.MANUAL_CRYPTO,
+            mode = PaymentMethodMode.AUTO,
+            detailsEncrypted = crypto.encrypt("Wallet"),
+            enabled = true
+        )
+        insertPaymentMethod(method)
+        val order = createOrder(merchantId, 15L, variantId, qty = 1)
+
+        val service = ManualPaymentsService(
+            dbTx,
+            ordersRepository,
+            orderLinesRepository,
+            orderStatusHistoryRepository,
+            merchantsRepository,
+            paymentMethodsRepository,
+            paymentDetailsRepository,
+            paymentClaimsRepository,
+            attachmentsRepository,
+            variantsRepository,
+            InMemoryOrderHoldService(),
+            InMemoryHoldService(),
+            NoopLockManager(),
+            InMemoryEventLogRepository(),
+            InMemoryStorage(),
+            crypto,
+            FakeManualPaymentsNotifier(),
+            Clock.systemUTC()
+        )
+
+        runBlocking {
+            service.selectPaymentMethod(order.id, order.userId, method.type)
+            val error = runCatching {
+                service.submitClaim(order.id, order.userId, txid = "   ", comment = "check", attachments = emptyList())
+            }.exceptionOrNull() as ApiError
+            error.message shouldBe "txid_required"
+            error.status shouldBe io.ktor.http.HttpStatusCode.BadRequest
         }
     }
 
@@ -474,13 +524,13 @@ class ManualPaymentsServiceTest : StringSpec({
 
         runBlocking {
             service.selectPaymentMethod(order.id, order.userId, method.type)
-            service.submitClaim(order.id, order.userId, txid = null, comment = "first", attachments = emptyList())
+            service.submitClaim(order.id, order.userId, txid = "tx-first", comment = "first", attachments = emptyList())
             val firstClaimedAt = ordersRepository.get(order.id)!!.paymentClaimedAt!!
             clock.advanceSeconds(10)
             service.rejectPayment(order.id, adminId = 1L, reason = "no_match")
             ordersRepository.get(order.id)!!.paymentClaimedAt shouldBe null
             clock.advanceSeconds(5)
-            val secondClaim = service.submitClaim(order.id, order.userId, txid = null, comment = "second", attachments = emptyList())
+            val secondClaim = service.submitClaim(order.id, order.userId, txid = "tx-second", comment = "second", attachments = emptyList())
             val refreshed = ordersRepository.get(order.id)!!.paymentClaimedAt
             secondClaim.status shouldBe PaymentClaimStatus.SUBMITTED
             refreshed shouldBe clock.instant()
