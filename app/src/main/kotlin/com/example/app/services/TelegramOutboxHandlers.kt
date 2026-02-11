@@ -30,9 +30,9 @@ import com.pengrad.telegrambot.request.SendMediaGroup
 import com.pengrad.telegrambot.request.SendPhoto
 import com.pengrad.telegrambot.request.SendVideo
 import io.micrometer.core.instrument.MeterRegistry
+import java.security.MessageDigest
 import java.sql.SQLException
 import java.time.Instant
-import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -44,7 +44,7 @@ import org.slf4j.LoggerFactory
 data class TelegramPublishAlbumPayload(
     val itemId: String,
     val channelId: Long,
-    val operationId: String = UUID.randomUUID().toString()
+    val operationId: String? = null
 )
 
 @Serializable
@@ -84,13 +84,17 @@ class TelegramOutboxHandlers(
 
     suspend fun publishAlbum(payloadJson: String) {
         val payload = outboxJson.decodeFromString(TelegramPublishAlbumPayload.serializer(), payloadJson)
+        val operationId = payload.operationId
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: stableLegacyOperationId(payloadJson)
         val item = itemsRepository.getById(payload.itemId)
             ?: error("Item not found: ${payload.itemId}")
         require(item.status != ItemStatus.sold) { "Item is sold" }
 
         val now = Instant.now()
-        publishStateRepository.upsertOperation(payload.operationId, payload.itemId, payload.channelId, now)
-        var state = checkNotNull(publishStateRepository.getByOperationId(payload.operationId))
+        publishStateRepository.upsertOperation(operationId, payload.itemId, payload.channelId, now)
+        var state = checkNotNull(publishStateRepository.getByOperationId(operationId))
 
         val media = itemMediaRepository.listByItem(payload.itemId)
         val messageIds = state.messageIdsJson
@@ -102,7 +106,7 @@ class TelegramOutboxHandlers(
                     else -> error("Item ${payload.itemId} must have 1..10 media (have ${media.size})")
                 }
                 publishStateRepository.saveMessages(
-                    operationId = payload.operationId,
+                    operationId = operationId,
                     messageIdsJson = outboxJson.encodeToString(sentMessageIds),
                     firstMessageId = sentMessageIds.first(),
                     now = now
@@ -114,12 +118,12 @@ class TelegramOutboxHandlers(
             postsRepository.insert(
                 Post(id = 0, merchantId = item.merchantId, itemId = payload.itemId, channelMsgIds = messageIds)
             )
-            publishStateRepository.markPostInserted(payload.operationId, Instant.now())
+            publishStateRepository.markPostInserted(operationId, Instant.now())
         } else if (!state.postInserted) {
-            publishStateRepository.markPostInserted(payload.operationId, Instant.now())
+            publishStateRepository.markPostInserted(operationId, Instant.now())
         }
 
-        state = checkNotNull(publishStateRepository.getByOperationId(payload.operationId))
+        state = checkNotNull(publishStateRepository.getByOperationId(operationId))
 
         val firstMessageId = messageIds.first()
         val storefrontId = resolveStorefrontId(payload.channelId, item.merchantId)
@@ -136,7 +140,7 @@ class TelegramOutboxHandlers(
                 expiresAt = null,
                 metadataJson = "{}"
             )
-        ).token.also { token -> publishStateRepository.saveAddToken(payload.operationId, token, Instant.now()) }
+        ).token.also { token -> publishStateRepository.saveAddToken(operationId, token, Instant.now()) }
 
         val buyToken = state.buyToken ?: linkContextService.create(
             LinkContextCreateRequest(
@@ -150,9 +154,9 @@ class TelegramOutboxHandlers(
                 expiresAt = null,
                 metadataJson = "{}"
             )
-        ).token.also { token -> publishStateRepository.saveBuyToken(payload.operationId, token, Instant.now()) }
+        ).token.also { token -> publishStateRepository.saveBuyToken(operationId, token, Instant.now()) }
 
-        state = checkNotNull(publishStateRepository.getByOperationId(payload.operationId))
+        state = checkNotNull(publishStateRepository.getByOperationId(operationId))
 
         if (!state.editEnqueued) {
             enqueueEdit(
@@ -165,7 +169,7 @@ class TelegramOutboxHandlers(
                     itemId = payload.itemId
                 )
             )
-            publishStateRepository.markEditEnqueued(payload.operationId, Instant.now())
+            publishStateRepository.markEditEnqueued(operationId, Instant.now())
         }
 
         if (!state.pinEnqueued) {
@@ -177,8 +181,13 @@ class TelegramOutboxHandlers(
                     itemId = payload.itemId
                 )
             )
-            publishStateRepository.markPinEnqueued(payload.operationId, Instant.now())
+            publishStateRepository.markPinEnqueued(operationId, Instant.now())
         }
+    }
+
+    private fun stableLegacyOperationId(payloadJson: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(payloadJson.toByteArray(Charsets.UTF_8))
+        return digest.joinToString(separator = "") { "%02x".format(it) }
     }
 
     private suspend fun isPostAlreadyStored(itemId: String, messageIds: List<Int>): Boolean {
