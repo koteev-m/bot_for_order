@@ -11,6 +11,7 @@ import com.example.app.services.PaymentDetailsStateStore
 import com.example.app.services.PaymentRejectReasonStateStore
 import com.example.app.services.PostService
 import com.example.bots.TelegramClients
+import com.example.db.AdminUsersRepository
 import com.example.db.ItemMediaRepository
 import com.example.db.ItemsRepository
 import com.example.db.MerchantsRepository
@@ -60,6 +61,7 @@ class WebhookAuthTest : StringSpec({
                             single { mockk<OrdersRepository>(relaxed = true) }
                             single { mockk<OrderDeliveryRepository>(relaxed = true) }
                             single { mockk<com.example.db.AuditLogRepository>(relaxed = true) }
+                            single { mockk<AdminUsersRepository>(relaxed = true) }
                             single { mockk<TelegramWebhookDedupRepository>(relaxed = true) }
                         }
                     )

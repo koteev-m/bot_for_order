@@ -13,6 +13,7 @@ import com.example.app.services.PostService
 import com.example.app.testutil.InMemoryTelegramWebhookDedupRepository
 import com.example.bots.InstrumentedTelegramBot
 import com.example.bots.TelegramClients
+import com.example.db.AdminUsersRepository
 import com.example.db.ItemMediaRepository
 import com.example.db.OrderDeliveryRepository
 import com.example.db.OrdersRepository
@@ -100,6 +101,7 @@ class TelegramWebhookDedupTest : StringSpec({
                             single { mockk<OrdersRepository>(relaxed = true) }
                             single { mockk<OrderDeliveryRepository>(relaxed = true) }
                             single { mockk<com.example.db.AuditLogRepository>(relaxed = true) }
+                            single { mockk<AdminUsersRepository>(relaxed = true) }
                             single<TelegramWebhookDedupRepository> { dedupRepository }
                         }
                     )
@@ -168,6 +170,7 @@ class TelegramWebhookDedupTest : StringSpec({
                             single { mockk<OrdersRepository>(relaxed = true) }
                             single { mockk<OrderDeliveryRepository>(relaxed = true) }
                             single { mockk<com.example.db.AuditLogRepository>(relaxed = true) }
+                            single { mockk<AdminUsersRepository>(relaxed = true) }
                             single<TelegramWebhookDedupRepository> { dedupRepository }
                         }
                     )
@@ -231,6 +234,7 @@ class TelegramWebhookDedupTest : StringSpec({
                             single { mockk<OrdersRepository>(relaxed = true) }
                             single { mockk<OrderDeliveryRepository>(relaxed = true) }
                             single { mockk<com.example.db.AuditLogRepository>(relaxed = true) }
+                            single { mockk<AdminUsersRepository>(relaxed = true) }
                             single<TelegramWebhookDedupRepository> { dedupRepository }
                         }
                     )
@@ -295,6 +299,7 @@ class TelegramWebhookDedupTest : StringSpec({
                             single { mockk<OrdersRepository>(relaxed = true) }
                             single { mockk<OrderDeliveryRepository>(relaxed = true) }
                             single { mockk<com.example.db.AuditLogRepository>(relaxed = true) }
+                            single { mockk<AdminUsersRepository>(relaxed = true) }
                             single<TelegramWebhookDedupRepository> { dedupRepository }
                         }
                     )

@@ -110,7 +110,7 @@ fun Application.installAdminApiRoutes() {
             installInitDataAuth(initDataVerifier)
 
             get("/me") {
-                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, ADMIN_READ_ROLES)
                 call.respond(
                     AdminMeResponse(
                         userId = admin.userId,
@@ -121,7 +121,7 @@ fun Application.installAdminApiRoutes() {
             }
 
             get("/orders") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                call.requireAdminUser(cfg, adminUsersRepository, ADMIN_READ_ROLES)
                 val bucket = call.request.queryParameters["bucket"] ?: "awaiting_payment"
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, MAX_LIMIT) ?: DEFAULT_LIMIT
                 val offset = call.request.queryParameters["offset"]?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
@@ -151,7 +151,7 @@ fun Application.installAdminApiRoutes() {
             }
 
             get("/orders/{id}") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                call.requireAdminUser(cfg, adminUsersRepository, ADMIN_READ_ROLES)
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
                 val order = ordersRepository.get(orderId) ?: throw ApiError("order_not_found", HttpStatusCode.NotFound)
                 if (order.merchantId != cfg.merchants.defaultMerchantId) {
@@ -224,7 +224,7 @@ fun Application.installAdminApiRoutes() {
 
             post("/orders/{id}/payment/details") {
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
-                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, ADMIN_PAYMENTS_ROLES)
                 ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
                 val req = call.receive<AdminPaymentDetailsRequest>()
                 val order = manualPaymentsService.setPaymentDetails(orderId, admin.userId, req.text)
@@ -245,7 +245,7 @@ fun Application.installAdminApiRoutes() {
             }
             post("/orders/{id}/payment/confirm") {
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
-                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, ADMIN_PAYMENTS_ROLES)
                 ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
                 val idempotencyKey = idempotencyService.normalizeKey(call.request.headers["Idempotency-Key"])
                 if (idempotencyKey == null) {
@@ -301,7 +301,7 @@ fun Application.installAdminApiRoutes() {
             }
             post("/orders/{id}/payment/reject") {
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
-                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, ADMIN_PAYMENTS_ROLES)
                 ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
                 val req = call.receive<AdminPaymentRejectRequest>()
                 val order = manualPaymentsService.rejectPayment(orderId, admin.userId, req.reason)
@@ -322,7 +322,7 @@ fun Application.installAdminApiRoutes() {
             }
             post("/orders/{id}/status") {
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
-                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, ADMIN_OPERATOR_ROLES)
                 val req = call.receive<AdminOrderStatusRequest>()
                 ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
                 val status = runCatching { OrderStatus.valueOf(req.status) }.getOrElse {
@@ -403,7 +403,7 @@ fun Application.installAdminApiRoutes() {
             }
             get("/orders/{id}/attachments/{attachmentId}/url") {
                 val orderId = call.parameters["id"] ?: throw IllegalArgumentException("order id missing")
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                call.requireAdminUser(cfg, adminUsersRepository, ADMIN_READ_ROLES)
                 val attachmentId = call.parameters["attachmentId"]?.toLongOrNull()
                     ?: throw IllegalArgumentException("attachment id missing")
                 ensureOrderForMerchant(orderId, ordersRepository, cfg.merchants.defaultMerchantId)
@@ -413,7 +413,7 @@ fun Application.installAdminApiRoutes() {
             }
 
             get("/settings/payment_methods") {
-                val admin = call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                val admin = call.requireAdminUser(cfg, adminUsersRepository, ADMIN_READ_ROLES)
                 val merchantId = cfg.merchants.defaultMerchantId
                 val methods = PaymentMethodType.values().map { type ->
                     val stored = paymentMethodsRepository.getMethod(merchantId, type)
@@ -475,7 +475,7 @@ fun Application.installAdminApiRoutes() {
             }
 
             get("/settings/delivery_method") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                call.requireAdminUser(cfg, adminUsersRepository, ADMIN_READ_ROLES)
                 val merchantId = cfg.merchants.defaultMerchantId
                 val stored = deliveryMethodsRepository.getMethod(merchantId, DeliveryMethodType.CDEK_PICKUP_MANUAL)
                 val required = stored?.requiredFieldsJson?.let(DeliveryFieldsCodec::parseRequiredFields).orEmpty()
@@ -546,7 +546,7 @@ fun Application.installAdminApiRoutes() {
             }
 
             get("/settings/storefronts") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                call.requireAdminUser(cfg, adminUsersRepository, ADMIN_READ_ROLES)
                 val merchantId = cfg.merchants.defaultMerchantId
                 val storefronts = storefrontsRepository.listByMerchant(merchantId).map {
                     AdminStorefrontDto(id = it.id, name = it.name)
@@ -607,7 +607,7 @@ fun Application.installAdminApiRoutes() {
             }
 
             get("/settings/channel_bindings") {
-                call.requireAdminUser(cfg, adminUsersRepository, setOf(AdminRole.OPERATOR))
+                call.requireAdminUser(cfg, adminUsersRepository, ADMIN_READ_ROLES)
                 val merchantId = cfg.merchants.defaultMerchantId
                 val storefronts = storefrontsRepository.listByMerchant(merchantId)
                 val bindings = storefronts.flatMap { storefront ->
@@ -717,6 +717,10 @@ fun Application.installAdminApiRoutes() {
         }
     }
 }
+
+private val ADMIN_READ_ROLES = setOf(AdminRole.OPERATOR, AdminRole.PAYMENTS, AdminRole.READONLY)
+private val ADMIN_PAYMENTS_ROLES = setOf(AdminRole.OPERATOR, AdminRole.PAYMENTS)
+private val ADMIN_OPERATOR_ROLES = setOf(AdminRole.OPERATOR)
 
 private fun resolveBucketStatuses(bucket: String): List<OrderStatus> = when (bucket) {
     "awaiting_payment" -> listOf(

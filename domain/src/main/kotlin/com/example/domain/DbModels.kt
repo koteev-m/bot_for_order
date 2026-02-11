@@ -19,7 +19,9 @@ data class Merchant(
 @Serializable
 enum class AdminRole {
     OWNER,
-    OPERATOR
+    OPERATOR,
+    PAYMENTS,
+    READONLY
 }
 
 @Serializable

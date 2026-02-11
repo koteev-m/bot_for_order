@@ -1,5 +1,6 @@
 package com.example.app.routes
 
+import com.example.app.api.AdminPaymentDetailsRequest
 import com.example.app.api.AdminPaymentMethodsUpdateRequest
 import com.example.app.api.AdminPaymentMethodUpdate
 import com.example.app.api.AdminPaymentRejectRequest
@@ -40,6 +41,7 @@ import com.example.db.StorefrontsRepository
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -146,6 +148,88 @@ class AdminRoutesRbacTest : StringSpec({
         }
     }
 
+
+
+    "readonly can access read endpoints but forbidden for mutating endpoints" {
+        val deps = TestAdminDeps()
+        deps.adminUsers.put(adminUser(42L, AdminRole.READONLY, deps.config.merchants.defaultMerchantId))
+        deps.stubOrderActions()
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                val appLog = environment.log
+                install(StatusPages) { installApiErrors(appLog) }
+                install(Koin) { modules(deps.module()) }
+                installAdminApiRoutes()
+            }
+            val client = createClient { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
+            val initData = buildInitData(deps.config.telegram.shopToken, userId = 42L)
+
+            val meResponse = client.get("/api/admin/me") {
+                header("X-Telegram-Init-Data", initData)
+            }
+            meResponse.status shouldBe HttpStatusCode.OK
+
+            val confirmResponse = client.post("/api/admin/orders/1/payment/confirm") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+            }
+            confirmResponse.status shouldBe HttpStatusCode.Forbidden
+
+            val rejectResponse = client.post("/api/admin/orders/1/payment/reject") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+                setBody(AdminPaymentRejectRequest(reason = "no proof"))
+            }
+            rejectResponse.status shouldBe HttpStatusCode.Forbidden
+
+            val detailsResponse = client.post("/api/admin/orders/1/payment/details") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+                setBody(AdminPaymentDetailsRequest(text = "card"))
+            }
+            detailsResponse.status shouldBe HttpStatusCode.Forbidden
+
+            val statusResponse = client.post("/api/admin/orders/1/status") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+                setBody(AdminOrderStatusRequest(status = OrderStatus.shipped.name, trackingCode = "TRK-1"))
+            }
+            statusResponse.status shouldBe HttpStatusCode.Forbidden
+        }
+    }
+
+    "payments role can mutate manual payments but cannot change order status" {
+        val deps = TestAdminDeps()
+        deps.adminUsers.put(adminUser(42L, AdminRole.PAYMENTS, deps.config.merchants.defaultMerchantId))
+        deps.stubOrderActions()
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                val appLog = environment.log
+                install(StatusPages) { installApiErrors(appLog) }
+                install(Koin) { modules(deps.module()) }
+                installAdminApiRoutes()
+            }
+            val client = createClient { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
+            val initData = buildInitData(deps.config.telegram.shopToken, userId = 42L)
+
+            val confirmResponse = client.post("/api/admin/orders/1/payment/confirm") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+            }
+            confirmResponse.status shouldBe HttpStatusCode.OK
+
+            val statusResponse = client.post("/api/admin/orders/1/status") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+                setBody(AdminOrderStatusRequest(status = OrderStatus.shipped.name, trackingCode = "TRK-1"))
+            }
+            statusResponse.status shouldBe HttpStatusCode.Forbidden
+        }
+    }
     "owner can mutate settings and publish" {
         val deps = TestAdminDeps()
         deps.adminUsers.put(adminUser(42L, AdminRole.OWNER, deps.config.merchants.defaultMerchantId))
