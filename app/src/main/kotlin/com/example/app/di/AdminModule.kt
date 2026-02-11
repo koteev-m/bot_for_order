@@ -1,6 +1,7 @@
 package com.example.app.di
 
 import com.example.app.config.AppConfig
+import com.example.app.services.BuyerStatusNotificationOutbox
 import com.example.app.services.ItemsService
 import com.example.app.services.MediaStateStore
 import com.example.app.services.OrderStatusService
@@ -23,6 +24,13 @@ val adminModule = module {
     single { MediaStateStore() }
     single { PaymentDetailsStateStore() }
     single { PaymentRejectReasonStateStore() }
+    single {
+        BuyerStatusNotificationOutbox(
+            get(),
+            get(),
+            runCatching { get<MeterRegistry>() }.getOrNull()
+        )
+    }
     single {
         PostService(
             get(),
@@ -51,5 +59,5 @@ val adminModule = module {
             runCatching { get<MeterRegistry>() }.getOrNull()
         )
     }
-    single { OrderStatusService(get(), get(), get(), get(), get(), get(), get()) }
+    single { OrderStatusService(get(), get(), get(), get(), get(), get()) }
 }

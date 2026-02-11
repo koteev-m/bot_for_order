@@ -875,6 +875,43 @@ class OrdersRepositoryExposed(private val tx: DatabaseTx) : OrdersRepository {
         }
     }
 
+    override suspend fun setStatusWithOutbox(
+        id: String,
+        status: OrderStatus,
+        actorId: Long,
+        comment: String?,
+        statusChangedAt: Instant,
+        outboxType: String,
+        outboxPayloadJson: String,
+        outboxNow: Instant
+    ) {
+        tx.tx {
+            OrdersTable.update({ OrdersTable.id eq id }) {
+                it[OrdersTable.status] = status.name
+                if (status == OrderStatus.canceled || status == OrderStatus.PAID_CONFIRMED) {
+                    it[OrdersTable.paymentDecidedAt] = CurrentTimestamp()
+                }
+                it[OrdersTable.updatedAt] = CurrentTimestamp()
+            }
+            OrderStatusHistoryTable.insert {
+                it[orderId] = id
+                it[OrderStatusHistoryTable.status] = status.name
+                it[OrderStatusHistoryTable.comment] = comment
+                it[OrderStatusHistoryTable.actorId] = actorId
+                it[ts] = statusChangedAt
+            }
+            OutboxMessageTable.insert {
+                it[type] = outboxType
+                it[payloadJson] = outboxPayloadJson
+                it[OutboxMessageTable.status] = OutboxMessageStatus.NEW.name
+                it[attempts] = 0
+                it[nextAttemptAt] = outboxNow
+                it[createdAt] = outboxNow
+                it[lastError] = null
+            }
+        }
+    }
+
     override suspend fun setInvoiceMessage(id: String, invoiceMessageId: Int) {
         tx.tx {
             OrdersTable.update({ OrdersTable.id eq id }) {
