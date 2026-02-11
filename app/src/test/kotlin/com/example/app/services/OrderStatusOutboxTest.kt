@@ -160,6 +160,61 @@ class OrderStatusOutboxTest {
     }
 
     @Test
+    fun `worker normalizes buyer status with surrounding spaces`(): Unit = runBlocking {
+        val clock = LocalOutboxTestClock(Instant.parse("2025-01-01T10:00:00Z"))
+        val repository = LocalFakeOutboxRepository()
+        val clients = mockk<TelegramClients>()
+        val shopBot = mockk<InstrumentedTelegramBot>()
+        every { clients.shopBot } returns shopBot
+        every { shopBot.execute(any<SendMessage>()) } returns mockk<SendResponse> {
+            every { isOk } returns true
+        }
+
+        val outboxHandler = BuyerStatusNotificationOutbox(
+            outboxRepository = repository,
+            clients = clients,
+            meterRegistry = null
+        )
+        val payloadJson = Json.encodeToString(
+            BuyerStatusNotificationPayload.serializer(),
+            BuyerStatusNotificationPayload(
+                orderId = "order-42",
+                buyerUserId = 101L,
+                status = " delivered ",
+                comment = null,
+                locale = null
+            )
+        )
+        val id = repository.insert(BuyerStatusNotificationOutbox.BUYER_STATUS_NOTIFICATION, payloadJson, clock.instant())
+
+        val worker = OutboxWorker(
+            application = mockk<Application>(relaxed = true),
+            outboxRepository = repository,
+            handlerRegistry = OutboxHandlerRegistry(
+                mapOf(BuyerStatusNotificationOutbox.BUYER_STATUS_NOTIFICATION to OutboxHandler { outboxHandler.handle(it) })
+            ),
+            config = baseTestConfig().copy(
+                outbox = OutboxConfig(
+                    enabled = true,
+                    pollIntervalMs = 10,
+                    batchSize = 10,
+                    maxAttempts = 3,
+                    baseBackoffMs = 100,
+                    maxBackoffMs = 1000,
+                    processingTtlMs = 600_000
+                )
+            ),
+            clock = clock,
+            random = Random(1)
+        )
+
+        worker.runOnce()
+
+        repository.message(id).status shouldBe OutboxMessageStatus.DONE
+        verify(exactly = 1) { shopBot.execute(any<SendMessage>()) }
+    }
+
+    @Test
     fun `worker skips unknown buyer status notification without retry`(): Unit = runBlocking {
         val clock = LocalOutboxTestClock(Instant.parse("2025-01-01T10:00:00Z"))
         val repository = LocalFakeOutboxRepository()
@@ -209,6 +264,18 @@ class OrderStatusOutboxTest {
 
         repository.message(id).status shouldBe OutboxMessageStatus.DONE
         verify(exactly = 0) { shopBot.execute(any<SendMessage>()) }
+    }
+
+    @Test
+    fun `build buyer status notification message truncates too long comments`(): Unit = runBlocking {
+        val template = "📬 Заказ доставлен. Спасибо за покупку!"
+        val veryLongComment = "x".repeat(TELEGRAM_TEXT_MAX_LEN)
+
+        val message = buildBuyerStatusNotificationMessage(template, veryLongComment)
+
+        (message.length <= TELEGRAM_TEXT_MAX_LEN) shouldBe true
+        message.contains(template) shouldBe true
+        message.endsWith("…") shouldBe true
     }
 }
 

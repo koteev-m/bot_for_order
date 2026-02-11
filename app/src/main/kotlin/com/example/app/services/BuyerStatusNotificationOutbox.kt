@@ -13,6 +13,27 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 
+internal const val TELEGRAM_TEXT_MAX_LEN = 4096
+
+internal fun buildBuyerStatusNotificationMessage(template: String, comment: String?): String {
+    val safeTemplate = template.take(TELEGRAM_TEXT_MAX_LEN)
+    val note = comment?.takeIf { it.isNotBlank() } ?: return safeTemplate
+    val commentPrefix = "Комментарий: "
+    val separator = "\n"
+    val maxCommentLen = TELEGRAM_TEXT_MAX_LEN - safeTemplate.length - separator.length - commentPrefix.length
+    if (maxCommentLen <= 0) {
+        return safeTemplate
+    }
+    val safeComment = if (note.length <= maxCommentLen) {
+        note
+    } else if (maxCommentLen == 1) {
+        "…"
+    } else {
+        note.take(maxCommentLen - 1) + "…"
+    }
+    return safeTemplate + separator + commentPrefix + safeComment
+}
+
 @Serializable
 data class BuyerStatusNotificationPayload(
     val orderId: String,
@@ -33,6 +54,8 @@ class BuyerStatusNotificationOutbox(
     private val enqueueFailedCounter = meterRegistry?.counter("buyer_status_notification_enqueue_total", "result", "failed")
     private val deliveryDoneCounter = meterRegistry?.counter("buyer_status_notification_delivery_total", "result", "done")
     private val deliveryFailedCounter = meterRegistry?.counter("buyer_status_notification_delivery_total", "result", "failed")
+    private val deliverySkippedUnknownStatusCounter =
+        meterRegistry?.counter("buyer_status_notification_delivery_total", "result", "skipped_unknown_status")
 
     suspend fun enqueue(payload: BuyerStatusNotificationPayload, now: Instant) {
         val payloadJson = outboxJson.encodeToString(BuyerStatusNotificationPayload.serializer(), payload)
@@ -59,20 +82,14 @@ class BuyerStatusNotificationOutbox(
 
     suspend fun handle(payloadJson: String) {
         val payload = outboxJson.decodeFromString(BuyerStatusNotificationPayload.serializer(), payloadJson)
-        val template = STATUS_NOTIFICATIONS[payload.status]
+        val normalizedStatus = payload.status.trim()
+        val template = STATUS_NOTIFICATIONS[normalizedStatus]
         if (template == null) {
-            log.debug("buyer_status_notification_unknown_status status={}", payload.status)
+            deliverySkippedUnknownStatusCounter?.increment()
+            log.debug("buyer_status_notification_unknown_status status={}", normalizedStatus)
             return
         }
-        val message = buildString {
-            append(template)
-            val note = payload.comment?.takeIf { it.isNotBlank() }
-            if (note != null) {
-                append('\n')
-                append("Комментарий: ")
-                append(note)
-            }
-        }
+        val message = buildBuyerStatusNotificationMessage(template, payload.comment)
         runCatching {
             val response = withContext(Dispatchers.IO) {
                 clients.shopBot.execute(SendMessage(payload.buyerUserId, message))
