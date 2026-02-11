@@ -24,7 +24,6 @@ suspend fun ApplicationCall.requireAdminUser(
 }
 
 private fun isRoleAllowed(role: AdminRole, allowedRoles: Set<AdminRole>): Boolean {
-    if (allowedRoles.contains(role)) return true
-    if (role == AdminRole.OWNER && allowedRoles.contains(AdminRole.OPERATOR)) return true
-    return false
+    if (role == AdminRole.OWNER) return true
+    return allowedRoles.contains(role)
 }

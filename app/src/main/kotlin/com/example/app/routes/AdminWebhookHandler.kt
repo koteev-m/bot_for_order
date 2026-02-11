@@ -17,6 +17,7 @@ import com.example.app.tg.TgUpdate
 import com.example.app.tg.TgCallbackQuery
 import com.example.app.util.ClientIpResolver
 import com.example.bots.TelegramClients
+import com.example.db.AdminUsersRepository
 import com.example.db.AuditLogRepository
 import com.example.db.OrderDeliveryRepository
 import com.example.db.OrdersRepository
@@ -63,6 +64,7 @@ fun Application.installAdminWebhook() {
     val paymentDetailsStateStore by inject<PaymentDetailsStateStore>()
     val paymentRejectReasonStateStore by inject<PaymentRejectReasonStateStore>()
     val auditLogRepository by inject<AuditLogRepository>()
+    val adminUsersRepository by inject<AdminUsersRepository>()
     val ordersRepository by inject<OrdersRepository>()
     val orderDeliveryRepository by inject<OrderDeliveryRepository>()
     val webhookDedupRepository by inject<TelegramWebhookDedupRepository>()
@@ -79,6 +81,7 @@ fun Application.installAdminWebhook() {
         paymentDetailsStateStore = paymentDetailsStateStore,
         paymentRejectReasonStateStore = paymentRejectReasonStateStore,
         auditLogRepository = auditLogRepository,
+        adminUsersRepository = adminUsersRepository,
         postService = postService,
         orderStatusService = orderStatusService,
         offersService = offersService,
@@ -111,6 +114,7 @@ private data class AdminWebhookDeps(
     val paymentDetailsStateStore: PaymentDetailsStateStore,
     val paymentRejectReasonStateStore: PaymentRejectReasonStateStore,
     val auditLogRepository: AuditLogRepository,
+    val adminUsersRepository: AdminUsersRepository,
     val postService: PostService,
     val orderStatusService: OrderStatusService,
     val offersService: OffersService,
@@ -176,6 +180,11 @@ private suspend fun handleAdminUpdate(
         if (!deps.config.telegram.adminIds.contains(fromId)) {
             reply("⛔ Команда доступна только администраторам.")
         } else {
+            val role = resolveAdminRole(deps, fromId)
+            if (role == null) {
+                reply("⛔ Команда недоступна.")
+                return@runCatching
+            }
             val text = message.text?.trim().orEmpty()
             val pendingDetailsOrderId = deps.paymentDetailsStateStore.get(fromId)
             val pendingRejectOrderId = deps.paymentRejectReasonStateStore.get(fromId)
@@ -186,7 +195,7 @@ private suspend fun handleAdminUpdate(
                 handlePaymentDetailsMessage(call, chatId, fromId, pendingDetailsOrderId, text, deps, reply)
                 deps.paymentDetailsStateStore.clear(fromId)
             } else if (text.startsWith("/")) {
-                handleAdminCommand(call, chatId, fromId, text, deps, reply)
+                handleAdminCommand(call, chatId, fromId, role, text, deps, reply)
             } else {
                 handleMediaCollection(fromId, chatId, message, deps, reply)
             }
@@ -236,12 +245,23 @@ private suspend fun handleAdminCallback(call: ApplicationCall, callback: TgCallb
         deps.clients.adminBot.execute(AnswerCallbackQuery(callback.id))
         return
     }
+    val role = resolveAdminRole(deps, fromId)
+    if (role == null) {
+        reply("⛔ Команда недоступна.")
+        deps.clients.adminBot.execute(AnswerCallbackQuery(callback.id))
+        return
+    }
     val parts = data.split(":", limit = 3)
     if (parts.size < 3 || parts[0] != "payment") {
         deps.clients.adminBot.execute(AnswerCallbackQuery(callback.id))
         return
     }
     val action = parts[1]
+    if (!isPaymentActionAllowed(role, action)) {
+        reply("⛔ Команда недоступна.")
+        deps.clients.adminBot.execute(AnswerCallbackQuery(callback.id))
+        return
+    }
     val orderId = parts[2]
     when (action) {
         "confirm" -> {
@@ -354,11 +374,16 @@ private suspend fun handleAdminCommand(
     call: ApplicationCall,
     chatId: Long,
     fromId: Long,
+    role: com.example.domain.AdminRole,
     text: String,
     deps: AdminWebhookDeps,
     reply: (String) -> Unit
 ) {
     val (command, args) = splitCommand(text)
+    if (!isCommandAllowed(role, command)) {
+        reply("⛔ Команда недоступна.")
+        return
+    }
     when (command) {
         "/start" -> reply(START_REPLY)
         "/help" -> reply(HELP_REPLY)
@@ -404,6 +429,25 @@ private suspend fun handleAdminCommand(
         STOCK_COMMAND -> handleStockCommand(args, deps.inventoryService, reply)
         ORDER_COMMAND -> handleOrderCommand(args, deps.ordersRepository, deps.orderDeliveryRepository, reply)
         else -> reply("Неизвестная команда. Напишите <code>/help</code>.")
+    }
+}
+
+private suspend fun resolveAdminRole(deps: AdminWebhookDeps, userId: Long): com.example.domain.AdminRole? {
+    val merchantId = deps.config.merchants.defaultMerchantId
+    return deps.adminUsersRepository.get(merchantId, userId)?.role
+}
+
+private fun isPaymentActionAllowed(role: com.example.domain.AdminRole, action: String): Boolean {
+    if (role == com.example.domain.AdminRole.OWNER || role == com.example.domain.AdminRole.OPERATOR) return true
+    return role == com.example.domain.AdminRole.PAYMENTS && action in setOf("confirm", "reject", "clarify", "details")
+}
+
+private fun isCommandAllowed(role: com.example.domain.AdminRole, command: String): Boolean {
+    if (role == com.example.domain.AdminRole.OWNER || role == com.example.domain.AdminRole.OPERATOR) return true
+    return when (role) {
+        com.example.domain.AdminRole.PAYMENTS -> command in setOf("/start", "/help", "/cancel", ORDER_COMMAND)
+        com.example.domain.AdminRole.READONLY -> command in setOf("/start", "/help", ORDER_COMMAND)
+        else -> false
     }
 }
 
