@@ -1,5 +1,6 @@
 package com.example.miniapp.api
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -103,6 +104,95 @@ data class WatchlistSubscribeRequest(
 @Serializable
 data class SimpleResponse(
     val ok: Boolean = true
+)
+
+@Serializable
+data class LinkResolveRequest(
+    val token: String
+)
+
+@Serializable
+data class ListingDto(
+    val id: String,
+    val title: String,
+    val description: String,
+    val status: String
+)
+
+@Serializable
+data class LinkResolveRequiredOptions(
+    @SerialName("variant_required")
+    val variantRequired: Boolean,
+    @SerialName("auto_variant_id")
+    val autoVariantId: String? = null
+)
+
+@Serializable
+data class LinkResolveVariant(
+    val id: String,
+    val size: String? = null,
+    val sku: String? = null,
+    val stock: Int,
+    val active: Boolean,
+    val available: Boolean
+)
+
+@Serializable
+data class LinkResolveResponse(
+    val action: String,
+    val listing: ListingDto,
+    @SerialName("required_options")
+    val requiredOptions: LinkResolveRequiredOptions,
+    @SerialName("available_variants")
+    val availableVariants: List<LinkResolveVariant>
+)
+
+@Serializable
+data class CartAddByTokenRequest(
+    val token: String,
+    val qty: Int = 1,
+    val selectedVariantId: String? = null
+)
+
+@Serializable
+data class CartAddResponse(
+    val status: String = "ok",
+    val undoToken: String,
+    val addedLineId: Long
+)
+
+@Serializable
+data class VariantRequiredResponse(
+    val status: String,
+    val listing: ListingDto,
+    @SerialName("available_variants")
+    val availableVariants: List<LinkResolveVariant>,
+    @SerialName("required_options")
+    val requiredOptions: LinkResolveRequiredOptions
+)
+
+sealed interface AddByTokenResult
+
+data class AddByTokenResponse(
+    val undoToken: String,
+    val addedLineId: Long
+) : AddByTokenResult
+
+data class VariantRequiredResult(
+    val listing: ListingDto,
+    val availableVariants: List<LinkResolveVariant>,
+    val requiredOptions: LinkResolveRequiredOptions
+) : AddByTokenResult
+
+@Serializable
+data class CartUpdateRequest(
+    val lineId: Long,
+    val remove: Boolean
+)
+
+@Serializable
+data class CartUndoRequest(
+    val undoToken: String
 )
 
 @Serializable
