@@ -11,12 +11,14 @@ import com.example.app.config.AppConfig
 import com.example.app.security.TelegramInitDataVerifier
 import com.example.app.security.installInitDataAuth
 import com.example.app.services.CartService
+import com.example.app.services.IdempotencyService
 import com.example.app.services.LinkContextService
 import com.example.app.services.LinkTokenHasher
 import com.example.app.services.UserActionRateLimiter
 import com.example.app.testutil.InMemoryCartItemsRepository
 import com.example.app.testutil.InMemoryCartRedisStore
 import com.example.app.testutil.InMemoryCartsRepository
+import com.example.app.testutil.InMemoryIdempotencyRepository
 import com.example.app.testutil.InMemoryItemsRepository
 import com.example.app.testutil.InMemoryLinkContextsRepository
 import com.example.app.testutil.InMemoryPricesDisplayRepository
@@ -69,7 +71,7 @@ class CartRoutesTest : StringSpec({
                 routing {
                     route("/api") {
                         installInitDataAuth(deps.initDataVerifier)
-                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter)
+                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter, deps.idempotencyService)
                     }
                 }
             }
@@ -108,7 +110,7 @@ class CartRoutesTest : StringSpec({
                 routing {
                     route("/api") {
                         installInitDataAuth(deps.initDataVerifier)
-                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter)
+                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter, deps.idempotencyService)
                     }
                 }
             }
@@ -140,7 +142,7 @@ class CartRoutesTest : StringSpec({
                 routing {
                     route("/api") {
                         installInitDataAuth(deps.initDataVerifier)
-                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter)
+                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter, deps.idempotencyService)
                     }
                 }
             }
@@ -193,7 +195,7 @@ class CartRoutesTest : StringSpec({
                 routing {
                     route("/api") {
                         installInitDataAuth(deps.initDataVerifier)
-                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter)
+                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter, deps.idempotencyService)
                     }
                 }
             }
@@ -215,6 +217,50 @@ class CartRoutesTest : StringSpec({
             }
             val undoBody = undoResponse.body<CartResponse>()
             undoBody.cart.items.size shouldBe 0
+        }
+    }
+
+    "add_by_token is idempotent by Idempotency-Key" {
+        val deps = TestCartRoutesDeps()
+        val token = "token-5"
+        deps.seedBasicItem(token)
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                val appLog = environment.log
+                install(StatusPages) { installApiErrors(appLog) }
+                routing {
+                    route("/api") {
+                        installInitDataAuth(deps.initDataVerifier)
+                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter, deps.idempotencyService)
+                    }
+                }
+            }
+            val client = createClient {
+                install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            }
+            val initData = buildInitData(deps.config.telegram.shopToken, userId = 42L)
+            val first = client.post("/api/cart/add_by_token") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+                header("Idempotency-Key", "quick-add-1")
+                setBody(CartAddByTokenRequest(token = token))
+            }
+            val second = client.post("/api/cart/add_by_token") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+                header("Idempotency-Key", "quick-add-1")
+                setBody(CartAddByTokenRequest(token = token))
+            }
+
+            first.status shouldBe HttpStatusCode.OK
+            second.status shouldBe HttpStatusCode.OK
+            val firstBody = first.body<CartAddResponse>()
+            val secondBody = second.body<CartAddResponse>()
+            firstBody.addedLineId shouldBe secondBody.addedLineId
+            firstBody.undoToken shouldBe secondBody.undoToken
+            secondBody.cart.items.size shouldBe 1
         }
     }
 })
@@ -243,6 +289,7 @@ private class TestCartRoutesDeps {
         cartRedisStore = redisStore,
         tokenHasher = tokenHasher
     )
+    val idempotencyService = IdempotencyService(InMemoryIdempotencyRepository())
     val initDataVerifier = TelegramInitDataVerifier(config.telegram.shopToken, config.telegramInitData.maxAgeSeconds)
     val userActionRateLimiter = UserActionRateLimiter(config.userActionRateLimit)
 

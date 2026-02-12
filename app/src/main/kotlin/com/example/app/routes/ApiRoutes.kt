@@ -74,7 +74,7 @@ fun Application.installApiRoutes() {
             registerBuyerDeliveryRoutes(deliveryService)
             registerWatchlistRoutes(itemsRepo, variantsRepo, watchlistRepo, cfg)
             registerLinkRoutes(linkResolveService, userActionRateLimiter)
-            registerCartRoutes(cartService, cfg, userActionRateLimiter)
+            registerCartRoutes(cartService, cfg, userActionRateLimiter, idempotencyService)
             registerAnalyticsRoutes(eventLogRepository, cfg)
         }
     }
