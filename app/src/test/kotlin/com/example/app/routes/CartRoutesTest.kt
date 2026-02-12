@@ -48,6 +48,9 @@ import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Instant
@@ -220,6 +223,55 @@ class CartRoutesTest : StringSpec({
         }
     }
 
+    "add_by_token replay bypasses rate limiter" {
+        val mockedRateLimiter = mockk<UserActionRateLimiter>()
+        every { mockedRateLimiter.allowAdd(42L) } returnsMany listOf(true, false)
+
+        val deps = TestCartRoutesDeps(userActionRateLimiter = mockedRateLimiter)
+        val token = "token-6"
+        deps.seedBasicItem(token)
+
+        testApplication {
+            application {
+                install(ServerContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+                val appLog = environment.log
+                install(StatusPages) { installApiErrors(appLog) }
+                routing {
+                    route("/api") {
+                        installInitDataAuth(deps.initDataVerifier)
+                        registerCartRoutes(deps.cartService, deps.config, deps.userActionRateLimiter, deps.idempotencyService)
+                    }
+                }
+            }
+            val client = createClient {
+                install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            }
+            val initData = buildInitData(deps.config.telegram.shopToken, userId = 42L)
+            val first = client.post("/api/cart/add_by_token") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+                header("Idempotency-Key", "quick-add-rate-limiter")
+                setBody(CartAddByTokenRequest(token = token))
+            }
+            val second = client.post("/api/cart/add_by_token") {
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("X-Telegram-Init-Data", initData)
+                header("Idempotency-Key", "quick-add-rate-limiter")
+                setBody(CartAddByTokenRequest(token = token))
+            }
+
+            first.status shouldBe HttpStatusCode.OK
+            second.status shouldBe HttpStatusCode.OK
+            val firstBody = first.body<CartAddResponse>()
+            val secondBody = second.body<CartAddResponse>()
+            firstBody.addedLineId shouldBe secondBody.addedLineId
+            firstBody.undoToken shouldBe secondBody.undoToken
+            secondBody.cart.items.size shouldBe 1
+
+            verify(exactly = 1) { mockedRateLimiter.allowAdd(42L) }
+        }
+    }
+
     "add_by_token is idempotent by Idempotency-Key" {
         val deps = TestCartRoutesDeps()
         val token = "token-5"
@@ -265,7 +317,9 @@ class CartRoutesTest : StringSpec({
     }
 })
 
-private class TestCartRoutesDeps {
+private class TestCartRoutesDeps(
+    userActionRateLimiter: UserActionRateLimiter? = null
+) {
     val config: AppConfig = baseTestConfig().copy(
         telegram = baseTestConfig().telegram.copy(shopToken = "test:token")
     )
@@ -291,7 +345,7 @@ private class TestCartRoutesDeps {
     )
     val idempotencyService = IdempotencyService(InMemoryIdempotencyRepository())
     val initDataVerifier = TelegramInitDataVerifier(config.telegram.shopToken, config.telegramInitData.maxAgeSeconds)
-    val userActionRateLimiter = UserActionRateLimiter(config.userActionRateLimit)
+    val userActionRateLimiter = userActionRateLimiter ?: UserActionRateLimiter(config.userActionRateLimit)
 
     suspend fun seedBasicItem(token: String) {
         val now = Instant.parse("2024-01-02T00:00:00Z")

@@ -63,13 +63,12 @@ private suspend fun handleAddByToken(
     val token = QuickAddRequestValidation.normalizeToken(req.token)
     QuickAddRequestValidation.validateVariantId(req.selectedVariantId)
 
-    if (!rateLimiter.allowAdd(buyerUserId)) {
-        throw ApiError("rate_limited", HttpStatusCode.TooManyRequests)
-    }
-
     val request = req.copy(token = token)
     val idempotencyKey = idempotencyService.normalizeKey(call.request.headers["Idempotency-Key"])
     if (idempotencyKey == null) {
+        if (!rateLimiter.allowAdd(buyerUserId)) {
+            throw ApiError("rate_limited", HttpStatusCode.TooManyRequests)
+        }
         call.respond(buildAddByTokenResponse(cartService, buyerUserId, request))
         return
     }
@@ -82,6 +81,9 @@ private suspend fun handleAddByToken(
         key = idempotencyKey,
         requestHash = requestHash
     ) {
+        if (!rateLimiter.allowAdd(buyerUserId)) {
+            throw ApiError("rate_limited", HttpStatusCode.TooManyRequests)
+        }
         val response = buildAddByTokenResponse(cartService, buyerUserId, request)
         IdempotencyService.IdempotentResponse(
             status = HttpStatusCode.OK,
