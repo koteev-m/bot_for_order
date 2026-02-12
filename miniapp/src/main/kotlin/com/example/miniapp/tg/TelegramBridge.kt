@@ -27,6 +27,26 @@ object TelegramBridge {
         } catch (_: dynamic) {
         }
     }
+
+    fun hapticSuccess() {
+        try {
+            wa?.HapticFeedback?.notificationOccurred?.invoke("success")
+        } catch (_: dynamic) {
+        }
+    }
+
+    fun closeIfAvailable(): Boolean {
+        return try {
+            if (wa != null && wa?.asDynamic()?.close != null) {
+                wa.asDynamic().close()
+                true
+            } else {
+                false
+            }
+        } catch (_: dynamic) {
+            false
+        }
+    }
 }
 
 object UrlQuery {

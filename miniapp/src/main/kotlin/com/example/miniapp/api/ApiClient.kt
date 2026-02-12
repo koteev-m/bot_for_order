@@ -10,10 +10,11 @@ import io.ktor.client.request.accept
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
-import io.ktor.client.request.put
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
 
@@ -45,6 +46,35 @@ class ApiClient(
 
     suspend fun subscribeWatchlist(req: WatchlistSubscribeRequest): SimpleResponse =
         client.post("$baseUrl/api/watchlist") { setBody(req) }.body()
+
+    suspend fun resolveLink(token: String): LinkResolveResponse =
+        client.post("$baseUrl/api/link/resolve") { setBody(LinkResolveRequest(token)) }.body()
+
+    suspend fun addToCartByToken(
+        token: String,
+        selectedVariantId: String?,
+        idempotencyKey: String
+    ): AddByTokenResult {
+        val response = client.post("$baseUrl/api/cart/add_by_token") {
+            header("Idempotency-Key", idempotencyKey)
+            setBody(
+                CartAddByTokenRequest(
+                    token = token,
+                    qty = 1,
+                    selectedVariantId = selectedVariantId
+                )
+            )
+        }
+        return parseAddByTokenResult(response)
+    }
+
+    suspend fun removeCartLine(lineId: Long): SimpleResponse =
+        client.post("$baseUrl/api/cart/update") {
+            setBody(CartUpdateRequest(lineId = lineId, remove = true))
+        }.body()
+
+    suspend fun undoAdd(undoToken: String): SimpleResponse =
+        client.post("$baseUrl/api/cart/undo") { setBody(CartUndoRequest(undoToken)) }.body()
 
     suspend fun getAdminMe(): AdminMeResponse =
         client.get("$baseUrl/api/admin/me").body()
@@ -90,4 +120,18 @@ class ApiClient(
 
     suspend fun publish(req: AdminPublishRequest): AdminPublishResponse =
         client.post("$baseUrl/api/admin/publications/publish") { setBody(req) }.body()
+
+    private suspend fun parseAddByTokenResult(response: HttpResponse): AddByTokenResult {
+        check(response.status.isSuccess()) {
+            "cart_add_by_token failed: ${response.status}"
+        }
+        val jsonText = response.body<String>()
+        return if (jsonText.contains("\"status\":\"variant_required\"")) {
+            val parsed = json.decodeFromString<VariantRequiredResponse>(jsonText)
+            VariantRequiredResult(parsed.listing, parsed.availableVariants, parsed.requiredOptions)
+        } else {
+            val parsed = json.decodeFromString<CartAddResponse>(jsonText)
+            AddByTokenResponse(parsed.undoToken, parsed.addedLineId)
+        }
+    }
 }

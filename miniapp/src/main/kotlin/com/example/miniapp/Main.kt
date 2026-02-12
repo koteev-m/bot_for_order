@@ -1,11 +1,16 @@
 package com.example.miniapp
 
+import com.example.miniapp.api.AddByTokenResponse
 import com.example.miniapp.api.ApiClient
 import com.example.miniapp.api.ItemResponse
+import com.example.miniapp.api.LinkResolveVariant
 import com.example.miniapp.api.OfferAcceptRequest
 import com.example.miniapp.api.OfferRequest
 import com.example.miniapp.api.OrderCreateRequest
+import com.example.miniapp.api.VariantRequiredResult
 import com.example.miniapp.api.WatchlistSubscribeRequest
+import com.example.miniapp.quickadd.QuickAddStateKind
+import com.example.miniapp.quickadd.evaluateQuickAddState
 import com.example.miniapp.startapp.StartAppCodecJs
 import com.example.miniapp.tg.TelegramBridge
 import com.example.miniapp.tg.UrlQuery
@@ -26,7 +31,12 @@ import io.kvision.panel.root
 import io.kvision.panel.vPanel
 import io.kvision.startApplication
 import kotlinx.browser.window
-import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.max
@@ -35,13 +45,31 @@ private const val DEFAULT_QUANTITY = 1
 private const val MINOR_UNITS_IN_MAJOR = 100
 private const val MINOR_DIGITS = 2
 private const val DEFAULT_CURRENCY = "RUB"
+private const val UNDO_TIMEOUT_MS = 7_000L
 
 class MiniApp : Application() {
-    private val scope = MainScope()
+    private val appJob = SupervisorJob()
+    private val scope = CoroutineScope(Dispatchers.Default + appJob)
     private val api = ApiClient()
     private var currentItem: ItemResponse? = null
+    private var quickAddRequestJob: Job? = null
+    private var undoHideJob: Job? = null
+
+    override fun dispose(): Map<String, Any> {
+        quickAddRequestJob?.cancel()
+        undoHideJob?.cancel()
+        scope.cancel()
+        return super.dispose()
+    }
 
     override fun start(state: Map<String, Any>) {
+        val qp = UrlQuery.parse(window.location.search)
+        val quickAddToken = qp["token"] ?: TelegramBridge.startParam()
+        if (!quickAddToken.isNullOrBlank()) {
+            renderQuickAdd(quickAddToken, qp)
+            return
+        }
+
         root("kvapp") {
             vPanel(spacing = 8) {
                 val titleEl = Div(className = "h1")
@@ -143,9 +171,10 @@ class MiniApp : Application() {
                     add(statusErr)
                 })
 
-                val qp = UrlQuery.parse(window.location.search)
                 val itemId = qp["item"]
-                    ?: TelegramBridge.startParam()?.let { StartAppCodecJs.decode(it).itemId }
+                    ?: TelegramBridge.startParam()?.let {
+                        runCatching { StartAppCodecJs.decode(it).itemId }.getOrNull()
+                    }
                 if (itemId == null) {
                     titleEl.content = "Не указан товар"
                     descEl.content = "Откройте Mini App по кнопке «Купить» или передайте ?item=<ID>."
@@ -160,6 +189,182 @@ class MiniApp : Application() {
                     acceptOfferFromQuery(offerIdParam, qty, statusOk, statusErr)
                 }
             }
+        }
+    }
+
+    private fun renderQuickAdd(token: String, qp: Map<String, String>) {
+        root("kvapp") {
+            vPanel(spacing = 8) {
+                val titleEl = Div(className = "h1").apply { content = "Быстрое добавление" }
+                val statusEl = Div(className = "muted").apply { content = "Проверяем ссылку…" }
+                val chipsContainer = Div(className = "chips")
+                val errorEl = Div(className = "err")
+                val toastEl = Div(className = "snackbar")
+                val undoButton = Button("Undo", className = "secondary").apply { visible = false }
+                add(Div(className = "card").apply {
+                    add(titleEl)
+                    add(statusEl)
+                    add(chipsContainer)
+                    add(errorEl)
+                    add(toastEl)
+                    add(undoButton)
+                })
+
+                quickAddRequestJob?.cancel()
+                quickAddRequestJob = scope.launch {
+                    runCatching { api.resolveLink(token) }
+                        .onSuccess { resolved ->
+                            titleEl.content = escape(resolved.listing.title)
+                            val state = evaluateQuickAddState(resolved)
+                            when (state.kind) {
+                                QuickAddStateKind.AUTO_ADD -> {
+                                    statusEl.content = "Добавляем в корзину…"
+                                    scope.launch {
+                                        performQuickAdd(
+                                        token,
+                                        state.selectedVariantId,
+                                        qp,
+                                        statusEl,
+                                        errorEl,
+                                        toastEl,
+                                        undoButton
+                                    )
+                                    }
+                                }
+
+                                QuickAddStateKind.NEED_VARIANT -> {
+                                    statusEl.content = "Выберите вариант"
+                                    renderVariantChips(
+                                        chipsContainer,
+                                        state.variants,
+                                        errorEl
+                                    ) { selected ->
+                                        scope.launch {
+                                            performQuickAdd(
+                                                token,
+                                                selected,
+                                                qp,
+                                                statusEl,
+                                                errorEl,
+                                                toastEl,
+                                                undoButton
+                                            )
+                                        }
+                                    }
+                                }
+
+                                QuickAddStateKind.ERROR -> {
+                                    errorEl.content = state.errorMessage ?: "Не удалось обработать ссылку"
+                                }
+                            }
+                        }
+                        .onFailure { e ->
+                            statusEl.content = ""
+                            errorEl.content = "Ошибка resolve: ${e.message ?: e.toString()}"
+                        }
+                }
+            }
+        }
+    }
+
+    private fun renderVariantChips(
+        container: Div,
+        variants: List<LinkResolveVariant>,
+        errorEl: Div,
+        onPick: (String) -> Unit
+    ) {
+        container.removeAll()
+        variants.forEach { variant ->
+            val label = variant.size ?: variant.sku ?: variant.id
+            container.add(
+                Button(label, className = "chip").apply {
+                    disabled = !variant.available
+                    onClick {
+                        if (!variant.available) {
+                            errorEl.content = "Вариант недоступен"
+                            return@onClick
+                        }
+                        onPick(variant.id)
+                    }
+                }
+            )
+        }
+    }
+
+    @Suppress("LongParameterList")
+    private suspend fun performQuickAdd(
+        token: String,
+        variantId: String?,
+        qp: Map<String, String>,
+        statusEl: Div,
+        errorEl: Div,
+        toastEl: Div,
+        undoButton: Button
+    ) {
+        errorEl.content = ""
+        val idempotencyKey = createIdempotencyKey()
+        runCatching {
+            api.addToCartByToken(token, variantId, idempotencyKey)
+        }.onSuccess { response ->
+            when (response) {
+                is AddByTokenResponse -> {
+                    statusEl.content = ""
+                    TelegramBridge.hapticSuccess()
+                    showUndoToast(toastEl, undoButton, response.undoToken, response.addedLineId, errorEl)
+                    maybeAutoClose(qp)
+                }
+
+                is VariantRequiredResult -> {
+                    statusEl.content = "Выберите вариант"
+                    errorEl.content = "Нужен выбор варианта"
+                }
+            }
+        }.onFailure { e ->
+            statusEl.content = ""
+            errorEl.content = "Не удалось добавить в корзину: ${e.message ?: e.toString()}"
+        }
+    }
+
+    private fun showUndoToast(
+        toastEl: Div,
+        undoButton: Button,
+        undoToken: String,
+        lineId: Long,
+        errorEl: Div
+    ) {
+        toastEl.content = "Добавлено"
+        undoButton.visible = true
+        undoHideJob?.cancel()
+        undoHideJob = scope.launch {
+            delay(UNDO_TIMEOUT_MS)
+            toastEl.content = ""
+            undoButton.visible = false
+        }
+        undoButton.onClick {
+            quickAddRequestJob?.cancel()
+            quickAddRequestJob = scope.launch {
+                runCatching {
+                    api.removeCartLine(lineId)
+                }.onSuccess {
+                    toastEl.content = "Отменено"
+                    undoButton.visible = false
+                }.onFailure {
+                    runCatching { api.undoAdd(undoToken) }
+                        .onSuccess {
+                            toastEl.content = "Отменено"
+                            undoButton.visible = false
+                        }
+                        .onFailure { e -> errorEl.content = "Undo не выполнен: ${e.message ?: e.toString()}" }
+                }
+            }
+        }
+    }
+
+    private fun maybeAutoClose(qp: Map<String, String>) {
+        val compact = qp["mode"] == "compact"
+        if (!compact) return
+        if (!TelegramBridge.closeIfAvailable()) {
+            window.history.back()
         }
     }
 
@@ -410,8 +615,16 @@ class MiniApp : Application() {
                     .toIntOrNull() ?: return null
                 major * MINOR_UNITS_IN_MAJOR + minor
             }
+
             else -> null
         }
+    }
+
+    private fun createIdempotencyKey(): String {
+        return js("globalThis.crypto && globalThis.crypto.randomUUID ? globalThis.crypto.randomUUID() : null") as String?
+            ?: (
+                "id-" + (js("Date.now().toString(36) + '-' + Math.random().toString(16).slice(2)") as String)
+            )
     }
 
     private fun q(value: String?): String = js("JSON.stringify")(value ?: "") as String
