@@ -53,10 +53,13 @@ class CartService(
     ): CartAddResult {
         if (qty < 1) throw ApiError("invalid_request")
 
-        val context = linkContextService.getByToken(token) ?: throw ApiError("not_found", HttpStatusCode.NotFound)
-        if (context.revokedAt != null) throw ApiError("not_found", HttpStatusCode.NotFound)
+        val context = linkContextService.getByToken(token) ?: throw ApiError("invalid_token", HttpStatusCode.NotFound)
+        if (context.revokedAt != null) throw ApiError("invalid_token", HttpStatusCode.NotFound)
         val expiresAt = context.expiresAt
-        if (expiresAt != null && !expiresAt.isAfter(now)) throw ApiError("not_found", HttpStatusCode.NotFound)
+        if (expiresAt != null && !expiresAt.isAfter(now)) throw ApiError("invalid_token", HttpStatusCode.NotFound)
+
+        QuickAddRequestValidation.validateListingId(context.listingId)
+        QuickAddRequestValidation.validateVariantId(selectedVariantId)
 
         val item = itemsRepository.getById(context.listingId) ?: throw ApiError("not_found", HttpStatusCode.NotFound)
         if (item.merchantId != context.merchantId) throw ApiError("not_found", HttpStatusCode.NotFound)

@@ -17,18 +17,20 @@ class LinkResolveService(
     private val variantsRepository: VariantsRepository
 ) {
     suspend fun resolve(token: String, now: Instant = Instant.now()): LinkResolveResponse {
-        val context = linkContextService.getByToken(token) ?: throw LinkResolveException("not_found")
-        if (context.revokedAt != null) throw LinkResolveException("not_found")
+        val context = linkContextService.getByToken(token) ?: throw LinkResolveException("invalid_token")
+        if (context.revokedAt != null) throw LinkResolveException("invalid_token")
         val expiresAt = context.expiresAt
         if (expiresAt != null && !expiresAt.isAfter(now)) {
-            throw LinkResolveException("not_found")
+            throw LinkResolveException("invalid_token")
         }
 
+        QuickAddRequestValidation.validateListingId(context.listingId)
         val listing = itemsRepository.getById(context.listingId) ?: throw LinkResolveException("not_found")
         if (listing.merchantId != context.merchantId) throw LinkResolveException("not_found")
 
         val variants = variantsRepository.listByItem(listing.id)
         val availableVariants = variants.map { variant ->
+            QuickAddRequestValidation.validateVariantId(variant.id)
             LinkResolveVariant(
                 id = variant.id,
                 size = variant.size,
