@@ -371,6 +371,71 @@ class ManualPaymentsServiceTest : StringSpec({
         }
     }
 
+    "submit claim is idempotent under review before input validation".config(enabled = dockerAvailable) {
+        Assumptions.assumeTrue(dockerReady, "Docker недоступен или контейнер не стартовал.")
+        val cfg = baseTestConfig()
+        val crypto = PaymentDetailsCrypto(cfg.manualPayments.detailsEncryptionKey)
+        val merchantId = newMerchantId()
+        insertMerchant(merchantId)
+        val variantId = "var-${UUID.randomUUID()}"
+        insertItemAndVariant(merchantId, variantId, stock = 5)
+        val method = MerchantPaymentMethod(
+            merchantId = merchantId,
+            type = PaymentMethodType.MANUAL_CRYPTO,
+            mode = PaymentMethodMode.AUTO,
+            detailsEncrypted = crypto.encrypt("Wallet"),
+            enabled = true
+        )
+        insertPaymentMethod(method)
+        val order = createOrder(merchantId, 16L, variantId, qty = 1)
+
+        val service = ManualPaymentsService(
+            dbTx,
+            ordersRepository,
+            orderLinesRepository,
+            orderStatusHistoryRepository,
+            merchantsRepository,
+            paymentMethodsRepository,
+            paymentDetailsRepository,
+            paymentClaimsRepository,
+            attachmentsRepository,
+            variantsRepository,
+            InMemoryOrderHoldService(),
+            InMemoryHoldService(),
+            NoopLockManager(),
+            InMemoryEventLogRepository(),
+            InMemoryStorage(),
+            crypto,
+            FakeManualPaymentsNotifier(),
+            Clock.systemUTC()
+        )
+
+        runBlocking {
+            service.selectPaymentMethod(order.id, order.userId, method.type)
+            val first = service.submitClaim(
+                order.id,
+                order.userId,
+                txid = "tx-valid",
+                comment = "comment",
+                attachments = emptyList()
+            )
+            ordersRepository.get(order.id)!!.status shouldBe OrderStatus.PAYMENT_UNDER_REVIEW
+
+            val repeated = service.submitClaim(
+                order.id,
+                order.userId,
+                txid = "   ",
+                comment = "   ",
+                attachments = emptyList()
+            )
+
+            repeated.id shouldBe first.id
+            repeated.txid shouldBe first.txid
+            repeated.comment shouldBe first.comment
+            repeated.status shouldBe first.status
+        }
+    }
+
     "manual_send details transition and instructions".config(enabled = dockerAvailable) {
         Assumptions.assumeTrue(dockerReady, "Docker недоступен или контейнер не стартовал.")
         val cfg = baseTestConfig()
