@@ -156,9 +156,6 @@ class ManualPaymentsService(
             ensureOwner(order, buyerId)
             val methodType = order.paymentMethodType
                 ?: throw ApiError("payment_method_not_selected", HttpStatusCode.Conflict)
-            val method = paymentMethodsRepository.getEnabledMethod(order.merchantId, methodType)
-                ?: throw ApiError("payment_method_unavailable", HttpStatusCode.Conflict)
-            val normalized = validateClaimInput(methodType, txid, comment, attachments)
             if (order.status == OrderStatus.PAYMENT_UNDER_REVIEW) {
                 val existing = paymentClaimsRepository.getSubmittedByOrder(orderId)
                 if (existing != null) return@withLock existing
@@ -170,6 +167,10 @@ class ManualPaymentsService(
             if (order.status != OrderStatus.AWAITING_PAYMENT) {
                 throw ApiError("payment_claim_not_allowed", HttpStatusCode.Conflict)
             }
+
+            val method = paymentMethodsRepository.getEnabledMethod(order.merchantId, methodType)
+                ?: throw ApiError("payment_method_unavailable", HttpStatusCode.Conflict)
+            val normalized = validateClaimInput(methodType, txid, comment, attachments)
 
             val now = Instant.now(clock)
             val claim = createSubmittedClaim(orderId, methodType, normalized.txid, normalized.comment, now)
