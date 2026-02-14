@@ -17,6 +17,9 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 class ApiClient(
     private val baseUrl: String = ""
@@ -89,7 +92,9 @@ class ApiClient(
         client.post("$baseUrl/api/admin/orders/$orderId/payment/confirm").body()
 
     suspend fun rejectPayment(orderId: String, reason: String): PaymentSelectResponse =
-        client.post("$baseUrl/api/admin/orders/$orderId/payment/reject") { setBody(AdminPaymentRejectRequest(reason)) }.body()
+        client.post("$baseUrl/api/admin/orders/$orderId/payment/reject") {
+            setBody(AdminPaymentRejectRequest(reason))
+        }.body()
 
     suspend fun updateOrderStatus(orderId: String, req: AdminOrderStatusRequest): PaymentSelectResponse =
         client.post("$baseUrl/api/admin/orders/$orderId/status") { setBody(req) }.body()
@@ -126,12 +131,24 @@ class ApiClient(
             "cart_add_by_token failed: ${response.status}"
         }
         val jsonText = response.body<String>()
-        return if (jsonText.contains("\"status\":\"variant_required\"")) {
-            val parsed = json.decodeFromString<VariantRequiredResponse>(jsonText)
-            VariantRequiredResult(parsed.listing, parsed.availableVariants, parsed.requiredOptions)
-        } else {
-            val parsed = json.decodeFromString<CartAddResponse>(jsonText)
-            AddByTokenResponse(parsed.undoToken, parsed.addedLineId)
+        val status = json.parseToJsonElement(jsonText)
+            .jsonObject["status"]
+            ?.jsonPrimitive
+            ?.contentOrNull
+            ?: error("cart_add_by_token missing status")
+
+        return when (status) {
+            "variant_required" -> {
+                val parsed = json.decodeFromString<VariantRequiredResponse>(jsonText)
+                VariantRequiredResult(parsed.listing, parsed.availableVariants, parsed.requiredOptions)
+            }
+
+            "ok" -> {
+                val parsed = json.decodeFromString<CartAddResponse>(jsonText)
+                AddByTokenResponse(parsed.undoToken, parsed.addedLineId)
+            }
+
+            else -> error("cart_add_by_token unexpected status: $status")
         }
     }
 }
