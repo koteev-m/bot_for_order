@@ -35,6 +35,13 @@ object TelegramBridge {
         }
     }
 
+    fun hapticError() {
+        try {
+            wa?.HapticFeedback?.notificationOccurred?.invoke("error")
+        } catch (_: dynamic) {
+        }
+    }
+
     fun closeIfAvailable(): Boolean {
         return try {
             if (wa != null && wa?.asDynamic()?.close != null) {
