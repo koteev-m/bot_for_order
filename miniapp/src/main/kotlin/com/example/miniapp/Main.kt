@@ -54,6 +54,8 @@ class MiniApp : Application() {
     private var currentItem: ItemResponse? = null
     private var quickAddRequestJob: Job? = null
     private var undoHideJob: Job? = null
+    private var activeUndoToken: String? = null
+    private var activeUndoLineId: Long? = null
 
     override fun dispose(): Map<String, Any> {
         quickAddRequestJob?.cancel()
@@ -64,7 +66,9 @@ class MiniApp : Application() {
 
     override fun start(state: Map<String, Any>) {
         val qp = UrlQuery.parse(window.location.search)
-        val quickAddToken = qp["token"] ?: TelegramBridge.startParam()
+        val startParam = TelegramBridge.startParam()?.takeIf { it.isNotBlank() }
+        val startParamItemId = startParam?.let { decodeStartParamItemId(it) }
+        val quickAddToken = qp["token"] ?: startParam?.takeIf { startParamItemId == null }
         if (!quickAddToken.isNullOrBlank()) {
             renderQuickAdd(quickAddToken, qp)
             return
@@ -171,10 +175,7 @@ class MiniApp : Application() {
                     add(statusErr)
                 })
 
-                val itemId = qp["item"]
-                    ?: TelegramBridge.startParam()?.let {
-                        runCatching { StartAppCodecJs.decode(it).itemId }.getOrNull()
-                    }
+                val itemId = qp["item"] ?: startParamItemId
                 if (itemId == null) {
                     titleEl.content = "Не указан товар"
                     descEl.content = "Откройте Mini App по кнопке «Купить» или передайте ?item=<ID>."
@@ -192,6 +193,11 @@ class MiniApp : Application() {
         }
     }
 
+    private fun decodeStartParamItemId(startParam: String): String? =
+        runCatching { StartAppCodecJs.decode(startParam).itemId }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+
     private fun renderQuickAdd(token: String, qp: Map<String, String>) {
         root("kvapp") {
             vPanel(spacing = 8) {
@@ -201,6 +207,30 @@ class MiniApp : Application() {
                 val errorEl = Div(className = "err")
                 val toastEl = Div(className = "snackbar")
                 val undoButton = Button("Undo", className = "secondary").apply { visible = false }
+                undoButton.onClick {
+                    val lineId = activeUndoLineId
+                    val undoToken = activeUndoToken
+                    if (lineId == null || undoToken.isNullOrBlank()) {
+                        errorEl.content = "Undo недоступен"
+                        return@onClick
+                    }
+                    quickAddRequestJob?.cancel()
+                    quickAddRequestJob = scope.launch {
+                        runCatching {
+                            api.removeCartLine(lineId)
+                        }.onSuccess {
+                            clearUndoState(toastEl, undoButton)
+                            toastEl.content = "Отменено"
+                        }.onFailure {
+                            runCatching { api.undoAdd(undoToken) }
+                                .onSuccess {
+                                    clearUndoState(toastEl, undoButton)
+                                    toastEl.content = "Отменено"
+                                }
+                                .onFailure { e -> errorEl.content = "Undo не выполнен: ${e.message ?: e.toString()}" }
+                        }
+                    }
+                }
                 add(Div(className = "card").apply {
                     add(titleEl)
                     add(statusEl)
@@ -221,14 +251,14 @@ class MiniApp : Application() {
                                     statusEl.content = "Добавляем в корзину…"
                                     scope.launch {
                                         performQuickAdd(
-                                        token,
-                                        state.selectedVariantId,
-                                        qp,
-                                        statusEl,
-                                        errorEl,
-                                        toastEl,
-                                        undoButton
-                                    )
+                                            token,
+                                            state.selectedVariantId,
+                                            qp,
+                                            statusEl,
+                                            errorEl,
+                                            toastEl,
+                                            undoButton
+                                        )
                                     }
                                 }
 
@@ -310,7 +340,7 @@ class MiniApp : Application() {
                 is AddByTokenResponse -> {
                     statusEl.content = ""
                     TelegramBridge.hapticSuccess()
-                    showUndoToast(toastEl, undoButton, response.undoToken, response.addedLineId, errorEl)
+                    showUndoToast(toastEl, undoButton, response.undoToken, response.addedLineId)
                     maybeAutoClose(qp)
                 }
 
@@ -329,35 +359,26 @@ class MiniApp : Application() {
         toastEl: Div,
         undoButton: Button,
         undoToken: String,
-        lineId: Long,
-        errorEl: Div
+        lineId: Long
     ) {
+        activeUndoToken = undoToken
+        activeUndoLineId = lineId
         toastEl.content = "Добавлено"
         undoButton.visible = true
         undoHideJob?.cancel()
         undoHideJob = scope.launch {
             delay(UNDO_TIMEOUT_MS)
-            toastEl.content = ""
-            undoButton.visible = false
+            clearUndoState(toastEl, undoButton)
         }
-        undoButton.onClick {
-            quickAddRequestJob?.cancel()
-            quickAddRequestJob = scope.launch {
-                runCatching {
-                    api.removeCartLine(lineId)
-                }.onSuccess {
-                    toastEl.content = "Отменено"
-                    undoButton.visible = false
-                }.onFailure {
-                    runCatching { api.undoAdd(undoToken) }
-                        .onSuccess {
-                            toastEl.content = "Отменено"
-                            undoButton.visible = false
-                        }
-                        .onFailure { e -> errorEl.content = "Undo не выполнен: ${e.message ?: e.toString()}" }
-                }
-            }
-        }
+    }
+
+    private fun clearUndoState(toastEl: Div, undoButton: Button) {
+        undoHideJob?.cancel()
+        undoHideJob = null
+        activeUndoToken = null
+        activeUndoLineId = null
+        undoButton.visible = false
+        toastEl.content = ""
     }
 
     private fun maybeAutoClose(qp: Map<String, String>) {

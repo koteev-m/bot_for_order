@@ -1,3 +1,5 @@
+import io.gitlab.arturbosch.detekt.Detekt
+
 plugins {
     kotlin("js")
     alias(libs.plugins.serialization)
@@ -8,6 +10,9 @@ repositories {
     mavenCentral()
 }
 
+val chromeBin = providers.environmentVariable("CHROME_BIN").orNull
+val runDetekt = providers.environmentVariable("RUN_DETEKT").orNull == "true"
+
 kotlin {
     js(IR) {
         browser {
@@ -16,6 +21,17 @@ kotlin {
                 cssSupport {
                     enabled.set(true)
                 }
+            }
+            testTask {
+                enabled = !chromeBin.isNullOrBlank()
+                useKarma {
+                    useChromeHeadless()
+                }
+            }
+        }
+        nodejs {
+            testTask {
+                useMocha()
             }
         }
         binaries.executable()
@@ -72,4 +88,9 @@ tasks.register("kotlinUpgradeYarnLock") {
     doLast {
         logger.lifecycle("kotlinUpgradeYarnLock: no yarn.lock updates required")
     }
+}
+
+
+tasks.withType<Detekt>().configureEach {
+    enabled = runDetekt
 }

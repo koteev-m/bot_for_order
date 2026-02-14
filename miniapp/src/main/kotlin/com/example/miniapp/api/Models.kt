@@ -1,6 +1,5 @@
 package com.example.miniapp.api
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -121,9 +120,7 @@ data class ListingDto(
 
 @Serializable
 data class LinkResolveRequiredOptions(
-    @SerialName("variant_required")
     val variantRequired: Boolean,
-    @SerialName("auto_variant_id")
     val autoVariantId: String? = null
 )
 
@@ -141,9 +138,7 @@ data class LinkResolveVariant(
 data class LinkResolveResponse(
     val action: String,
     val listing: ListingDto,
-    @SerialName("required_options")
     val requiredOptions: LinkResolveRequiredOptions,
-    @SerialName("available_variants")
     val availableVariants: List<LinkResolveVariant>
 )
 
@@ -165,9 +160,7 @@ data class CartAddResponse(
 data class VariantRequiredResponse(
     val status: String,
     val listing: ListingDto,
-    @SerialName("available_variants")
     val availableVariants: List<LinkResolveVariant>,
-    @SerialName("required_options")
     val requiredOptions: LinkResolveRequiredOptions
 )
 
