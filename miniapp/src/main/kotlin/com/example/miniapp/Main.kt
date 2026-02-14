@@ -46,6 +46,7 @@ private const val MINOR_UNITS_IN_MAJOR = 100
 private const val MINOR_DIGITS = 2
 private const val DEFAULT_CURRENCY = "RUB"
 private const val UNDO_TIMEOUT_MS = 7_000L
+private const val CANCEL_TOAST_TIMEOUT_MS = 1_700L
 
 class MiniApp : Application() {
     private val appJob = SupervisorJob()
@@ -206,29 +207,43 @@ class MiniApp : Application() {
                 val chipsContainer = Div(className = "chips")
                 val errorEl = Div(className = "err")
                 val toastEl = Div(className = "snackbar")
-                val undoButton = Button("Undo", className = "secondary").apply { visible = false }
+                val undoButton = Button("Отменить", className = "secondary").apply { visible = false }
+                val chipButtons = mutableListOf<Pair<Button, Boolean>>()
+                fun setVariantChipsEnabled(enabled: Boolean) {
+                    chipButtons.forEach { (chip, available) ->
+                        chip.disabled = !enabled || !available
+                    }
+                }
                 undoButton.onClick {
                     val lineId = activeUndoLineId
                     val undoToken = activeUndoToken
                     if (lineId == null || undoToken.isNullOrBlank()) {
-                        errorEl.content = "Undo недоступен"
+                        errorEl.content = "Отмена недоступна"
+                        TelegramBridge.hapticError()
                         return@onClick
                     }
                     quickAddRequestJob?.cancel()
+                    undoButton.disabled = true
                     quickAddRequestJob = scope.launch {
                         runCatching {
                             api.removeCartLine(lineId)
                         }.onSuccess {
                             clearUndoState(toastEl, undoButton)
-                            toastEl.content = "Отменено"
+                            showTransientToast(toastEl, "Отменено")
+                            TelegramBridge.hapticSuccess()
                         }.onFailure {
                             runCatching { api.undoAdd(undoToken) }
                                 .onSuccess {
                                     clearUndoState(toastEl, undoButton)
-                                    toastEl.content = "Отменено"
+                                    showTransientToast(toastEl, "Отменено")
+                                    TelegramBridge.hapticSuccess()
                                 }
-                                .onFailure { e -> errorEl.content = "Undo не выполнен: ${e.message ?: e.toString()}" }
+                                .onFailure { e ->
+                                    errorEl.content = "Отмена не выполнена: ${e.message ?: e.toString()}"
+                                    TelegramBridge.hapticError()
+                                }
                         }
+                        undoButton.disabled = false
                     }
                 }
                 add(Div(className = "card").apply {
@@ -254,17 +269,25 @@ class MiniApp : Application() {
                                             token,
                                             state.selectedVariantId,
                                             qp,
+                                            titleEl,
+                                            chipsContainer,
                                             statusEl,
                                             errorEl,
                                             toastEl,
-                                            undoButton
+                                            undoButton,
+                                            onVariantChipsRendered = { rendered ->
+                                                chipButtons.clear()
+                                                chipButtons += rendered
+                                            },
+                                            setVariantChipsEnabled = ::setVariantChipsEnabled
                                         )
                                     }
                                 }
 
                                 QuickAddStateKind.NEED_VARIANT -> {
                                     statusEl.content = "Выберите вариант"
-                                    renderVariantChips(
+                                    chipButtons.clear()
+                                    chipButtons += renderVariantChips(
                                         chipsContainer,
                                         state.variants,
                                         errorEl
@@ -274,10 +297,17 @@ class MiniApp : Application() {
                                                 token,
                                                 selected,
                                                 qp,
+                                                titleEl,
+                                                chipsContainer,
                                                 statusEl,
                                                 errorEl,
                                                 toastEl,
-                                                undoButton
+                                                undoButton,
+                                                onVariantChipsRendered = { rendered ->
+                                                    chipButtons.clear()
+                                                    chipButtons += rendered
+                                                },
+                                                setVariantChipsEnabled = ::setVariantChipsEnabled
                                             )
                                         }
                                     }
@@ -302,22 +332,23 @@ class MiniApp : Application() {
         variants: List<LinkResolveVariant>,
         errorEl: Div,
         onPick: (String) -> Unit
-    ) {
+    ): List<Pair<Button, Boolean>> {
         container.removeAll()
-        variants.forEach { variant ->
+        return variants.map { variant ->
             val label = variant.size ?: variant.sku ?: variant.id
-            container.add(
-                Button(label, className = "chip").apply {
-                    disabled = !variant.available
-                    onClick {
-                        if (!variant.available) {
-                            errorEl.content = "Вариант недоступен"
-                            return@onClick
-                        }
-                        onPick(variant.id)
+            val chip = Button(label, className = "chip").apply {
+                disabled = !variant.available
+                onClick {
+                    if (!variant.available) {
+                        errorEl.content = "Вариант недоступен"
+                        TelegramBridge.hapticError()
+                        return@onClick
                     }
+                    onPick(variant.id)
                 }
-            )
+            }
+            container.add(chip)
+            chip to variant.available
         }
     }
 
@@ -326,13 +357,18 @@ class MiniApp : Application() {
         token: String,
         variantId: String?,
         qp: Map<String, String>,
+        titleEl: Div,
+        chipsContainer: Div,
         statusEl: Div,
         errorEl: Div,
         toastEl: Div,
-        undoButton: Button
+        undoButton: Button,
+        onVariantChipsRendered: (List<Pair<Button, Boolean>>) -> Unit,
+        setVariantChipsEnabled: (Boolean) -> Unit
     ) {
         errorEl.content = ""
         val idempotencyKey = createIdempotencyKey()
+        setVariantChipsEnabled(false)
         runCatching {
             api.addToCartByToken(token, variantId, idempotencyKey)
         }.onSuccess { response ->
@@ -346,12 +382,49 @@ class MiniApp : Application() {
 
                 is VariantRequiredResult -> {
                     statusEl.content = "Выберите вариант"
-                    errorEl.content = "Нужен выбор варианта"
+                    titleEl.content = escape(response.listing.title)
+                    errorEl.content = ""
+                    onVariantChipsRendered(
+                        renderVariantChips(
+                            chipsContainer,
+                            response.availableVariants,
+                            errorEl
+                        ) { selected ->
+                            scope.launch {
+                                performQuickAdd(
+                                    token,
+                                    selected,
+                                    qp,
+                                    titleEl,
+                                    chipsContainer,
+                                    statusEl,
+                                    errorEl,
+                                    toastEl,
+                                    undoButton,
+                                    onVariantChipsRendered,
+                                    setVariantChipsEnabled
+                                )
+                            }
+                        }
+                    )
                 }
             }
         }.onFailure { e ->
             statusEl.content = ""
             errorEl.content = "Не удалось добавить в корзину: ${e.message ?: e.toString()}"
+            TelegramBridge.hapticError()
+        }.also {
+            setVariantChipsEnabled(true)
+        }
+    }
+
+    private fun showTransientToast(toastEl: Div, message: String, timeoutMs: Long = CANCEL_TOAST_TIMEOUT_MS) {
+        toastEl.content = message
+        undoHideJob?.cancel()
+        undoHideJob = scope.launch {
+            delay(timeoutMs)
+            toastEl.content = ""
+            undoHideJob = null
         }
     }
 
