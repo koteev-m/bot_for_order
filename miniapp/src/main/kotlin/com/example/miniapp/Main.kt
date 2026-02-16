@@ -44,6 +44,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -53,6 +55,7 @@ private const val MINOR_DIGITS = 2
 private const val DEFAULT_CURRENCY = "RUB"
 private const val UNDO_TIMEOUT_MS = 7_000L
 private const val SCREEN_CART = "cart"
+private const val SCREEN_CHECKOUT = "checkout"
 
 class MiniApp : Application() {
     private val appJob = SupervisorJob()
@@ -63,6 +66,7 @@ class MiniApp : Application() {
     private var undoHideJob: Job? = null
     private var activeUndoToken: String? = null
     private var activeUndoLineId: Long? = null
+    private var checkoutIdempotencyKey: String? = null
 
     override fun dispose(): Map<String, Any> {
         quickAddRequestJob?.cancel()
@@ -77,6 +81,10 @@ class MiniApp : Application() {
         val requestedScreen = resolveScreen(startParam, qp["screen"])
         if (requestedScreen == SCREEN_CART) {
             renderCartScreen()
+            return
+        }
+        if (requestedScreen == SCREEN_CHECKOUT) {
+            renderCheckoutScreen()
             return
         }
         val startParamItemId = startParam?.let { decodeStartParamItemId(it) }
@@ -501,6 +509,120 @@ class MiniApp : Application() {
         }
     }
 
+    private fun renderCheckoutScreen() {
+        root("kvapp") {
+            vPanel(spacing = 8) {
+                val titleEl = Div(className = "h1").apply { content = "Оформление заказа" }
+                val statusEl = Div(className = "muted").apply { content = "Загружаем корзину…" }
+                val errorEl = Div(className = "err")
+                val reviewEl = Div()
+                val totalsEl = Div(className = "muted")
+                val deliveryNameInput = TextInput(InputType.TEXT).apply { placeholder = "Имя получателя" }
+                val deliveryPhoneInput = TextInput(InputType.TEL).apply { placeholder = "Телефон" }
+                val deliveryAddressInput = TextArea(rows = 3).apply { placeholder = "Адрес доставки" }
+                val submitButton = Button("Подтвердить заказ", className = "primary")
+                val backButton = Button("Назад в корзину", className = "secondary").apply {
+                    onClick { navigateToScreen(SCREEN_CART) }
+                }
+
+                add(Div(className = "card").apply {
+                    add(titleEl)
+                    add(statusEl)
+                    add(errorEl)
+                    add(reviewEl)
+                    add(totalsEl)
+                    add(Div(className = "h2").apply { content = "Доставка" })
+                    add(Div(className = "row").apply {
+                        add(deliveryNameInput)
+                        add(deliveryPhoneInput)
+                    })
+                    add(deliveryAddressInput)
+                    add(Div(className = "buttons").apply {
+                        add(submitButton)
+                        add(backButton)
+                    })
+                })
+
+                suspend fun refreshCheckout() {
+                    statusEl.content = "Загружаем корзину…"
+                    errorEl.content = ""
+                    reviewEl.removeAll()
+                    totalsEl.content = ""
+                    checkoutIdempotencyKey = null
+                    try {
+                        val cart = api.getCart().cart
+                        statusEl.content = ""
+                        if (cart.items.isEmpty()) {
+                            reviewEl.add(Div(className = "muted").apply { content = "Корзина пуста. Добавьте товары перед оформлением." })
+                            submitButton.disabled = true
+                            return
+                        }
+                        submitButton.disabled = false
+                        cart.items.forEach { line ->
+                            val variant = line.variantId?.let { " · вариант ${escape(it)}" }.orEmpty()
+                            val amount = formatMoney(line.priceSnapshotMinor * line.qty, line.currency)
+                            reviewEl.add(Div(className = "card").apply {
+                                content = "${escape(line.listingId)}$variant · ${line.qty} шт. · $amount"
+                            })
+                        }
+                        totalsEl.content = "Итого к оплате: ${formatSubtotals(buildCartTotal(cart.items))}"
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        statusEl.content = ""
+                        submitButton.disabled = true
+                        errorEl.content = "Не удалось загрузить checkout: ${humanizeCartError(e)}"
+                    }
+                }
+
+                submitButton.onClick {
+                    if (submitButton.disabled) return@onClick
+                    submitButton.disabled = true
+                    errorEl.content = ""
+                    statusEl.content = "Создаём заказ…"
+                    scope.launch {
+                        try {
+                            val idempotencyKey = checkoutIdempotencyKey ?: createIdempotencyKey().also {
+                                checkoutIdempotencyKey = it
+                            }
+                            val created = api.createOrderFromCart(idempotencyKey)
+                            val hasDelivery = !deliveryNameInput.value.isNullOrBlank() ||
+                                !deliveryPhoneInput.value.isNullOrBlank() ||
+                                !deliveryAddressInput.value.isNullOrBlank()
+                            if (hasDelivery) {
+                                val fields = buildJsonObject {
+                                    deliveryNameInput.value?.takeIf { it.isNotBlank() }?.let { put("name", it) }
+                                    deliveryPhoneInput.value?.takeIf { it.isNotBlank() }?.let { put("phone", it) }
+                                    deliveryAddressInput.value?.takeIf { it.isNotBlank() }?.let { put("address", it) }
+                                }
+                                api.setOrderDelivery(created.orderId, com.example.miniapp.api.OrderDeliveryRequest(fields))
+                            }
+                            checkoutIdempotencyKey = null
+                            statusEl.content = ""
+                            TelegramBridge.hapticSuccess()
+                            reviewEl.removeAll()
+                            totalsEl.content = ""
+                            reviewEl.add(Div(className = "ok").apply {
+                                content = "Заказ ${created.orderId} создан (статус ${created.status})."
+                            })
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            statusEl.content = ""
+                            errorEl.content = humanizeCheckoutSubmitError(e)
+                        } finally {
+                            submitButton.disabled = false
+                        }
+                    }
+                }
+
+                scope.launch {
+                    refreshCheckout()
+                }
+            }
+        }
+    }
+
     private fun renderCartScreen() {
         root("kvapp") {
             vPanel(spacing = 8) {
@@ -509,6 +631,9 @@ class MiniApp : Application() {
                 val errorEl = Div(className = "err")
                 val groupsEl = Div()
                 val totalsEl = Div(className = "muted")
+                val checkoutButton = Button("Перейти к оформлению", className = "primary").apply {
+                    onClick { navigateToScreen(SCREEN_CHECKOUT) }
+                }
                 val backButton = Button("Вернуться к витрине", className = "secondary").apply {
                     onClick { navigateToScreen(null) }
                 }
@@ -519,7 +644,10 @@ class MiniApp : Application() {
                     add(errorEl)
                     add(groupsEl)
                     add(totalsEl)
-                    add(backButton)
+                    add(Div(className = "buttons").apply {
+                        add(checkoutButton)
+                        add(backButton)
+                    })
                 })
 
                 scope.launch {
@@ -679,13 +807,25 @@ class MiniApp : Application() {
         }
     }
 
+    private fun humanizeCheckoutSubmitError(error: Throwable): String {
+        val apiError = (error as? ApiClientException)?.error
+        return when (apiError) {
+            "hold_conflict" -> "Не удалось зарезервировать остаток. Проверьте корзину и попробуйте снова."
+            "out_of_stock", "variant_not_available" ->
+                "Часть товаров недоступна. Уменьшите количество или удалите позицию в корзине."
+            "idempotency_in_progress" -> "Оформление уже выполняется. Повторите через пару секунд."
+            else -> "Ошибка оформления: ${error.message ?: error.toString()}"
+        }
+    }
+
     private fun resolveScreen(startParam: String?, screenQuery: String?): String? {
         val normalizedScreen = screenQuery?.trim()?.lowercase()
-        if (normalizedScreen == SCREEN_CART) {
-            return SCREEN_CART
+        if (normalizedScreen == SCREEN_CART || normalizedScreen == SCREEN_CHECKOUT) {
+            return normalizedScreen
         }
-        if (startParam?.trim()?.lowercase() == SCREEN_CART) {
-            return SCREEN_CART
+        val normalizedStartParam = startParam?.trim()?.lowercase()
+        if (normalizedStartParam == SCREEN_CART || normalizedStartParam == SCREEN_CHECKOUT) {
+            return normalizedStartParam
         }
         return null
     }
@@ -695,7 +835,9 @@ class MiniApp : Application() {
         if (screen.isNullOrBlank()) {
             qp.remove("screen")
             val startParam = qp["tgWebAppStartParam"]
-            if (startParam?.equals(SCREEN_CART, ignoreCase = true) == true) {
+            if (startParam?.equals(SCREEN_CART, ignoreCase = true) == true ||
+                startParam?.equals(SCREEN_CHECKOUT, ignoreCase = true) == true
+            ) {
                 qp.remove("tgWebAppStartParam")
             }
         } else {
