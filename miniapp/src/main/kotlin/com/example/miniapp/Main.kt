@@ -539,87 +539,129 @@ class MiniApp : Application() {
         errorEl.content = ""
         groupsEl.removeAll()
         totalsEl.content = ""
-        runCatching { api.getCart().cart }
-            .onSuccess { cart ->
-                statusEl.content = ""
-                if (cart.items.isEmpty()) {
-                    groupsEl.add(Div(className = "muted").apply {
-                        content = "Корзина пока пустая"
-                    })
-                    return
-                }
-                val grouped = groupCartLinesByStorefront(cart.items)
-                grouped.forEach { group ->
-                    groupsEl.add(Div(className = "h2").apply {
-                        content = "Витрина: ${escape(group.storefrontId)}"
-                    })
-                    group.lines.forEach { line ->
-                        groupsEl.add(Div(className = "card").apply {
-                            val rowSummary = Div().apply {
-                                val variant = line.variantId?.let { " · вариант $it" }.orEmpty()
-                                val lineTotal = formatMoney(line.priceSnapshotMinor * line.qty, line.currency)
-                                content = "${escape(line.listingId)}$variant · $lineTotal"
-                            }
-                            val qtyRow = Div(className = "buttons")
-                            val qtyLabel = Div().apply { content = "Кол-во: ${line.qty}" }
-                            val minus = Button("-", className = "secondary")
-                            val plus = Button("+", className = "secondary")
-                            val remove = Button("Удалить", className = "secondary")
-                            fun setDisabled(disabled: Boolean) {
-                                minus.disabled = disabled
-                                plus.disabled = disabled
-                                remove.disabled = disabled
-                            }
-                            minus.onClick {
-                                if (line.qty <= DEFAULT_QUANTITY) return@onClick
-                                scope.launch {
-                                    setDisabled(true)
-                                    handleCartMutation(errorEl) { api.updateCartQty(line.lineId, line.qty - 1) }
-                                    loadAndRenderCart(groupsEl, totalsEl, statusEl, errorEl)
-                                }
-                            }
-                            plus.onClick {
-                                scope.launch {
-                                    setDisabled(true)
-                                    handleCartMutation(errorEl) { api.updateCartQty(line.lineId, line.qty + 1) }
-                                    loadAndRenderCart(groupsEl, totalsEl, statusEl, errorEl)
-                                }
-                            }
-                            remove.onClick {
-                                scope.launch {
-                                    setDisabled(true)
-                                    handleCartMutation(errorEl) { api.removeCartLineFromScreen(line.lineId) }
-                                    loadAndRenderCart(groupsEl, totalsEl, statusEl, errorEl)
-                                }
-                            }
-                            qtyRow.add(qtyLabel)
-                            qtyRow.add(minus)
-                            qtyRow.add(plus)
-                            qtyRow.add(remove)
-                            add(rowSummary)
-                            add(qtyRow)
-                        })
-                    }
-                    groupsEl.add(
-                        Div(className = "muted").apply {
-                            content = "Подытог витрины: ${formatSubtotals(group.subtotals)}"
+        try {
+            val cart = api.getCart().cart
+            statusEl.content = ""
+            if (cart.items.isEmpty()) {
+                groupsEl.add(Div(className = "muted").apply {
+                    content = "Корзина пока пустая"
+                })
+                return
+            }
+            val grouped = groupCartLinesByStorefront(cart.items)
+            grouped.forEach { group ->
+                groupsEl.add(Div(className = "h2").apply {
+                    content = "Витрина: ${escape(group.storefrontId)}"
+                })
+                group.lines.forEach { line ->
+                    groupsEl.add(Div(className = "card").apply {
+                        val rowSummary = Div().apply {
+                            val variant = line.variantId?.let { " · вариант ${escape(it)}" }.orEmpty()
+                            val lineTotal = formatMoney(line.priceSnapshotMinor * line.qty, line.currency)
+                            content = "${escape(line.listingId)}$variant · $lineTotal"
                         }
-                    )
+                        val qtyRow = Div(className = "buttons")
+                        val qtyLabel = Div().apply { content = "Кол-во: ${line.qty}" }
+                        val minus = Button("-", className = "secondary")
+                        val plus = Button("+", className = "secondary")
+                        val remove = Button("Удалить", className = "secondary")
+                        fun setDisabled(disabled: Boolean) {
+                            minus.disabled = disabled
+                            plus.disabled = disabled
+                            remove.disabled = disabled
+                        }
+                        minus.onClick {
+                            if (minus.disabled || plus.disabled || remove.disabled) return@onClick
+                            if (line.qty <= DEFAULT_QUANTITY) return@onClick
+                            setDisabled(true)
+                            scope.launch {
+                                var mutationSucceeded = false
+                                try {
+                                    mutationSucceeded = handleCartMutation(errorEl) {
+                                        api.updateCartQty(line.lineId, line.qty - 1)
+                                    }
+                                    if (mutationSucceeded) {
+                                        loadAndRenderCart(groupsEl, totalsEl, statusEl, errorEl)
+                                    }
+                                } finally {
+                                    if (!mutationSucceeded) {
+                                        setDisabled(false)
+                                    }
+                                }
+                            }
+                        }
+                        plus.onClick {
+                            if (minus.disabled || plus.disabled || remove.disabled) return@onClick
+                            setDisabled(true)
+                            scope.launch {
+                                var mutationSucceeded = false
+                                try {
+                                    mutationSucceeded = handleCartMutation(errorEl) {
+                                        api.updateCartQty(line.lineId, line.qty + 1)
+                                    }
+                                    if (mutationSucceeded) {
+                                        loadAndRenderCart(groupsEl, totalsEl, statusEl, errorEl)
+                                    }
+                                } finally {
+                                    if (!mutationSucceeded) {
+                                        setDisabled(false)
+                                    }
+                                }
+                            }
+                        }
+                        remove.onClick {
+                            if (minus.disabled || plus.disabled || remove.disabled) return@onClick
+                            setDisabled(true)
+                            scope.launch {
+                                var mutationSucceeded = false
+                                try {
+                                    mutationSucceeded = handleCartMutation(errorEl) {
+                                        api.removeCartLineFromScreen(line.lineId)
+                                    }
+                                    if (mutationSucceeded) {
+                                        loadAndRenderCart(groupsEl, totalsEl, statusEl, errorEl)
+                                    }
+                                } finally {
+                                    if (!mutationSucceeded) {
+                                        setDisabled(false)
+                                    }
+                                }
+                            }
+                        }
+                        qtyRow.add(qtyLabel)
+                        qtyRow.add(minus)
+                        qtyRow.add(plus)
+                        qtyRow.add(remove)
+                        add(rowSummary)
+                        add(qtyRow)
+                    })
                 }
-                totalsEl.content = "Итого: ${formatSubtotals(buildCartTotal(cart.items))}"
+                groupsEl.add(
+                    Div(className = "muted").apply {
+                        content = "Подытог витрины: ${formatSubtotals(group.subtotals)}"
+                    }
+                )
             }
-            .onFailure { e ->
-                statusEl.content = ""
-                errorEl.content = "Не удалось загрузить корзину: ${humanizeCartError(e)}"
-            }
+            totalsEl.content = "Итого: ${formatSubtotals(buildCartTotal(cart.items))}"
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            statusEl.content = ""
+            errorEl.content = "Не удалось загрузить корзину: ${humanizeCartError(e)}"
+        }
     }
 
-    private suspend fun handleCartMutation(errorEl: Div, action: suspend () -> Unit) {
+    private suspend fun handleCartMutation(errorEl: Div, action: suspend () -> Unit): Boolean {
         errorEl.content = ""
-        runCatching { action() }
-            .onFailure { e ->
-                errorEl.content = humanizeCartError(e)
-            }
+        return try {
+            action()
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            errorEl.content = humanizeCartError(e)
+            false
+        }
     }
 
     private fun formatSubtotals(subtotals: List<MoneySubtotal>): String {
@@ -652,6 +694,10 @@ class MiniApp : Application() {
         val qp = UrlQuery.parse(window.location.search).toMutableMap()
         if (screen.isNullOrBlank()) {
             qp.remove("screen")
+            val startParam = qp["tgWebAppStartParam"]
+            if (startParam?.equals(SCREEN_CART, ignoreCase = true) == true) {
+                qp.remove("tgWebAppStartParam")
+            }
         } else {
             qp["screen"] = screen
         }
