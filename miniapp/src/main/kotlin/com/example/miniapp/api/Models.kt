@@ -1,6 +1,7 @@
 package com.example.miniapp.api
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 data class ItemResponse(
@@ -90,6 +91,20 @@ data class OrderCreateResponse(
 data class PaymentSelectResponse(
     val orderId: String,
     val status: String
+)
+
+
+@Serializable
+data class OrderDeliveryRequest(
+    val fields: JsonObject
+)
+
+@Serializable
+data class OrderDeliveryResponse(
+    val type: String,
+    val fields: JsonObject,
+    val createdAt: String,
+    val updatedAt: String
 )
 
 @Serializable

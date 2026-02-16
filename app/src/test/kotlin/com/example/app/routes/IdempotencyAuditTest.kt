@@ -334,7 +334,18 @@ class IdempotencyAuditTest : StringSpec({
             sourceChannelId = 1L,
             sourcePostMessageId = 2
         )
-        coEvery { orderCheckoutService.createFromCart(10L, any()) } returns OrderWithLines(order, listOf(line))
+        val secondLine = OrderLine(
+            orderId = order.id,
+            listingId = "item-2",
+            variantId = "v-2",
+            qty = 2,
+            priceSnapshotMinor = 700,
+            currency = "RUB",
+            sourceStorefrontId = "sf-1",
+            sourceChannelId = 1L,
+            sourcePostMessageId = 3
+        )
+        coEvery { orderCheckoutService.createFromCart(10L, any()) } returns OrderWithLines(order, listOf(line, secondLine))
         coEvery { itemsRepository.getById("item-1") } returns Item(
             id = "item-1",
             merchantId = cfg.merchants.defaultMerchantId,

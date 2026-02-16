@@ -50,6 +50,14 @@ class ApiClient(
     suspend fun postOrder(req: OrderCreateRequest): OrderCreateResponse =
         client.post("$baseUrl/api/orders") { setBody(req) }.body()
 
+    suspend fun createOrderFromCart(idempotencyKey: String): OrderCreateResponse =
+        client.post("$baseUrl/api/orders") {
+            header("Idempotency-Key", idempotencyKey)
+        }.body()
+
+    suspend fun setOrderDelivery(orderId: String, req: OrderDeliveryRequest): OrderDeliveryResponse =
+        client.post("$baseUrl/api/orders/$orderId/delivery") { setBody(req) }.body()
+
     suspend fun subscribeWatchlist(req: WatchlistSubscribeRequest): SimpleResponse =
         client.post("$baseUrl/api/watchlist") { setBody(req) }.body()
 
