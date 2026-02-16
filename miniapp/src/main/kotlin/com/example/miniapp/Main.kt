@@ -32,6 +32,8 @@ import io.kvision.panel.vPanel
 import io.kvision.startApplication
 import kotlinx.browser.window
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -204,6 +206,7 @@ class MiniApp : Application() {
                 val titleEl = Div(className = "h1").apply { content = "Быстрое добавление" }
                 val statusEl = Div(className = "muted").apply { content = "Проверяем ссылку…" }
                 val chipsContainer = Div(className = "chips")
+                val variantChipButtons = mutableListOf<Button>()
                 val errorEl = Div(className = "err")
                 val toastEl = Div(className = "snackbar")
                 val undoButton = Button("Undo", className = "secondary").apply { visible = false }
@@ -214,20 +217,32 @@ class MiniApp : Application() {
                         errorEl.content = "Undo недоступен"
                         return@onClick
                     }
+                    if (undoButton.disabled) {
+                        return@onClick
+                    }
+                    undoButton.disabled = true
                     quickAddRequestJob?.cancel()
-                    quickAddRequestJob = scope.launch {
-                        runCatching {
-                            api.removeCartLine(lineId)
-                        }.onSuccess {
-                            clearUndoState(toastEl, undoButton)
-                            toastEl.content = "Отменено"
-                        }.onFailure {
-                            runCatching { api.undoAdd(undoToken) }
-                                .onSuccess {
-                                    clearUndoState(toastEl, undoButton)
-                                    toastEl.content = "Отменено"
-                                }
-                                .onFailure { e -> errorEl.content = "Undo не выполнен: ${e.message ?: e.toString()}" }
+                    quickAddRequestJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                        try {
+                            runCatching {
+                                api.removeCartLine(lineId)
+                            }.onSuccess {
+                                clearUndoState(toastEl, undoButton)
+                                toastEl.content = "Отменено"
+                                return@launch
+                            }
+                            runCatching {
+                                api.undoAdd(undoToken)
+                            }.onSuccess {
+                                clearUndoState(toastEl, undoButton)
+                                toastEl.content = "Отменено"
+                            }.onFailure { e ->
+                                errorEl.content = "Undo не выполнен: ${e.message ?: e.toString()}"
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } finally {
+                            undoButton.disabled = false
                         }
                     }
                 }
@@ -249,7 +264,7 @@ class MiniApp : Application() {
                             when (state.kind) {
                                 QuickAddStateKind.AUTO_ADD -> {
                                     statusEl.content = "Добавляем в корзину…"
-                                    scope.launch {
+                                    scope.launch(start = CoroutineStart.UNDISPATCHED) {
                                         performQuickAdd(
                                             token,
                                             state.selectedVariantId,
@@ -257,7 +272,8 @@ class MiniApp : Application() {
                                             statusEl,
                                             errorEl,
                                             toastEl,
-                                            undoButton
+                                            undoButton,
+                                            variantChipButtons
                                         )
                                     }
                                 }
@@ -267,9 +283,10 @@ class MiniApp : Application() {
                                     renderVariantChips(
                                         chipsContainer,
                                         state.variants,
-                                        errorEl
+                                        errorEl,
+                                        variantChipButtons
                                     ) { selected ->
-                                        scope.launch {
+                                        scope.launch(start = CoroutineStart.UNDISPATCHED) {
                                             performQuickAdd(
                                                 token,
                                                 selected,
@@ -277,7 +294,8 @@ class MiniApp : Application() {
                                                 statusEl,
                                                 errorEl,
                                                 toastEl,
-                                                undoButton
+                                                undoButton,
+                                                variantChipButtons
                                             )
                                         }
                                     }
@@ -301,23 +319,25 @@ class MiniApp : Application() {
         container: Div,
         variants: List<LinkResolveVariant>,
         errorEl: Div,
+        chipButtons: MutableList<Button>,
         onPick: (String) -> Unit
     ) {
         container.removeAll()
+        chipButtons.clear()
         variants.forEach { variant ->
             val label = variant.size ?: variant.sku ?: variant.id
-            container.add(
-                Button(label, className = "chip").apply {
-                    disabled = !variant.available
-                    onClick {
-                        if (!variant.available) {
-                            errorEl.content = "Вариант недоступен"
-                            return@onClick
-                        }
-                        onPick(variant.id)
+            val chip = Button(label, className = "chip").apply {
+                disabled = !variant.available
+                onClick {
+                    if (!variant.available) {
+                        errorEl.content = "Вариант недоступен"
+                        return@onClick
                     }
+                    onPick(variant.id)
                 }
-            )
+            }
+            chipButtons += chip
+            container.add(chip)
         }
     }
 
@@ -329,14 +349,14 @@ class MiniApp : Application() {
         statusEl: Div,
         errorEl: Div,
         toastEl: Div,
-        undoButton: Button
+        undoButton: Button,
+        chipButtons: List<Button>
     ) {
         errorEl.content = ""
         val idempotencyKey = createIdempotencyKey()
-        runCatching {
-            api.addToCartByToken(token, variantId, idempotencyKey)
-        }.onSuccess { response ->
-            when (response) {
+        setVariantChipsEnabled(chipButtons, false)
+        try {
+            when (val response = api.addToCartByToken(token, variantId, idempotencyKey)) {
                 is AddByTokenResponse -> {
                     statusEl.content = ""
                     TelegramBridge.hapticSuccess()
@@ -349,9 +369,19 @@ class MiniApp : Application() {
                     errorEl.content = "Нужен выбор варианта"
                 }
             }
-        }.onFailure { e ->
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
             statusEl.content = ""
             errorEl.content = "Не удалось добавить в корзину: ${e.message ?: e.toString()}"
+        } finally {
+            setVariantChipsEnabled(chipButtons, true)
+        }
+    }
+
+    private fun setVariantChipsEnabled(chipButtons: List<Button>, enabled: Boolean) {
+        chipButtons.forEach { chip ->
+            chip.disabled = !enabled
         }
     }
 
