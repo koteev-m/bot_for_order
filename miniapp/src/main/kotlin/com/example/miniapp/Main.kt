@@ -224,19 +224,24 @@ class MiniApp : Application() {
                     quickAddRequestJob?.cancel()
                     quickAddRequestJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
                         try {
-                            runCatching {
+                            try {
                                 api.removeCartLine(lineId)
-                            }.onSuccess {
                                 clearUndoState(toastEl, undoButton)
                                 toastEl.content = "Отменено"
                                 return@launch
+                            } catch (e: Throwable) {
+                                if (e is CancellationException) {
+                                    throw e
+                                }
                             }
-                            runCatching {
+                            try {
                                 api.undoAdd(undoToken)
-                            }.onSuccess {
                                 clearUndoState(toastEl, undoButton)
                                 toastEl.content = "Отменено"
-                            }.onFailure { e ->
+                            } catch (e: Throwable) {
+                                if (e is CancellationException) {
+                                    throw e
+                                }
                                 errorEl.content = "Undo не выполнен: ${e.message ?: e.toString()}"
                             }
                         } catch (e: CancellationException) {
@@ -336,7 +341,9 @@ class MiniApp : Application() {
                     onPick(variant.id)
                 }
             }
-            chipButtons += chip
+            if (variant.available) {
+                chipButtons += chip
+            }
             container.add(chip)
         }
     }
