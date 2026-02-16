@@ -2,6 +2,7 @@ package com.example.miniapp
 
 import com.example.miniapp.api.AddByTokenResponse
 import com.example.miniapp.api.ApiClient
+import com.example.miniapp.api.ApiClientException
 import com.example.miniapp.api.ItemResponse
 import com.example.miniapp.api.LinkResolveVariant
 import com.example.miniapp.api.OfferAcceptRequest
@@ -9,6 +10,9 @@ import com.example.miniapp.api.OfferRequest
 import com.example.miniapp.api.OrderCreateRequest
 import com.example.miniapp.api.VariantRequiredResult
 import com.example.miniapp.api.WatchlistSubscribeRequest
+import com.example.miniapp.cart.MoneySubtotal
+import com.example.miniapp.cart.buildCartTotal
+import com.example.miniapp.cart.groupCartLinesByStorefront
 import com.example.miniapp.quickadd.QuickAddStateKind
 import com.example.miniapp.quickadd.evaluateQuickAddState
 import com.example.miniapp.startapp.StartAppCodecJs
@@ -48,6 +52,7 @@ private const val MINOR_UNITS_IN_MAJOR = 100
 private const val MINOR_DIGITS = 2
 private const val DEFAULT_CURRENCY = "RUB"
 private const val UNDO_TIMEOUT_MS = 7_000L
+private const val SCREEN_CART = "cart"
 
 class MiniApp : Application() {
     private val appJob = SupervisorJob()
@@ -69,8 +74,13 @@ class MiniApp : Application() {
     override fun start(state: Map<String, Any>) {
         val qp = UrlQuery.parse(window.location.search)
         val startParam = TelegramBridge.startParam()?.takeIf { it.isNotBlank() }
+        val requestedScreen = resolveScreen(startParam, qp["screen"])
+        if (requestedScreen == SCREEN_CART) {
+            renderCartScreen()
+            return
+        }
         val startParamItemId = startParam?.let { decodeStartParamItemId(it) }
-        val quickAddToken = qp["token"] ?: startParam?.takeIf { startParamItemId == null }
+        val quickAddToken = qp["token"] ?: startParam?.takeIf { startParamItemId == null && it != SCREEN_CART }
         if (!quickAddToken.isNullOrBlank()) {
             renderQuickAdd(quickAddToken, qp)
             return
@@ -99,6 +109,13 @@ class MiniApp : Application() {
                 val statusErr = Div(className = "err")
 
                 add(Div(className = "card").apply {
+                    add(Div(className = "buttons").apply {
+                        add(
+                            Button("Корзина", className = "secondary").apply {
+                                onClick { navigateToScreen(SCREEN_CART) }
+                            }
+                        )
+                    })
                     add(titleEl)
                     add(descEl)
                     add(priceEl)
@@ -483,6 +500,171 @@ class MiniApp : Application() {
             }
         }
     }
+
+    private fun renderCartScreen() {
+        root("kvapp") {
+            vPanel(spacing = 8) {
+                val titleEl = Div(className = "h1").apply { content = "Корзина" }
+                val statusEl = Div(className = "muted").apply { content = "Загружаем корзину…" }
+                val errorEl = Div(className = "err")
+                val groupsEl = Div()
+                val totalsEl = Div(className = "muted")
+                val backButton = Button("Вернуться к витрине", className = "secondary").apply {
+                    onClick { navigateToScreen(null) }
+                }
+
+                add(Div(className = "card").apply {
+                    add(titleEl)
+                    add(statusEl)
+                    add(errorEl)
+                    add(groupsEl)
+                    add(totalsEl)
+                    add(backButton)
+                })
+
+                scope.launch {
+                    loadAndRenderCart(groupsEl, totalsEl, statusEl, errorEl)
+                }
+            }
+        }
+    }
+
+    private suspend fun loadAndRenderCart(
+        groupsEl: Div,
+        totalsEl: Div,
+        statusEl: Div,
+        errorEl: Div
+    ) {
+        statusEl.content = "Загружаем корзину…"
+        errorEl.content = ""
+        groupsEl.removeAll()
+        totalsEl.content = ""
+        runCatching { api.getCart().cart }
+            .onSuccess { cart ->
+                statusEl.content = ""
+                if (cart.items.isEmpty()) {
+                    groupsEl.add(Div(className = "muted").apply {
+                        content = "Корзина пока пустая"
+                    })
+                    return
+                }
+                val grouped = groupCartLinesByStorefront(cart.items)
+                grouped.forEach { group ->
+                    groupsEl.add(Div(className = "h2").apply {
+                        content = "Витрина: ${escape(group.storefrontId)}"
+                    })
+                    group.lines.forEach { line ->
+                        groupsEl.add(Div(className = "card").apply {
+                            val rowSummary = Div().apply {
+                                val variant = line.variantId?.let { " · вариант $it" }.orEmpty()
+                                val lineTotal = formatMoney(line.priceSnapshotMinor * line.qty, line.currency)
+                                content = "${escape(line.listingId)}$variant · $lineTotal"
+                            }
+                            val qtyRow = Div(className = "buttons")
+                            val qtyLabel = Div().apply { content = "Кол-во: ${line.qty}" }
+                            val minus = Button("-", className = "secondary")
+                            val plus = Button("+", className = "secondary")
+                            val remove = Button("Удалить", className = "secondary")
+                            fun setDisabled(disabled: Boolean) {
+                                minus.disabled = disabled
+                                plus.disabled = disabled
+                                remove.disabled = disabled
+                            }
+                            minus.onClick {
+                                if (line.qty <= DEFAULT_QUANTITY) return@onClick
+                                scope.launch {
+                                    setDisabled(true)
+                                    handleCartMutation(errorEl) { api.updateCartQty(line.lineId, line.qty - 1) }
+                                    loadAndRenderCart(groupsEl, totalsEl, statusEl, errorEl)
+                                }
+                            }
+                            plus.onClick {
+                                scope.launch {
+                                    setDisabled(true)
+                                    handleCartMutation(errorEl) { api.updateCartQty(line.lineId, line.qty + 1) }
+                                    loadAndRenderCart(groupsEl, totalsEl, statusEl, errorEl)
+                                }
+                            }
+                            remove.onClick {
+                                scope.launch {
+                                    setDisabled(true)
+                                    handleCartMutation(errorEl) { api.removeCartLineFromScreen(line.lineId) }
+                                    loadAndRenderCart(groupsEl, totalsEl, statusEl, errorEl)
+                                }
+                            }
+                            qtyRow.add(qtyLabel)
+                            qtyRow.add(minus)
+                            qtyRow.add(plus)
+                            qtyRow.add(remove)
+                            add(rowSummary)
+                            add(qtyRow)
+                        })
+                    }
+                    groupsEl.add(
+                        Div(className = "muted").apply {
+                            content = "Подытог витрины: ${formatSubtotals(group.subtotals)}"
+                        }
+                    )
+                }
+                totalsEl.content = "Итого: ${formatSubtotals(buildCartTotal(cart.items))}"
+            }
+            .onFailure { e ->
+                statusEl.content = ""
+                errorEl.content = "Не удалось загрузить корзину: ${humanizeCartError(e)}"
+            }
+    }
+
+    private suspend fun handleCartMutation(errorEl: Div, action: suspend () -> Unit) {
+        errorEl.content = ""
+        runCatching { action() }
+            .onFailure { e ->
+                errorEl.content = humanizeCartError(e)
+            }
+    }
+
+    private fun formatSubtotals(subtotals: List<MoneySubtotal>): String {
+        return subtotals.joinToString(" / ") { subtotal ->
+            formatMoney(subtotal.amountMinor, subtotal.currency)
+        }
+    }
+
+    private fun humanizeCartError(error: Throwable): String {
+        val apiError = (error as? ApiClientException)?.error
+        return when (apiError) {
+            "variant_not_available", "out_of_stock", "hold_conflict" ->
+                "Текущего остатка недостаточно. Уменьшите количество или удалите позицию."
+            else -> error.message ?: error.toString()
+        }
+    }
+
+    private fun resolveScreen(startParam: String?, screenQuery: String?): String? {
+        val normalizedScreen = screenQuery?.trim()?.lowercase()
+        if (normalizedScreen == SCREEN_CART) {
+            return SCREEN_CART
+        }
+        if (startParam?.trim()?.lowercase() == SCREEN_CART) {
+            return SCREEN_CART
+        }
+        return null
+    }
+
+    private fun navigateToScreen(screen: String?) {
+        val qp = UrlQuery.parse(window.location.search).toMutableMap()
+        if (screen.isNullOrBlank()) {
+            qp.remove("screen")
+        } else {
+            qp["screen"] = screen
+        }
+        val next = if (qp.isEmpty()) {
+            window.location.pathname
+        } else {
+            val query = qp.entries.joinToString("&") { (key, value) -> "$key=${encodeURIComponent(value)}" }
+            "${window.location.pathname}?$query"
+        }
+        window.location.assign(next)
+    }
+
+    private fun encodeURIComponent(s: String): String = js("encodeURIComponent")(s) as String
 
     private fun onBuyClicked(
         qtyRaw: String?,
