@@ -152,8 +152,7 @@ class ApiClient(
         client.post("$baseUrl/api/admin/publications/publish") { setBody(req) }.body()
 
     private suspend fun parseAddByTokenResult(response: HttpResponse): AddByTokenResult {
-        ensureSuccess(response)
-        val jsonText = response.body<String>()
+        val jsonText = ensureSuccess(response)
         val status = json.parseToJsonElement(jsonText)
             .jsonObject["status"]
             ?.jsonPrimitive
