@@ -17,9 +17,12 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 class ApiClient(
     private val baseUrl: String = ""
@@ -79,6 +82,28 @@ class ApiClient(
     suspend fun undoAdd(undoToken: String): SimpleResponse =
         client.post("$baseUrl/api/cart/undo") { setBody(CartUndoRequest(undoToken)) }.body()
 
+    suspend fun getCart(): CartResponse {
+        val response = client.get("$baseUrl/api/cart")
+        val body = ensureSuccess(response)
+        return json.decodeFromString(body)
+    }
+
+    suspend fun updateCartQty(lineId: Long, qty: Int): CartResponse {
+        val payload = buildJsonObject {
+            put("lineId", lineId)
+            put("qty", qty)
+        }
+        return updateCart(payload)
+    }
+
+    suspend fun removeCartLineFromScreen(lineId: Long): CartResponse {
+        val payload = buildJsonObject {
+            put("lineId", lineId)
+            put("remove", true)
+        }
+        return updateCart(payload)
+    }
+
     suspend fun getAdminMe(): AdminMeResponse =
         client.get("$baseUrl/api/admin/me").body()
 
@@ -127,9 +152,7 @@ class ApiClient(
         client.post("$baseUrl/api/admin/publications/publish") { setBody(req) }.body()
 
     private suspend fun parseAddByTokenResult(response: HttpResponse): AddByTokenResult {
-        check(response.status.isSuccess()) {
-            "cart_add_by_token failed: ${response.status}"
-        }
+        ensureSuccess(response)
         val jsonText = response.body<String>()
         val status = json.parseToJsonElement(jsonText)
             .jsonObject["status"]
@@ -151,4 +174,33 @@ class ApiClient(
             else -> error("cart_add_by_token unexpected status: $status")
         }
     }
+
+    private suspend fun updateCart(payload: JsonObject): CartResponse {
+        val response = client.post("$baseUrl/api/cart/update") {
+            setBody(payload)
+        }
+        val body = ensureSuccess(response)
+        return json.decodeFromString(body)
+    }
+
+    private suspend fun ensureSuccess(response: HttpResponse): String {
+        val body = response.body<String>()
+        if (response.status.isSuccess()) {
+            return body
+        }
+        val error = runCatching {
+            json.decodeFromString<ErrorResponse>(body).error
+        }.getOrNull()
+        throw ApiClientException(
+            status = response.status.value,
+            error = error,
+            message = error ?: "request_failed_${response.status.value}"
+        )
+    }
 }
+
+class ApiClientException(
+    val status: Int,
+    val error: String?,
+    message: String
+) : RuntimeException(message)

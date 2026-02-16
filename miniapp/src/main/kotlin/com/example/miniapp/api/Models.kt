@@ -180,12 +180,49 @@ data class VariantRequiredResult(
 @Serializable
 data class CartUpdateRequest(
     val lineId: Long,
-    val remove: Boolean
+    val remove: Boolean = false,
+    val qty: Int? = null
 )
 
 @Serializable
 data class CartUndoRequest(
     val undoToken: String
+)
+
+@Serializable
+data class CartLineDto(
+    val lineId: Long,
+    val listingId: String,
+    val variantId: String? = null,
+    val qty: Int,
+    val priceSnapshotMinor: Long,
+    val currency: String,
+    val sourceStorefrontId: String,
+    val sourceChannelId: Long,
+    val sourcePostMessageId: Int? = null,
+    val createdAt: String
+)
+
+@Serializable
+data class CartDto(
+    val id: Long,
+    val merchantId: String,
+    val buyerUserId: Long,
+    val createdAt: String,
+    val updatedAt: String,
+    val items: List<CartLineDto>
+)
+
+@Serializable
+data class CartResponse(
+    val status: String = "ok",
+    val cart: CartDto
+)
+
+@Serializable
+data class ErrorResponse(
+    val error: String? = null,
+    val requestId: String? = null
 )
 
 @Serializable
